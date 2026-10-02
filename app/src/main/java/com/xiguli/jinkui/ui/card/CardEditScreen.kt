@@ -31,7 +31,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.AddPhotoAlternate
 import androidx.compose.material.icons.outlined.AutoFixHigh
+import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Link
+import androidx.compose.material.icons.outlined.Notes
+import androidx.compose.material.icons.outlined.Numbers
+import androidx.compose.material.icons.outlined.Password
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.LockOpen
 import androidx.compose.material.icons.outlined.Visibility
@@ -49,6 +54,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -80,7 +86,10 @@ import com.xiguli.jinkui.ui.components.JkSwitch
 import com.xiguli.jinkui.ui.components.JkTextField
 import com.xiguli.jinkui.ui.components.JkTopBar
 import com.xiguli.jinkui.ui.components.SecureImage
-import com.xiguli.jinkui.ui.components.cardColor
+import com.xiguli.jinkui.ui.components.JkRow
+import com.xiguli.jinkui.ui.components.JkSheet
+import com.xiguli.jinkui.ui.components.cardTheme
+import com.xiguli.jinkui.ui.components.icon
 import com.xiguli.jinkui.ui.generator.GeneratorSheet
 import com.xiguli.jinkui.ui.nav.jkViewModel
 import com.xiguli.jinkui.ui.theme.Jk
@@ -108,7 +117,7 @@ class CardEditViewModel(
     val type: CardType = original?.type ?: newType ?: CardType.CUSTOM
 
     var title by mutableStateOf(original?.title.orEmpty())
-    var color by mutableIntStateOf(original?.color ?: CardTemplates.defaultColor(type))
+    var color by mutableIntStateOf(original?.color ?: CardPalette.AUTO)
     var note by mutableStateOf(original?.note.orEmpty())
     val tags = mutableStateListOf<String>().apply { addAll(original?.tags.orEmpty()) }
     val fields = mutableStateListOf<DraftField>().apply {
@@ -136,8 +145,8 @@ class CardEditViewModel(
         }
     }
 
-    fun addField() {
-        fields.add(DraftField(CardTemplates.newId(), "", "", sensitive = false, kind = FieldKind.TEXT))
+    fun addField(kind: FieldKind) {
+        fields.add(DraftField(CardTemplates.newId(), "", "", sensitive = kind == FieldKind.PASSWORD, kind = kind))
     }
 
     fun removeExisting(attachment: Attachment) {
@@ -199,6 +208,7 @@ fun CardEditScreen(cardId: String?, newType: CardType?, onClose: () -> Unit) {
     var confirmDiscard by remember { mutableStateOf(false) }
     var generatorFor by remember { mutableStateOf<DraftField?>(null) }
     var tagInput by remember { mutableStateOf("") }
+    var pickKind by remember { mutableStateOf(false) }
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         if (uri != null) {
@@ -269,20 +279,30 @@ fun CardEditScreen(cardId: String?, newType: CardType?, onClose: () -> Unit) {
                 error = if (viewModel.titleError) "请填写名称" else null,
             )
 
-            JkSectionLabel("颜色")
-            Row(horizontalArrangement = Arrangement.spacedBy(Space.x1_5)) {
-                for (index in CardPalette.colors.indices) {
+            JkSectionLabel("卡面")
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(Space.x1_5),
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
+            ) {
+                // 第一个是该类型自己的默认卡面，其后是可选的纯色。
+                for (index in listOf(CardPalette.AUTO) + CardPalette.colors.indices) {
                     val selected = index == viewModel.color
+                    val theme = cardTheme(viewModel.type, index)
                     Box(
                         modifier = Modifier
-                            .size(32.dp)
+                            .size(36.dp)
                             .clip(CircleShape)
                             .border(2.dp, if (selected) colors.textPrimary else colors.bg, CircleShape)
                             .padding(4.dp)
                             .clip(CircleShape)
-                            .background(cardColor(index))
+                            .background(Brush.linearGradient(listOf(theme.start, theme.end)))
                             .clickable { viewModel.color = index },
-                    )
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (index == CardPalette.AUTO) {
+                            Icon(viewModel.type.icon, contentDescription = "默认卡面", tint = theme.accent, modifier = Modifier.size(14.dp))
+                        }
+                    }
                 }
             }
 
@@ -336,7 +356,7 @@ fun CardEditScreen(cardId: String?, newType: CardType?, onClose: () -> Unit) {
                 text = "添加字段",
                 icon = Icons.Outlined.Add,
                 style = ButtonStyle.Secondary,
-                onClick = viewModel::addField,
+                onClick = { pickKind = true },
                 modifier = Modifier.fillMaxWidth(),
             )
 
@@ -408,6 +428,30 @@ fun CardEditScreen(cardId: String?, newType: CardType?, onClose: () -> Unit) {
             },
         ) {
             Text("尚未保存的内容会丢失。", style = JkType.body, color = colors.textSecondary)
+        }
+    }
+
+    if (pickKind) {
+        JkSheet(onDismiss = { pickKind = false }, title = "添加字段") {
+            val kinds = listOf(
+                Triple(FieldKind.TEXT, "文本", Icons.Outlined.Notes),
+                Triple(FieldKind.PASSWORD, "密码（默认打码，可一键生成）", Icons.Outlined.Password),
+                Triple(FieldKind.NUMBER, "数字（卡号、手机号）", Icons.Outlined.Numbers),
+                Triple(FieldKind.DATE, "日期", Icons.Outlined.CalendarMonth),
+                Triple(FieldKind.URL, "网址", Icons.Outlined.Link),
+            )
+            for ((kind, label, icon) in kinds) {
+                JkRow(
+                    title = label,
+                    icon = icon,
+                    trailing = {},
+                    modifier = Modifier.clip(Radius.control),
+                    onClick = {
+                        viewModel.addField(kind)
+                        pickKind = false
+                    },
+                )
+            }
         }
     }
 

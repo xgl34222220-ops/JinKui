@@ -4,6 +4,7 @@ import com.xiguli.jinkui.core.crypto.BackupFormatException
 import com.xiguli.jinkui.data.model.Attachment
 import com.xiguli.jinkui.data.model.Card
 import com.xiguli.jinkui.data.model.CardField
+import com.xiguli.jinkui.data.model.CardPalette
 import com.xiguli.jinkui.data.model.CardType
 import com.xiguli.jinkui.data.model.FieldKind
 import com.xiguli.jinkui.data.model.HistoryEntry
@@ -153,7 +154,7 @@ object BackupJson {
             type = CardType.of(json.optString("type")),
             title = json.getString("title"),
             tags = (0 until tagsJson.length()).map { tagsJson.getString(it) },
-            color = json.optInt("color", 0),
+            color = json.optInt("color", CardPalette.AUTO),
             fields = fields,
             note = json.optString("note", ""),
             attachments = attachments,

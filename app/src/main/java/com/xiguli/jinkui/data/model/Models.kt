@@ -54,8 +54,8 @@ data class Card(
     val type: CardType,
     val title: String,
     val tags: List<String> = emptyList(),
-    /** [CardPalette] 中的序号。 */
-    val color: Int = 0,
+    /** [CardPalette] 中的序号；[CardPalette.AUTO] 表示跟随卡片类型的默认卡面。 */
+    val color: Int = CardPalette.AUTO,
     val fields: List<CardField> = emptyList(),
     val note: String = "",
     val attachments: List<Attachment> = emptyList(),
@@ -110,6 +110,9 @@ class PendingAttachment(
 
 /** 卡片色板的 ARGB 值；界面层再转成 Color。 */
 object CardPalette {
+    /** 不指定颜色：使用该类型自己的卡面配色。 */
+    const val AUTO = -1
+
     val colors: List<Long> = listOf(
         0xFF3A3632, // 墨
         0xFF8F6420, // 赤金

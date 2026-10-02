@@ -78,21 +78,6 @@ object CardTemplates {
         CardType.CUSTOM to emptyList(),
     )
 
-    /** 每种类型在色板中的默认颜色。 */
-    fun defaultColor(type: CardType): Int = when (type) {
-        CardType.LOGIN -> 0
-        CardType.BANK -> 1
-        CardType.UKEY -> 6
-        CardType.ID_CARD -> 3
-        CardType.PASSPORT -> 4
-        CardType.SOCIAL -> 2
-        CardType.DRIVER -> 3
-        CardType.MEMBER -> 5
-        CardType.ACCESS -> 7
-        CardType.WIFI -> 6
-        CardType.CUSTOM -> 0
-    }
-
     fun fieldsFor(type: CardType): List<CardField> =
         specs.getValue(type).map { CardField(newId(), it.label, "", it.sensitive, it.kind) }
 

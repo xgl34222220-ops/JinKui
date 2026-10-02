@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -23,6 +24,8 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -53,6 +56,7 @@ import androidx.lifecycle.viewModelScope
 import com.xiguli.jinkui.AppContainer
 import com.xiguli.jinkui.data.model.Card
 import com.xiguli.jinkui.data.model.CardField
+import com.xiguli.jinkui.data.model.CardPalette
 import com.xiguli.jinkui.data.model.CardType
 import com.xiguli.jinkui.ui.LocalContainer
 import com.xiguli.jinkui.ui.components.BrandMark
@@ -82,8 +86,9 @@ import kotlinx.coroutines.launch
 
 data class HomeUi(
     val total: Int = 0,
-    val tags: List<String> = emptyList(),
-    /** 正在搜索或按标签筛选时的结果；为 null 表示显示默认分区。 */
+    /** 筛选项：键 + 显示名。先是出现过的卡片类型，再是标签。 */
+    val filters: List<Pair<String, String>> = emptyList(),
+    /** 正在搜索或筛选时的结果；为 null 表示显示默认分区。 */
     val results: List<Card>? = null,
     val pinned: List<Card> = emptyList(),
     val recent: List<Card> = emptyList(),
@@ -92,27 +97,39 @@ data class HomeUi(
 
 class HomeViewModel(private val container: AppContainer) : ViewModel() {
     val query = MutableStateFlow("")
-    val tag = MutableStateFlow<String?>(null)
+
+    /** 当前筛选项的键："t:类型" 或 "g:标签"；null 为全部。 */
+    val filter = MutableStateFlow<String?>(null)
 
     /** 列表滚动位置随页面的 ViewModel 保留，进详情再返回不会跳回顶部。 */
     val listState = LazyListState()
 
-    val ui: StateFlow<HomeUi> = combine(container.repository.cards, query, tag) { cards, text, selectedTag ->
+    val ui: StateFlow<HomeUi> = combine(container.repository.cards, query, filter) { cards, text, selected ->
         val sorted = cards.sortedBy { it.title.lowercase() }
+        val types = CardType.entries.filter { type -> cards.any { it.type == type } }
         val tags = cards.flatMap { it.tags }.distinct().sorted()
-        val activeTag = selectedTag?.takeIf { it in tags }
-        if (text.isNotBlank() || activeTag != null) {
+        val filters = (if (types.size > 1) types.map { "t:" + it.key to it.label } else emptyList()) +
+            tags.map { "g:$it" to "#$it" }
+        val active = selected?.takeIf { key -> filters.any { it.first == key } }
+        if (text.isNotBlank() || active != null) {
             HomeUi(
                 total = cards.size,
-                tags = tags,
+                filters = filters,
                 results = sorted
-                    .filter { (activeTag == null || activeTag in it.tags) && it.matches(text) }
+                    .filter { card ->
+                        val inFilter = when {
+                            active == null -> true
+                            active.startsWith("t:") -> card.type.key == active.substring(2)
+                            else -> active.substring(2) in card.tags
+                        }
+                        inFilter && card.matches(text)
+                    }
                     .sortedByDescending { it.pinned },
             )
         } else {
             HomeUi(
                 total = cards.size,
-                tags = tags,
+                filters = filters,
                 pinned = sorted.filter { it.pinned },
                 recent = cards.filter { !it.pinned && it.lastUsedAt > it.createdAt }
                     .sortedByDescending { it.lastUsedAt }
@@ -147,7 +164,7 @@ fun HomeScreen(
     val viewModel = jkViewModel { HomeViewModel(container) }
     val ui by viewModel.ui.collectAsStateWithLifecycle()
     val query by viewModel.query.collectAsStateWithLifecycle()
-    val tag by viewModel.tag.collectAsStateWithLifecycle()
+    val filter by viewModel.filter.collectAsStateWithLifecycle()
     val colors = Jk.colors
 
     var quickCard by remember { mutableStateOf<Card?>(null) }
@@ -196,15 +213,15 @@ fun HomeScreen(
                 )
             }
 
-            if (ui.tags.isNotEmpty()) {
+            if (ui.filters.isNotEmpty()) {
                 LazyRow(
                     contentPadding = PaddingValues(horizontal = Space.x2_5),
                     horizontalArrangement = Arrangement.spacedBy(Space.x1),
                     modifier = Modifier.padding(top = Space.x1_5),
                 ) {
-                    item { JkChip("全部", tag == null, { viewModel.tag.value = null }) }
-                    items(ui.tags, key = { it }) { name ->
-                        JkChip(name, tag == name, { viewModel.tag.value = if (tag == name) null else name })
+                    item { JkChip("全部", filter == null, { viewModel.filter.value = null }) }
+                    items(ui.filters, key = { it.first }) { (key, label) ->
+                        JkChip(label, filter == key, { viewModel.filter.value = if (filter == key) null else key })
                     }
                 }
             }
@@ -242,7 +259,7 @@ fun HomeScreen(
                     if (results != null) {
                         item(key = "h-results") { SectionHeader("找到 ${results.size} 张") }
                         if (results.isEmpty()) {
-                            item(key = "none") { JkEmpty("没有匹配的卡片", "试试别的关键词，或者换一个标签。") }
+                            item(key = "none") { JkEmpty("没有匹配的卡片", "试试别的关键词，或者换一个筛选项。") }
                         }
                         itemsIndexed(results, key = { _, card -> "r-" + card.id }) { index, card ->
                             CardListItem(card, index < results.lastIndex, { onOpen(card.id) }, { quickCard = card })
@@ -457,28 +474,31 @@ private fun QuickActionsSheet(
     }
 }
 
+/** 新建卡片：直接从 11 种卡面里挑一种。 */
 @Composable
 private fun TypePickerSheet(onDismiss: () -> Unit, onPick: (CardType) -> Unit) {
-    val colors = Jk.colors
     JkSheet(onDismiss = onDismiss, title = "新建卡片") {
-        Column(verticalArrangement = Arrangement.spacedBy(Space.x1)) {
+        Column(
+            modifier = Modifier
+                .heightIn(max = 460.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(Space.x1_5),
+        ) {
             for (pair in CardType.entries.chunked(2)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(Space.x1)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(Space.x1_5)) {
                     for (type in pair) {
-                        Row(
+                        CardFace(
+                            title = type.label,
+                            type = type,
+                            colorIndex = CardPalette.AUTO,
+                            hint = "",
+                            aspect = 1.9f,
+                            mini = true,
                             modifier = Modifier
                                 .weight(1f)
-                                .height(52.dp)
-                                .clip(Radius.control)
-                                .border(1.dp, colors.border, Radius.control)
-                                .clickable { onPick(type) }
-                                .padding(horizontal = Space.x1_5),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Icon(type.icon, contentDescription = null, tint = colors.textSecondary, modifier = Modifier.size(20.dp))
-                            Spacer(Modifier.width(Space.x1_5))
-                            Text(type.label, style = JkType.body, color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
+                                .clip(Radius.field)
+                                .clickable { onPick(type) },
+                        )
                     }
                     if (pair.size == 1) Spacer(Modifier.weight(1f))
                 }

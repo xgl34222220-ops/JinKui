@@ -22,6 +22,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material.icons.outlined.CopyAll
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.History
@@ -51,6 +52,7 @@ import com.xiguli.jinkui.AppContainer
 import com.xiguli.jinkui.data.model.Attachment
 import com.xiguli.jinkui.data.model.Card
 import com.xiguli.jinkui.data.model.CardField
+import com.xiguli.jinkui.data.model.CardTemplates
 import com.xiguli.jinkui.data.model.FieldKind
 import com.xiguli.jinkui.data.model.HistoryEntry
 import com.xiguli.jinkui.data.model.groupDigits
@@ -135,6 +137,26 @@ class CardDetailViewModel(private val container: AppContainer, private val cardI
                     onDeleted()
                 }
                 .onFailure { container.messages.show("删除失败：${it.message.orEmpty()}") }
+        }
+    }
+
+    /** 复制一份：字段原样带过去，附件与历史不复制。 */
+    fun duplicate() {
+        val current = card.value ?: return
+        viewModelScope.launch {
+            runCatching {
+                repository.save(
+                    current.copy(
+                        id = CardTemplates.newId(),
+                        title = current.title + " 副本",
+                        fields = current.fields.map { it.copy(id = CardTemplates.newId()) },
+                        attachments = emptyList(),
+                        pinned = false,
+                    ),
+                )
+            }
+                .onSuccess { container.messages.show("已复制为「${it.title}」") }
+                .onFailure { container.messages.show("复制失败：${it.message.orEmpty()}") }
         }
     }
 
@@ -280,6 +302,14 @@ fun CardDetailScreen(cardId: String, onBack: () -> Unit, onEdit: () -> Unit) {
                         viewModel.loadHistory()
                         showHistory = true
                     },
+                )
+                JkDivider(inset = Space.x6 + Space.x05)
+                JkRow(
+                    title = "复制一份",
+                    subtitle = "以这张卡片为模板新建，附件不会带过去",
+                    icon = Icons.Outlined.CopyAll,
+                    onClick = viewModel::duplicate,
+                    trailing = {},
                 )
             }
 

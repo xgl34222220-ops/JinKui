@@ -81,7 +81,7 @@ fun cardColor(index: Int): Color = Color(CardPalette.argb(index))
  */
 @Composable
 fun CardTile(type: CardType, colorIndex: Int, size: Dp = 40.dp) {
-    val base = cardColor(colorIndex)
+    val base = cardTheme(type, colorIndex).start
     val dark = Jk.colors.isDark
     val foreground = if (dark) lerp(base, Color.White, 0.55f) else base
     val background = if (dark) lerp(base, Color.White, 0.3f).copy(alpha = 0.2f) else base.copy(alpha = 0.12f)
@@ -93,72 +93,6 @@ fun CardTile(type: CardType, colorIndex: Int, size: Dp = 40.dp) {
         contentAlignment = Alignment.Center,
     ) {
         Icon(type.icon, contentDescription = null, tint = foreground, modifier = Modifier.size(size * 0.5f))
-    }
-}
-
-/**
- * 卡面：金匮里最有“实物感”的元素，用在首页置顶区、详情页顶部和编辑页预览。
- * 斜向的同色渐变、一道极淡的高光描边、右下角被裁切的类型水印——不用投影。
- */
-@Composable
-fun CardFace(
-    title: String,
-    type: CardType,
-    colorIndex: Int,
-    hint: String,
-    modifier: Modifier = Modifier,
-    pinned: Boolean = false,
-    aspect: Float = 1.586f,
-) {
-    val base = cardColor(colorIndex)
-    val brush = Brush.linearGradient(listOf(lerp(base, Color.White, 0.10f), lerp(base, Color.Black, 0.22f)))
-    val ink = Color.White
-    Box(
-        modifier = modifier
-            .aspectRatio(aspect)
-            .clip(Radius.card)
-            .background(brush)
-            .border(1.dp, ink.copy(alpha = 0.14f), Radius.card),
-    ) {
-        Icon(
-            type.icon,
-            contentDescription = null,
-            tint = ink.copy(alpha = 0.09f),
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .offset(x = 22.dp, y = 26.dp)
-                .size(132.dp),
-        )
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(Space.x2_5),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(type.icon, contentDescription = null, tint = ink.copy(alpha = 0.9f), modifier = Modifier.size(16.dp))
-                Spacer(Modifier.width(Space.x1))
-                Text(type.label, style = JkType.caption, color = ink.copy(alpha = 0.78f), modifier = Modifier.weight(1f))
-                if (pinned) {
-                    Icon(Icons.Outlined.PushPin, contentDescription = "已置顶", tint = ink.copy(alpha = 0.78f), modifier = Modifier.size(14.dp))
-                }
-            }
-            Spacer(Modifier.weight(1f))
-            Text(
-                text = hint,
-                style = JkType.mono.copy(fontSize = JkType.small.fontSize),
-                color = ink.copy(alpha = 0.72f),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Spacer(Modifier.size(Space.x05))
-            Text(
-                text = title.ifBlank { "未命名" },
-                style = JkType.title.copy(fontFamily = FontFamily.Serif),
-                color = ink,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
     }
 }
 
