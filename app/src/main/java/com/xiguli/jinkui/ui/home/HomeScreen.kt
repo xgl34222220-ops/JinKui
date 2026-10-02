@@ -225,182 +225,170 @@ fun HomeScreen(
     var showGenerator by remember { mutableStateOf(false) }
     var showMore by remember { mutableStateOf(false) }
 
-    Box(Modifier.fillMaxSize()) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .statusBarsPadding(),
-        ) {
-            Row(
+    // 列表视图有自己的一整套版面；牌堆与空首页继续用下面原来的布局。
+    if (!settings.deckView && ui.total > 0) {
+        ListHome(
+            ui = ui,
+            query = query,
+            filter = filter,
+            listState = viewModel.listState,
+            sortOrder = settings.sortOrder,
+            onQuery = viewModel::setQuery,
+            onFilter = viewModel::setFilter,
+            onOpen = { onOpen(it.id) },
+            onLongClick = { quickCard = it },
+            onCopy = { card, field -> viewModel.copy(card, field) },
+            onToggleView = { container.settings.update { it.copy(deckView = true) } },
+            onLock = { container.vault.lock() },
+            onMore = { showMore = true },
+            onCreate = { showTypes = true },
+            onHealth = onHealth,
+            onSort = { order -> container.settings.update { it.copy(sortOrder = order) } },
+        )
+    } else {
+        Box(Modifier.fillMaxSize()) {
+            Column(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = Space.x2_5, end = Space.x1, top = Space.x1_5, bottom = Space.x1_5),
-                verticalAlignment = Alignment.CenterVertically,
+                    .fillMaxSize()
+                    .statusBarsPadding(),
             ) {
-                Column(Modifier.weight(1f)) {
-                    Text("金匮", style = JkType.brand, color = colors.textPrimary)
-                    Text(
-                        text = if (ui.total == 0) "只存在这台手机里的安全卡包" else "${ui.total} 张卡片，加密保存在本机",
-                        style = JkType.caption,
-                        color = colors.textTertiary,
-                    )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = Space.x2_5, end = Space.x1, top = Space.x1_5, bottom = Space.x1_5),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("金匮", style = JkType.brand, color = colors.textPrimary)
+                        Text(
+                            text = if (ui.total == 0) "只存在这台手机里的安全卡包" else "${ui.total} 张卡片，加密保存在本机",
+                            style = JkType.caption,
+                            color = colors.textTertiary,
+                        )
+                    }
+                    if (ui.total > 0) {
+                        JkIconButton(
+                            icon = if (settings.deckView) Icons.Outlined.ViewAgenda else Icons.Outlined.Layers,
+                            description = if (settings.deckView) "切换为列表" else "切换为牌堆",
+                            onClick = { container.settings.update { it.copy(deckView = !it.deckView) } },
+                        )
+                    }
+                    JkIconButton(Icons.Outlined.Lock, "立即锁定", { container.vault.lock() })
+                    JkIconButton(Icons.Outlined.MoreHoriz, "更多", { showMore = true })
                 }
+
                 if (ui.total > 0) {
-                    JkIconButton(
-                        icon = if (settings.deckView) Icons.Outlined.ViewAgenda else Icons.Outlined.Layers,
-                        description = if (settings.deckView) "切换为列表" else "切换为牌堆",
-                        onClick = { container.settings.update { it.copy(deckView = !it.deckView) } },
+                    JkTextField(
+                        value = query,
+                        onValueChange = { viewModel.setQuery(it) },
+                        placeholder = "搜索名称、标签或备注",
+                        leading = Icons.Outlined.Search,
+                        modifier = Modifier.padding(horizontal = Space.x2_5),
+                        trailing = {
+                            if (query.isNotEmpty()) {
+                                JkIconButton(Icons.Outlined.Close, "清除", { viewModel.setQuery("") })
+                            } else {
+                                Spacer(Modifier.width(Space.x1_5))
+                            }
+                        },
                     )
                 }
-                JkIconButton(Icons.Outlined.Lock, "立即锁定", { container.vault.lock() })
-                JkIconButton(Icons.Outlined.MoreHoriz, "更多", { showMore = true })
+
+                if (ui.filters.isNotEmpty()) {
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = Space.x2_5),
+                        horizontalArrangement = Arrangement.spacedBy(Space.x1),
+                        modifier = Modifier.padding(top = Space.x1_5),
+                    ) {
+                        item { JkChip("全部", filter == null, { viewModel.setFilter(null) }) }
+                        items(ui.filters, key = { it.first }) { (key, label) ->
+                            JkChip(label, filter == key, { viewModel.setFilter(if (filter == key) null else key) })
+                        }
+                    }
+                }
+
+                if (ui.total == 0) {
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                            .padding(horizontal = Space.x5),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                    ) {
+                        EmptyIllustration()
+                        Spacer(Modifier.height(Space.x3))
+                        Text("匣子还是空的", style = JkType.title, color = colors.textPrimary)
+                        Spacer(Modifier.height(Space.x1))
+                        Text(
+                            "密码、银行卡、证件……放进来的每一样东西，都只有你能打开。",
+                            style = JkType.small,
+                            color = colors.textTertiary,
+                            textAlign = TextAlign.Center,
+                        )
+                        Spacer(Modifier.height(Space.x3))
+                        JkButton("放进第一张卡片", { showTypes = true }, icon = Icons.Outlined.Add)
+                        Spacer(Modifier.height(Space.x4))
+                        // 首次使用的三步引导
+                        Column(verticalArrangement = Arrangement.spacedBy(Space.x1_5)) {
+                            for ((step, text) in listOf(
+                                "1" to "放进第一张卡片，11 种类型都有现成的字段",
+                                "2" to "在设置里开启指纹或面容，解锁更顺手",
+                                "3" to "导出一份加密备份，换手机也不怕",
+                            )) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = step,
+                                        style = JkType.caption,
+                                        color = colors.textSecondary,
+                                        textAlign = TextAlign.Center,
+                                        modifier = Modifier
+                                            .size(20.dp)
+                                            .clip(CircleShape)
+                                            .background(colors.surfaceAlt)
+                                            .padding(top = 2.dp),
+                                    )
+                                    Spacer(Modifier.width(Space.x1_5))
+                                    Text(text, style = JkType.small, color = colors.textSecondary)
+                                }
+                            }
+                        }
+                        Spacer(Modifier.height(Space.x6))
+                    }
+                } else if (settings.deckView) {
+                    DeckHome(
+                        cards = ui.deck,
+                        index = deckIndex,
+                        onIndexChange = { viewModel.deckCardId = ui.deck[it].id },
+                        onOpen = { onOpen(it.id) },
+                        onLongClick = { quickCard = it },
+                        onCopy = { card, field -> viewModel.copy(card, field) },
+                        onClearFilters = {
+                            viewModel.setQuery("")
+                            viewModel.setFilter(null)
+                        },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
             }
 
             if (ui.total > 0) {
-                JkTextField(
-                    value = query,
-                    onValueChange = { viewModel.setQuery(it) },
-                    placeholder = "搜索名称、标签或备注",
-                    leading = Icons.Outlined.Search,
-                    modifier = Modifier.padding(horizontal = Space.x2_5),
-                    trailing = {
-                        if (query.isNotEmpty()) {
-                            JkIconButton(Icons.Outlined.Close, "清除", { viewModel.setQuery("") })
-                        } else {
-                            Spacer(Modifier.width(Space.x1_5))
-                        }
-                    },
-                )
-            }
-
-            if (ui.filters.isNotEmpty()) {
-                LazyRow(
-                    contentPadding = PaddingValues(horizontal = Space.x2_5),
-                    horizontalArrangement = Arrangement.spacedBy(Space.x1),
-                    modifier = Modifier.padding(top = Space.x1_5),
-                ) {
-                    item { JkChip("全部", filter == null, { viewModel.setFilter(null) }) }
-                    items(ui.filters, key = { it.first }) { (key, label) ->
-                        JkChip(label, filter == key, { viewModel.setFilter(if (filter == key) null else key) })
-                    }
-                }
-            }
-
-            if (ui.total == 0) {
-                Column(
+                Row(
                     modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth()
-                        .padding(horizontal = Space.x5),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center,
+                        .align(Alignment.BottomEnd)
+                        .navigationBarsPadding()
+                        .padding(Space.x2_5)
+                        .height(52.dp)
+                        .clip(CircleShape)
+                        .background(colors.primary)
+                        .clickable { showTypes = true }
+                        .padding(start = Space.x2, end = Space.x2_5),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    EmptyIllustration()
-                    Spacer(Modifier.height(Space.x3))
-                    Text("匣子还是空的", style = JkType.title, color = colors.textPrimary)
-                    Spacer(Modifier.height(Space.x1))
-                    Text(
-                        "密码、银行卡、证件……放进来的每一样东西，都只有你能打开。",
-                        style = JkType.small,
-                        color = colors.textTertiary,
-                        textAlign = TextAlign.Center,
-                    )
-                    Spacer(Modifier.height(Space.x3))
-                    JkButton("放进第一张卡片", { showTypes = true }, icon = Icons.Outlined.Add)
-                    Spacer(Modifier.height(Space.x4))
-                    // 首次使用的三步引导
-                    Column(verticalArrangement = Arrangement.spacedBy(Space.x1_5)) {
-                        for ((step, text) in listOf(
-                            "1" to "放进第一张卡片，11 种类型都有现成的字段",
-                            "2" to "在设置里开启指纹或面容，解锁更顺手",
-                            "3" to "导出一份加密备份，换手机也不怕",
-                        )) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    text = step,
-                                    style = JkType.caption,
-                                    color = colors.textSecondary,
-                                    textAlign = TextAlign.Center,
-                                    modifier = Modifier
-                                        .size(20.dp)
-                                        .clip(CircleShape)
-                                        .background(colors.surfaceAlt)
-                                        .padding(top = 2.dp),
-                                )
-                                Spacer(Modifier.width(Space.x1_5))
-                                Text(text, style = JkType.small, color = colors.textSecondary)
-                            }
-                        }
-                    }
-                    Spacer(Modifier.height(Space.x6))
+                    Icon(Icons.Outlined.Add, contentDescription = null, tint = colors.onPrimary, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(Space.x1))
+                    Text("新建", style = JkType.bodyStrong, color = colors.onPrimary)
                 }
-            } else if (settings.deckView) {
-                DeckHome(
-                    cards = ui.deck,
-                    index = deckIndex,
-                    onIndexChange = { viewModel.deckCardId = ui.deck[it].id },
-                    onOpen = { onOpen(it.id) },
-                    onLongClick = { quickCard = it },
-                    onCopy = { card, field -> viewModel.copy(card, field) },
-                    onClearFilters = {
-                        viewModel.setQuery("")
-                        viewModel.setFilter(null)
-                    },
-                    modifier = Modifier.weight(1f),
-                )
-            } else {
-                LazyColumn(
-                    state = viewModel.listState,
-                    contentPadding = PaddingValues(top = Space.x05, bottom = 112.dp),
-                    modifier = Modifier.weight(1f),
-                ) {
-                    val results = ui.results
-                    if (results != null) {
-                        item(key = "h-results") { SectionHeader("找到 ${results.size} 张") }
-                        if (results.isEmpty()) {
-                            item(key = "none") { JkEmpty("没有匹配的卡片", "试试别的关键词，或者换一个筛选项。") }
-                        }
-                        itemsIndexed(results, key = { _, card -> "r-" + card.id }) { index, card ->
-                            CardListItem(card, index < results.lastIndex, { onOpen(card.id) }, { quickCard = card })
-                        }
-                    } else {
-                        if (ui.pinned.isNotEmpty()) {
-                            item(key = "h-pinned") { SectionHeader("置顶") }
-                            item(key = "pinned") {
-                                PinnedCards(ui.pinned, onOpen = { onOpen(it.id) }, onLongClick = { quickCard = it })
-                            }
-                        }
-                        if (ui.recent.isNotEmpty()) {
-                            item(key = "h-recent") { SectionHeader("最近使用") }
-                            itemsIndexed(ui.recent, key = { _, card -> "u-" + card.id }) { index, card ->
-                                CardListItem(card, index < ui.recent.lastIndex, { onOpen(card.id) }, { quickCard = card })
-                            }
-                        }
-                        item(key = "h-all") { SectionHeader("全部") }
-                        itemsIndexed(ui.all, key = { _, card -> "a-" + card.id }) { index, card ->
-                            CardListItem(card, index < ui.all.lastIndex, { onOpen(card.id) }, { quickCard = card })
-                        }
-                    }
-                }
-            }
-        }
-
-        if (ui.total > 0) {
-            Row(
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .navigationBarsPadding()
-                    .padding(Space.x2_5)
-                    .height(52.dp)
-                    .clip(CircleShape)
-                    .background(colors.primary)
-                    .clickable { showTypes = true }
-                    .padding(start = Space.x2, end = Space.x2_5),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(Icons.Outlined.Add, contentDescription = null, tint = colors.onPrimary, modifier = Modifier.size(20.dp))
-                Spacer(Modifier.width(Space.x1))
-                Text("新建", style = JkType.bodyStrong, color = colors.onPrimary)
             }
         }
     }
@@ -473,115 +461,6 @@ fun HomeScreen(
                 },
             )
         }
-    }
-}
-
-@Composable
-private fun SectionHeader(text: String) {
-    Text(
-        text = text,
-        style = JkType.small,
-        color = Jk.colors.textTertiary,
-        modifier = Modifier.padding(start = Space.x2_5, top = Space.x2_5, bottom = Space.x1),
-    )
-}
-
-/** 置顶区：把最要紧的几张做成真正的“卡面”，横向翻看。 */
-@Composable
-private fun PinnedCards(cards: List<Card>, onOpen: (Card) -> Unit, onLongClick: (Card) -> Unit) {
-    if (cards.size == 1) {
-        val card = cards.first()
-        CardFace(
-            title = card.title,
-            type = card.type,
-            colorIndex = card.color,
-            hint = CardTemplates.face(card).primary,
-            secondaryLabel = CardTemplates.face(card).secondaryLabel,
-            secondary = CardTemplates.face(card).secondary,
-            pinned = true,
-            modifier = Modifier
-                .padding(horizontal = Space.x2_5)
-                .fillMaxWidth()
-                .clip(Radius.card)
-                .combinedClickable(onClick = { onOpen(card) }, onLongClick = { onLongClick(card) }),
-        )
-    } else {
-        LazyRow(
-            contentPadding = PaddingValues(horizontal = Space.x2_5),
-            horizontalArrangement = Arrangement.spacedBy(Space.x1_5),
-        ) {
-            items(cards, key = { it.id }) { card ->
-                CardFace(
-                    title = card.title,
-                    type = card.type,
-                    colorIndex = card.color,
-                    hint = CardTemplates.face(card).primary,
-                    secondaryLabel = CardTemplates.face(card).secondaryLabel,
-                    secondary = CardTemplates.face(card).secondary,
-                    pinned = true,
-                    modifier = Modifier
-                        .width(288.dp)
-                        .clip(Radius.card)
-                        .combinedClickable(onClick = { onOpen(card) }, onLongClick = { onLongClick(card) }),
-                )
-            }
-        }
-    }
-}
-
-/** 列表行：不套卡片外框，直接落在底色上，行与行之间只有一根极淡的分隔线。 */
-@Composable
-private fun CardListItem(card: Card, divider: Boolean, onClick: () -> Unit, onLongClick: () -> Unit) {
-    val colors = Jk.colors
-    Column {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .combinedClickable(onClick = onClick, onLongClick = onLongClick)
-                .padding(horizontal = Space.x2_5, vertical = Space.x1_5),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            CardTile(card.type, card.color)
-            Spacer(Modifier.width(Space.x1_5))
-            Column(Modifier.weight(1f)) {
-                Text(
-                    text = card.title.ifBlank { "未命名" },
-                    style = JkType.bodyStrong,
-                    color = colors.textPrimary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    text = CardTemplates.face(card).primary,
-                    style = JkType.small,
-                    color = colors.textTertiary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            ExpiryNote(card, Modifier.padding(start = Space.x1_5))
-            val firstTag = card.tags.firstOrNull()
-            if (firstTag != null) {
-                Text(
-                    text = firstTag,
-                    style = JkType.caption,
-                    color = colors.textTertiary,
-                    maxLines = 1,
-                    modifier = Modifier.padding(start = Space.x1_5),
-                )
-            }
-            if (card.pinned) {
-                Icon(
-                    Icons.Outlined.PushPin,
-                    contentDescription = "已置顶",
-                    tint = colors.accent,
-                    modifier = Modifier
-                        .padding(start = Space.x1)
-                        .size(14.dp),
-                )
-            }
-        }
-        if (divider) JkDivider(inset = Space.x2_5 + 40.dp + Space.x1_5)
     }
 }
 
