@@ -1,6 +1,10 @@
 package com.xiguli.jinkui.ui.components
 
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -32,6 +36,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
@@ -51,6 +56,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -197,15 +209,23 @@ fun JkButton(
         ButtonStyle.Ghost -> colors.textSecondary
     }
     val active = enabled && !loading
+    // 按压反馈：按下时轻微缩小，松手回弹。
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val scale by animateFloatAsState(targetValue = if (pressed && active) 0.97f else 1f, label = "press")
     Row(
         modifier = modifier
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
             .heightIn(min = if (compact) 36.dp else 48.dp)
             .clip(Radius.control)
             .background(if (active || style != ButtonStyle.Primary) background else colors.textTertiary)
             .then(
                 if (style == ButtonStyle.Secondary) Modifier.border(1.dp, colors.border, Radius.control) else Modifier,
             )
-            .clickable(enabled = active, onClick = onClick)
+            .clickable(interactionSource = interaction, indication = LocalIndication.current, enabled = active, onClick = onClick)
             .padding(horizontal = if (compact) Space.x1_5 else Space.x2_5),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
@@ -634,9 +654,11 @@ fun JkEmpty(title: String, message: String, modifier: Modifier = Modifier, actio
             .padding(horizontal = Space.x4, vertical = Space.x6),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
+        EmptyIllustration()
+        Spacer(Modifier.height(Space.x2_5))
         Text(title, style = JkType.heading, color = Jk.colors.textPrimary)
         Spacer(Modifier.height(Space.x1))
-        Text(message, style = JkType.small, color = Jk.colors.textTertiary)
+        Text(message, style = JkType.small, color = Jk.colors.textTertiary, textAlign = TextAlign.Center)
         if (action != null) {
             Spacer(Modifier.height(Space.x2_5))
             action()
@@ -671,5 +693,52 @@ fun JkBadge(text: String, icon: ImageVector? = null, modifier: Modifier = Modifi
             Spacer(Modifier.width(Space.x05))
         }
         Text(text, style = JkType.caption, color = colors.accent, maxLines = 1)
+    }
+}
+
+/** 空状态用的小插画：一叠卡片，最上面一张带锁孔。只用描边与品牌色，不用投影。 */
+@Composable
+fun EmptyIllustration(modifier: Modifier = Modifier) {
+    val line = Jk.colors.border
+    val fill = Jk.colors.surface
+    val accent = Jk.colors.accent
+    val soft = Jk.colors.surfaceAlt
+    Canvas(modifier.size(width = 132.dp, height = 96.dp)) {
+        val u = 1.dp.toPx()
+        val w = size.width
+        val stroke = Stroke(width = 1.4f * u)
+        // 由远及近三张牌：越靠后越窄、越靠上
+        for (layer in 2 downTo 0) {
+            val inset = layer * 11f * u
+            val top = (2 - layer) * 12f * u
+            val cardWidth = w - inset * 2f
+            val cardHeight = 68f * u
+            val corner = CornerRadius(14f * u, 14f * u)
+            drawRoundRect(color = if (layer == 0) fill else soft, topLeft = Offset(inset, top), size = Size(cardWidth, cardHeight), cornerRadius = corner)
+            drawRoundRect(color = line, topLeft = Offset(inset, top), size = Size(cardWidth, cardHeight), cornerRadius = corner, style = stroke)
+        }
+        val top = 24f * u
+        // 最上面一张：两行“文字”与一个锁孔
+        drawLine(color = line, start = Offset(16f * u, top + 44f * u), end = Offset(62f * u, top + 44f * u), strokeWidth = 3f * u, cap = StrokeCap.Round)
+        drawLine(color = line, start = Offset(16f * u, top + 54f * u), end = Offset(44f * u, top + 54f * u), strokeWidth = 3f * u, cap = StrokeCap.Round)
+        drawCircle(color = accent, radius = 5f * u, center = Offset(w - 26f * u, top + 20f * u))
+        drawLine(color = accent, start = Offset(w - 26f * u, top + 22f * u), end = Offset(w - 26f * u, top + 32f * u), strokeWidth = 3f * u, cap = StrokeCap.Round)
+    }
+}
+
+/** 多选用的方形勾选框。 */
+@Composable
+fun JkCheck(checked: Boolean, modifier: Modifier = Modifier) {
+    val colors = Jk.colors
+    val shape = androidx.compose.foundation.shape.RoundedCornerShape(7.dp)
+    Box(
+        modifier = modifier
+            .size(22.dp)
+            .clip(shape)
+            .background(if (checked) colors.primary else colors.surface)
+            .border(1.dp, if (checked) colors.primary else colors.textTertiary, shape),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (checked) Icon(Icons.Outlined.Check, contentDescription = null, tint = colors.onPrimary, modifier = Modifier.size(15.dp))
     }
 }

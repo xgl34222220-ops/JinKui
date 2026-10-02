@@ -15,6 +15,8 @@ sealed interface Screen {
     data class Detail(val cardId: String) : Screen
     data class Edit(val cardId: String?, val type: CardType?) : Screen
     data object Settings : Screen
+    data object Health : Screen
+    data object Organize : Screen
 }
 
 /**

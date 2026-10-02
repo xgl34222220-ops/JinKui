@@ -37,6 +37,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.DoneAll
+import androidx.compose.material.icons.outlined.HealthAndSafety
+import androidx.compose.material.icons.outlined.MoreHoriz
 import androidx.compose.material.icons.outlined.ChevronLeft
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.Layers
@@ -78,12 +81,15 @@ import com.xiguli.jinkui.data.model.CardField
 import com.xiguli.jinkui.data.model.CardPalette
 import com.xiguli.jinkui.data.model.CardTemplates
 import com.xiguli.jinkui.data.model.CardType
+import com.xiguli.jinkui.data.model.PasswordHealth
 import com.xiguli.jinkui.data.model.deckOrder
+import com.xiguli.jinkui.data.model.sortCards
 import com.xiguli.jinkui.ui.components.ButtonStyle
 import com.xiguli.jinkui.ui.LocalContainer
 import com.xiguli.jinkui.ui.components.BrandMark
 import com.xiguli.jinkui.ui.components.CardFace
 import com.xiguli.jinkui.ui.components.CardTile
+import com.xiguli.jinkui.ui.components.EmptyIllustration
 import com.xiguli.jinkui.ui.components.ExpiryNote
 import com.xiguli.jinkui.ui.components.JkButton
 import com.xiguli.jinkui.ui.components.JkChip
@@ -100,6 +106,7 @@ import com.xiguli.jinkui.ui.theme.Jk
 import com.xiguli.jinkui.ui.theme.JkType
 import com.xiguli.jinkui.ui.theme.Radius
 import com.xiguli.jinkui.ui.theme.Space
+import java.time.LocalDate
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -118,6 +125,8 @@ data class HomeUi(
     val all: List<Card> = emptyList(),
     /** 牌堆里的卡：筛选时是结果，否则是全部（置顶在前）。 */
     val deck: List<Card> = emptyList(),
+    /** 安全体检发现的问题数，显示在“更多”里。 */
+    val issues: Int = 0,
 )
 
 class HomeViewModel(private val container: AppContainer) : ViewModel() {
@@ -142,11 +151,13 @@ class HomeViewModel(private val container: AppContainer) : ViewModel() {
     /** 列表滚动位置随页面的 ViewModel 保留，进详情再返回不会跳回顶部。 */
     val listState = LazyListState()
 
-    val ui: StateFlow<HomeUi> = combine(container.repository.cards, query, filter) { cards, text, selected ->
-        val sorted = cards.sortedBy { it.title.lowercase() }
+    val ui: StateFlow<HomeUi> = combine(container.repository.cards, query, filter, container.settings.flow) { cards, text, selected, settings ->
+        val sorted = sortCards(cards, settings.sortOrder)
+        val issues = PasswordHealth.analyze(cards, LocalDate.now()).issues.size
         val types = CardType.entries.filter { type -> cards.any { it.type == type } }
         val tags = cards.flatMap { it.tags }.distinct().sorted()
-        val filters = (if (types.size > 1) types.map { "t:" + it.key to it.label } else emptyList()) +
+        val filters = (if (cards.any { it.pinned }) listOf("p:" to "置顶") else emptyList()) +
+            (if (types.size > 1) types.map { "t:" + it.key to it.label } else emptyList()) +
             tags.map { "g:$it" to "#$it" }
         val active = selected?.takeIf { key -> filters.any { it.first == key } }
         if (text.isNotBlank() || active != null) {
@@ -154,13 +165,14 @@ class HomeViewModel(private val container: AppContainer) : ViewModel() {
                     .filter { card ->
                         val inFilter = when {
                             active == null -> true
+                            active == "p:" -> card.pinned
                             active.startsWith("t:") -> card.type.key == active.substring(2)
                             else -> active.substring(2) in card.tags
                         }
                         inFilter && card.matches(text)
                     }
                     .sortedByDescending { it.pinned }
-            HomeUi(total = cards.size, filters = filters, results = results, deck = results)
+            HomeUi(total = cards.size, filters = filters, results = results, deck = results, issues = issues)
         } else {
             HomeUi(
                 total = cards.size,
@@ -170,7 +182,8 @@ class HomeViewModel(private val container: AppContainer) : ViewModel() {
                     .sortedByDescending { it.lastUsedAt }
                     .take(3),
                 all = sorted,
-                deck = deckOrder(cards),
+                deck = deckOrder(cards, settings.sortOrder),
+                issues = issues,
             )
         }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, HomeUi())
@@ -195,6 +208,8 @@ fun HomeScreen(
     onOpen: (String) -> Unit,
     onCreate: (CardType) -> Unit,
     onSettings: () -> Unit,
+    onHealth: () -> Unit,
+    onOrganize: () -> Unit,
 ) {
     val container = LocalContainer.current
     val viewModel = jkViewModel { HomeViewModel(container) }
@@ -208,6 +223,7 @@ fun HomeScreen(
     var quickCard by remember { mutableStateOf<Card?>(null) }
     var showTypes by remember { mutableStateOf(false) }
     var showGenerator by remember { mutableStateOf(false) }
+    var showMore by remember { mutableStateOf(false) }
 
     Box(Modifier.fillMaxSize()) {
         Column(
@@ -229,7 +245,6 @@ fun HomeScreen(
                         color = colors.textTertiary,
                     )
                 }
-                JkIconButton(Icons.Outlined.Key, "密码生成器", { showGenerator = true })
                 if (ui.total > 0) {
                     JkIconButton(
                         icon = if (settings.deckView) Icons.Outlined.ViewAgenda else Icons.Outlined.Layers,
@@ -238,7 +253,7 @@ fun HomeScreen(
                     )
                 }
                 JkIconButton(Icons.Outlined.Lock, "立即锁定", { container.vault.lock() })
-                JkIconButton(Icons.Outlined.Settings, "设置", onSettings)
+                JkIconButton(Icons.Outlined.MoreHoriz, "更多", { showMore = true })
             }
 
             if (ui.total > 0) {
@@ -280,7 +295,7 @@ fun HomeScreen(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center,
                 ) {
-                    BrandMark(size = 72.dp)
+                    EmptyIllustration()
                     Spacer(Modifier.height(Space.x3))
                     Text("匣子还是空的", style = JkType.title, color = colors.textPrimary)
                     Spacer(Modifier.height(Space.x1))
@@ -292,6 +307,31 @@ fun HomeScreen(
                     )
                     Spacer(Modifier.height(Space.x3))
                     JkButton("放进第一张卡片", { showTypes = true }, icon = Icons.Outlined.Add)
+                    Spacer(Modifier.height(Space.x4))
+                    // 首次使用的三步引导
+                    Column(verticalArrangement = Arrangement.spacedBy(Space.x1_5)) {
+                        for ((step, text) in listOf(
+                            "1" to "放进第一张卡片，11 种类型都有现成的字段",
+                            "2" to "在设置里开启指纹或面容，解锁更顺手",
+                            "3" to "导出一份加密备份，换手机也不怕",
+                        )) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = step,
+                                    style = JkType.caption,
+                                    color = colors.textSecondary,
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier
+                                        .size(20.dp)
+                                        .clip(CircleShape)
+                                        .background(colors.surfaceAlt)
+                                        .padding(top = 2.dp),
+                                )
+                                Spacer(Modifier.width(Space.x1_5))
+                                Text(text, style = JkType.small, color = colors.textSecondary)
+                            }
+                        }
+                    }
                     Spacer(Modifier.height(Space.x6))
                 }
             } else if (settings.deckView) {
@@ -399,6 +439,49 @@ fun HomeScreen(
     }
     if (showGenerator) {
         GeneratorSheet(onDismiss = { showGenerator = false })
+    }
+    if (showMore) {
+        JkSheet(onDismiss = { showMore = false }, title = "更多") {
+            JkRow(
+                title = "安全体检",
+                subtitle = if (ui.issues == 0) "弱密码、重复密码与到期提醒" else "发现 ${ui.issues} 处可以改进",
+                icon = Icons.Outlined.HealthAndSafety,
+                modifier = Modifier.clip(Radius.control),
+                onClick = {
+                    showMore = false
+                    onHealth()
+                },
+            )
+            JkRow(
+                title = "批量整理",
+                subtitle = "多选、排序与标签管理",
+                icon = Icons.Outlined.DoneAll,
+                modifier = Modifier.clip(Radius.control),
+                onClick = {
+                    showMore = false
+                    onOrganize()
+                },
+            )
+            JkRow(
+                title = "密码生成器",
+                icon = Icons.Outlined.Key,
+                modifier = Modifier.clip(Radius.control),
+                onClick = {
+                    showMore = false
+                    showGenerator = true
+                },
+            )
+            JkRow(
+                title = "设置",
+                subtitle = "解锁方式、自动锁定、加密备份",
+                icon = Icons.Outlined.Settings,
+                modifier = Modifier.clip(Radius.control),
+                onClick = {
+                    showMore = false
+                    onSettings()
+                },
+            )
+        }
     }
 }
 

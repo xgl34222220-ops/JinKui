@@ -37,7 +37,9 @@ import com.xiguli.jinkui.core.security.VaultState
 import com.xiguli.jinkui.ui.card.CardDetailScreen
 import com.xiguli.jinkui.ui.card.CardEditScreen
 import com.xiguli.jinkui.ui.components.LocalUserActivity
+import com.xiguli.jinkui.ui.health.HealthScreen
 import com.xiguli.jinkui.ui.home.HomeScreen
+import com.xiguli.jinkui.ui.organize.OrganizeScreen
 import com.xiguli.jinkui.ui.lock.LockScreen
 import com.xiguli.jinkui.ui.nav.Navigator
 import com.xiguli.jinkui.ui.nav.Screen
@@ -105,6 +107,8 @@ private fun MainNavigation() {
                     onOpen = { navigator.push(Screen.Detail(it)) },
                     onCreate = { navigator.push(Screen.Edit(null, it)) },
                     onSettings = { navigator.push(Screen.Settings) },
+                    onHealth = { navigator.push(Screen.Health) },
+                    onOrganize = { navigator.push(Screen.Organize) },
                 )
                 is Screen.Detail -> CardDetailScreen(
                     cardId = screen.cardId,
@@ -117,6 +121,12 @@ private fun MainNavigation() {
                     onClose = { navigator.pop() },
                 )
                 Screen.Settings -> SettingsScreen(onBack = { navigator.pop() })
+                Screen.Health -> HealthScreen(
+                    onBack = { navigator.pop() },
+                    onOpen = { navigator.push(Screen.Detail(it)) },
+                    onSettings = { navigator.push(Screen.Settings) },
+                )
+                Screen.Organize -> OrganizeScreen(onBack = { navigator.pop() })
             }
             }
         }

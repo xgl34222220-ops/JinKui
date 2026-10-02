@@ -11,7 +11,12 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.automirrored.outlined.Backspace
 import androidx.compose.material3.Icon
+import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.tween
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
+import kotlin.math.PI
+import kotlin.math.sin
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.Column
@@ -31,6 +36,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -72,6 +79,10 @@ class LockViewModel(private val container: AppContainer) : ViewModel() {
     var lockoutUntil by mutableLongStateOf(vault.lockoutUntil)
         private set
 
+    /** 每输错一次加一，界面据此播放一次“摇头”动画。 */
+    var errorTick by mutableIntStateOf(0)
+        private set
+
     fun submit(secret: String, usePin: Boolean, onFinished: (success: Boolean) -> Unit) {
         if (busy || secret.isEmpty()) return
         busy = true
@@ -98,6 +109,7 @@ class LockViewModel(private val container: AppContainer) : ViewModel() {
         when (result) {
             UnlockResult.Success -> error = null
             is UnlockResult.Wrong -> {
+                errorTick++
                 lockoutUntil = vault.lockoutUntil
                 val remaining = result.remaining
                 error = if (remaining != null) {
@@ -126,6 +138,15 @@ fun LockScreen() {
     var usePin by remember { mutableStateOf(pinEnabled) }
     var secret by remember { mutableStateOf("") }
     var showForgot by remember { mutableStateOf(false) }
+    var shake by remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(viewModel.errorTick) {
+        if (viewModel.errorTick > 0) {
+            animate(0f, 1f, animationSpec = tween(durationMillis = 380)) { value, _ ->
+                shake = sin(value * 4f * PI.toFloat()) * (1f - value) * 36f
+            }
+            shake = 0f
+        }
+    }
 
     val now by produceState(System.currentTimeMillis()) {
         while (true) {
@@ -203,7 +224,7 @@ fun LockScreen() {
         Spacer(Modifier.height(Space.x2))
 
         if (usePin) {
-            PinDots(count = secret.length)
+            Box(Modifier.graphicsLayer { translationX = shake }) { PinDots(count = secret.length) }
             Spacer(Modifier.height(Space.x4))
             PinPad(
                 enabled = canSubmit,
@@ -236,7 +257,9 @@ fun LockScreen() {
                 keyboardType = KeyboardType.Password,
                 imeAction = ImeAction.Done,
                 onImeAction = submit,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .graphicsLayer { translationX = shake },
             )
             Spacer(Modifier.height(Space.x2))
             JkButton(

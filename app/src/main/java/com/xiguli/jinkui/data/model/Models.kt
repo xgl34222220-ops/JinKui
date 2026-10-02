@@ -100,6 +100,8 @@ data class Card(
             append(title).append('\n')
             append(type.label).append('\n')
             tags.forEach { append(it).append('\n') }
+            // 非敏感字段的内容也能搜到（开户行、账号等）；敏感字段永远不参与搜索。
+            fields.forEach { if (!it.sensitive) append(it.value).append('\n') }
             append(note)
         }.lowercase()
         return tokens.all { haystack.contains(it) }
@@ -150,5 +152,5 @@ fun groupDigits(value: String): String {
 }
 
 /** 牌堆里的顺序：置顶在前，其余按名称。 */
-fun deckOrder(cards: List<Card>): List<Card> =
-    cards.sortedWith(compareByDescending<Card> { it.pinned }.thenBy { it.title.lowercase() })
+fun deckOrder(cards: List<Card>, order: SortOrder = SortOrder.TITLE): List<Card> =
+    sortCards(cards, order).sortedByDescending { it.pinned }
