@@ -41,11 +41,58 @@ class CardTemplatesTest {
     }
 
     @Test
+    fun ukeyIsAVirtualCreditCardNow() {
+        assertEquals("U 卡", CardType.UKEY.label)
+        assertEquals("ukey", CardType.UKEY.key)
+        val fields = CardTemplates.fieldsFor(CardType.UKEY)
+        assertEquals(listOf("卡号", "持卡人", "有效期", "安全码", "卡组织", "账单地址", "账单邮编", "发卡机构"), fields.map { it.label })
+        assertTrue(fields.first { it.label == "卡号" }.sensitive)
+        assertEquals(FieldKind.NUMBER, fields.first { it.label == "卡号" }.kind)
+        assertFalse(fields.any { it.label.contains("PIN") || it.label.contains("序列号") })
+
+        val card = filled(CardType.UKEY, mapOf("卡号" to "4111 1111 1111 4321", "持卡人" to "ZHANG SAN", "有效期" to "11/28", "安全码" to "987"))
+        val face = CardTemplates.face(card)
+        assertEquals("•••• 4321", face.primary)
+        assertEquals("有效期", face.secondaryLabel)
+        assertEquals("11/28", face.secondary)
+        assertFalse((face.primary + face.secondary).contains("987"))
+        assertFalse(face.primary.contains("4111"))
+    }
+
+    @Test
+    fun legacyHardwareKeyCardsKeepTheirFieldsAndStillRender() {
+        // 0.4.0 及更早按“硬件密钥”模板存下来的卡片
+        val legacy = Card(
+            id = "old",
+            type = CardType.UKEY,
+            title = "旧 U 盾",
+            fields = listOf(
+                CardField("1", "所属机构", "某银行", false),
+                CardField("2", "卡号 / 序列号", "SN-0012345678", true),
+                CardField("3", "有效期", "03/27", false, FieldKind.DATE),
+                CardField("4", "安全码", "456", true, FieldKind.NUMBER),
+                CardField("5", "PIN 码", "135246", true, FieldKind.PASSWORD),
+                CardField("6", "恢复码", "abcd-efgh", true, FieldKind.PASSWORD),
+            ),
+        )
+        val shown = CardTemplates.displayOrder(legacy)
+        assertEquals(6, shown.size)
+        assertEquals(legacy.fields.map { it.id }.toSet(), shown.map { it.id }.toSet())
+        assertEquals(listOf("有效期", "安全码"), shown.take(2).map { it.label })
+        val face = CardTemplates.face(legacy)
+        assertEquals("•••• 5678", face.primary)
+        assertEquals("03/27", face.secondary)
+        assertFalse(face.primary.contains("135246"))
+        // 保存的字段顺序与内容原样不动
+        assertEquals("所属机构", legacy.fields.first().label)
+    }
+
+    @Test
     fun secretsInTemplatesAreMarkedSensitive() {
         for (type in CardType.entries) {
             for (field in CardTemplates.fieldsFor(type)) {
                 if (field.kind == FieldKind.PASSWORD) assertTrue(field.sensitive)
-                if (field.label in setOf("安全码", "取款密码", "卡号 / 序列号", "公民身份号码", "护照号码")) assertTrue(field.sensitive)
+                if (field.label in setOf("安全码", "取款密码", "公民身份号码", "护照号码")) assertTrue(field.sensitive)
             }
         }
         val bank = CardTemplates.fieldsFor(CardType.BANK)

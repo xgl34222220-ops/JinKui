@@ -41,13 +41,16 @@ object CardTemplates {
             Spec("取款密码", sensitive = true, kind = FieldKind.NUMBER, hint = "6 位数字"),
             Spec("预留手机号", kind = FieldKind.PHONE),
         ),
+        // U 卡 = USDT 虚拟信用卡，字段按网上支付时要填的信息来排。
         CardType.UKEY to listOf(
-            Spec("所属机构", hint = "银行或发行方"),
-            Spec("卡号 / 序列号", sensitive = true),
+            Spec("卡号", sensitive = true, kind = FieldKind.NUMBER),
+            Spec("持卡人", hint = "卡面上的拼音或英文姓名"),
             Spec("有效期", kind = FieldKind.DATE, hint = "月/年，如 08/29"),
-            Spec("安全码", sensitive = true, kind = FieldKind.NUMBER),
-            Spec("PIN 码", sensitive = true, kind = FieldKind.PASSWORD),
-            Spec("恢复码", sensitive = true, kind = FieldKind.PASSWORD),
+            Spec("安全码", sensitive = true, kind = FieldKind.NUMBER, hint = "CVV / CVC，3 位"),
+            Spec("卡组织", hint = "Visa / Mastercard"),
+            Spec("账单地址"),
+            Spec("账单邮编"),
+            Spec("发卡机构", hint = "发卡平台或银行"),
         ),
         CardType.ID_CARD to listOf(
             Spec("姓名"),
@@ -144,7 +147,8 @@ object CardTemplates {
         val info = when (card.type) {
             CardType.LOGIN -> FaceInfo(card.plain("账号"))
             CardType.BANK -> FaceInfo(card.identifier("卡号"), "有效期", card.plain("有效期"))
-            CardType.UKEY -> FaceInfo(card.identifier("卡号 / 序列号", "卡号", "设备序列号"), "有效期", card.plain("有效期"))
+            // 后两个名字是早期“硬件密钥”模板里的字段，老卡片仍能在卡面上认出来。
+            CardType.UKEY -> FaceInfo(card.identifier("卡号", "卡号 / 序列号", "设备序列号"), "有效期", card.plain("有效期"))
             CardType.ID_CARD -> FaceInfo(card.identifier("公民身份号码", "证件号码"), "姓名", card.plain("姓名"))
             CardType.PASSPORT -> FaceInfo(card.identifier("护照号码"), "有效期至", card.plain("有效期至"))
             CardType.SOCIAL -> FaceInfo(card.identifier("社会保障号码"), "姓名", card.plain("姓名"))

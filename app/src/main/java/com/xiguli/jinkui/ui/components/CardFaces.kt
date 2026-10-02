@@ -54,7 +54,7 @@ class CardTheme(val start: Color, val end: Color, val accent: Color)
  * | --- | --- | --- |
  * | 登录密码 | 靛青 | 渐隐的密码点阵 |
  * | 银行卡 | 玄黑描金 | 斜纹底 + 金色芯片 |
- * | U 卡 / 硬件密钥 | 钢青 | 电路走线 + 触摸环 |
+ * | U 卡（虚拟卡） | 钢青 | 电路走线 + 节点环 + 描线芯片 |
  * | 身份证 | 证件蓝 | 防伪同心纹 + 人像框 |
  * | 护照 | 绛红烫金 | 经纬地球 |
  * | 社保卡 | 松绿 | 十字纹 |
@@ -229,6 +229,16 @@ private fun DrawScope.drawCardTexture(type: CardType, accent: Color, mini: Boole
             }
             drawCircle(color = accent, radius = 4f * u, center = Offset(cx, cy), alpha = 0.5f)
             // 从触摸环向左引出的三条走线，末端各有一个焊点
+            // 虚拟卡没有实体芯片：只描一个芯片轮廓，和银行卡的实心金色芯片区分开。
+            if (roomy) {
+                val left = 20f * u
+                val top = h * 0.36f
+                val cw = 42f * u
+                val ch = 31f * u
+                drawRoundRect(color = accent, topLeft = Offset(left, top), size = Size(cw, ch), cornerRadius = CornerRadius(6f * u, 6f * u), alpha = 0.5f, style = hair)
+                drawLine(color = accent.copy(alpha = 0.3f), start = Offset(left, top + ch / 2f), end = Offset(left + cw, top + ch / 2f), strokeWidth = u)
+                drawLine(color = accent.copy(alpha = 0.3f), start = Offset(left + cw / 2f, top), end = Offset(left + cw / 2f, top + ch), strokeWidth = u)
+            }
             val trace = accent.copy(alpha = 0.16f)
             for (i in 0..2) {
                 val y = cy - 18f * u + i * 18f * u

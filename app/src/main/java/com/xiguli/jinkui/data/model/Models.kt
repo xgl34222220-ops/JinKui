@@ -4,7 +4,8 @@ package com.xiguli.jinkui.data.model
 enum class CardType(val key: String, val label: String) {
     LOGIN("login", "登录密码"),
     BANK("bank", "银行卡"),
-    UKEY("ukey", "U 卡 / 硬件密钥"),
+    /** U 卡：USDT 虚拟信用卡。键名 "ukey" 沿用早期版本，改了会让已有卡片认不出类型。 */
+    UKEY("ukey", "U 卡"),
     ID_CARD("id_card", "身份证"),
     PASSPORT("passport", "护照"),
     SOCIAL("social", "社保卡"),

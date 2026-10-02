@@ -22,7 +22,7 @@ import androidx.compose.material.icons.outlined.Category
 import androidx.compose.material.icons.outlined.DirectionsCar
 import androidx.compose.material.icons.outlined.Flight
 import androidx.compose.material.icons.outlined.HealthAndSafety
-import androidx.compose.material.icons.outlined.Key
+import androidx.compose.material.icons.outlined.CreditCard
 import androidx.compose.material.icons.outlined.Loyalty
 import androidx.compose.material.icons.outlined.MeetingRoom
 import androidx.compose.material.icons.outlined.Password
@@ -62,7 +62,7 @@ val CardType.icon: ImageVector
     get() = when (this) {
         CardType.LOGIN -> Icons.Outlined.Password
         CardType.BANK -> Icons.Outlined.AccountBalance
-        CardType.UKEY -> Icons.Outlined.Key
+        CardType.UKEY -> Icons.Outlined.CreditCard
         CardType.ID_CARD -> Icons.Outlined.Badge
         CardType.PASSPORT -> Icons.Outlined.Flight
         CardType.SOCIAL -> Icons.Outlined.HealthAndSafety
