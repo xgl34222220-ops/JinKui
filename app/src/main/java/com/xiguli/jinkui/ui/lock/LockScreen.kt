@@ -53,6 +53,7 @@ import com.xiguli.jinkui.ui.LocalContainer
 import com.xiguli.jinkui.ui.components.BrandMark
 import com.xiguli.jinkui.ui.components.ButtonStyle
 import com.xiguli.jinkui.ui.components.JkButton
+import com.xiguli.jinkui.ui.components.JkDialog
 import com.xiguli.jinkui.ui.components.JkTextField
 import com.xiguli.jinkui.ui.nav.jkViewModel
 import com.xiguli.jinkui.ui.theme.Jk
@@ -124,6 +125,7 @@ fun LockScreen() {
     val biometricReady = remember { vault.biometricEnabled && BiometricHelper.isAvailable(context) }
     var usePin by remember { mutableStateOf(pinEnabled) }
     var secret by remember { mutableStateOf("") }
+    var showForgot by remember { mutableStateOf(false) }
 
     val now by produceState(System.currentTimeMillis()) {
         while (true) {
@@ -279,7 +281,30 @@ fun LockScreen() {
                 color = colors.textTertiary,
             )
         }
+        Spacer(Modifier.height(Space.x1))
+        JkButton("忘记主密码？", { showForgot = true }, style = ButtonStyle.Ghost, compact = true)
         Spacer(Modifier.height(Space.x4))
+    }
+
+    if (showForgot) {
+        JkDialog(
+            title = "忘记主密码",
+            onDismiss = { showForgot = false },
+            confirmText = "知道了",
+            dismissText = null,
+            onConfirm = { showForgot = false },
+        ) {
+            Text(
+                "金匮不保存主密码，也没有任何找回途径。数据只能用主密码解开，这正是它安全的原因。",
+                style = JkType.body,
+                color = colors.textSecondary,
+            )
+            Text(
+                "如果确实想不起来，唯一的办法是清空本机数据、重新创建保险库，再从以前导出的加密备份恢复。恢复时需要输入那份备份当时的主密码。",
+                style = JkType.small,
+                color = colors.textTertiary,
+            )
+        }
     }
 }
 

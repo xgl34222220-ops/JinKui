@@ -76,6 +76,7 @@ import com.xiguli.jinkui.AppContainer
 import com.xiguli.jinkui.data.model.Card
 import com.xiguli.jinkui.data.model.CardField
 import com.xiguli.jinkui.data.model.CardPalette
+import com.xiguli.jinkui.data.model.CardTemplates
 import com.xiguli.jinkui.data.model.CardType
 import com.xiguli.jinkui.data.model.deckOrder
 import com.xiguli.jinkui.ui.components.ButtonStyle
@@ -83,6 +84,7 @@ import com.xiguli.jinkui.ui.LocalContainer
 import com.xiguli.jinkui.ui.components.BrandMark
 import com.xiguli.jinkui.ui.components.CardFace
 import com.xiguli.jinkui.ui.components.CardTile
+import com.xiguli.jinkui.ui.components.ExpiryNote
 import com.xiguli.jinkui.ui.components.JkButton
 import com.xiguli.jinkui.ui.components.JkChip
 import com.xiguli.jinkui.ui.components.JkDivider
@@ -580,7 +582,9 @@ private fun DeckCard(
             title = card.title,
             type = card.type,
             colorIndex = card.color,
-            hint = card.faceHint,
+            hint = CardTemplates.face(card).primary,
+            secondaryLabel = CardTemplates.face(card).secondaryLabel,
+            secondary = CardTemplates.face(card).secondary,
             pinned = card.pinned,
             aspect = CARD_ASPECT,
             modifier = Modifier
@@ -688,7 +692,9 @@ private fun PinnedCards(cards: List<Card>, onOpen: (Card) -> Unit, onLongClick: 
             title = card.title,
             type = card.type,
             colorIndex = card.color,
-            hint = card.faceHint,
+            hint = CardTemplates.face(card).primary,
+            secondaryLabel = CardTemplates.face(card).secondaryLabel,
+            secondary = CardTemplates.face(card).secondary,
             pinned = true,
             modifier = Modifier
                 .padding(horizontal = Space.x2_5)
@@ -706,7 +712,9 @@ private fun PinnedCards(cards: List<Card>, onOpen: (Card) -> Unit, onLongClick: 
                     title = card.title,
                     type = card.type,
                     colorIndex = card.color,
-                    hint = card.faceHint,
+                    hint = CardTemplates.face(card).primary,
+                    secondaryLabel = CardTemplates.face(card).secondaryLabel,
+                    secondary = CardTemplates.face(card).secondary,
                     pinned = true,
                     modifier = Modifier
                         .width(288.dp)
@@ -741,13 +749,14 @@ private fun CardListItem(card: Card, divider: Boolean, onClick: () -> Unit, onLo
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    text = card.faceHint,
+                    text = CardTemplates.face(card).primary,
                     style = JkType.small,
                     color = colors.textTertiary,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+            ExpiryNote(card, Modifier.padding(start = Space.x1_5))
             val firstTag = card.tags.firstOrNull()
             if (firstTag != null) {
                 Text(

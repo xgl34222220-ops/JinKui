@@ -18,6 +18,7 @@ import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -33,8 +34,11 @@ import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.xiguli.jinkui.data.model.Card
 import com.xiguli.jinkui.data.model.CardPalette
+import com.xiguli.jinkui.data.model.Expiry
 import com.xiguli.jinkui.data.model.CardType
+import com.xiguli.jinkui.ui.theme.Jk
 import com.xiguli.jinkui.ui.theme.JkType
 import com.xiguli.jinkui.ui.theme.Radius
 import com.xiguli.jinkui.ui.theme.Space
@@ -93,6 +97,8 @@ fun CardFace(
     colorIndex: Int,
     hint: String,
     modifier: Modifier = Modifier,
+    secondaryLabel: String = "",
+    secondary: String = "",
     pinned: Boolean = false,
     aspect: Float = 1.586f,
     mini: Boolean = false,
@@ -132,21 +138,39 @@ fun CardFace(
                     }
                 }
                 Spacer(Modifier.weight(1f))
-                Text(
-                    text = hint,
-                    style = JkType.mono.copy(fontSize = JkType.small.fontSize),
-                    color = ink.copy(alpha = 0.74f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Spacer(Modifier.height(Space.x05))
-                Text(
-                    text = title.ifBlank { "未命名" },
-                    style = JkType.title.copy(fontFamily = FontFamily.Serif),
-                    color = ink,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            text = hint,
+                            style = JkType.mono.copy(fontSize = JkType.small.fontSize),
+                            color = ink.copy(alpha = 0.74f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Spacer(Modifier.height(Space.x05))
+                        Text(
+                            text = title.ifBlank { "未命名" },
+                            style = JkType.title.copy(fontFamily = FontFamily.Serif),
+                            color = ink,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    // 右下角的次要信息：有效期、姓名、准驾车型……各类型不同。
+                    if (secondary.isNotBlank()) {
+                        Spacer(Modifier.width(Space.x1_5))
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text(secondaryLabel, style = JkType.caption, color = theme.accent, maxLines = 1)
+                            Text(
+                                text = secondary,
+                                style = JkType.mono.copy(fontSize = JkType.small.fontSize),
+                                color = ink.copy(alpha = 0.92f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                }
             }
         }
     }
@@ -364,4 +388,22 @@ private fun DrawScope.drawCardTexture(type: CardType, accent: Color, mini: Boole
             drawLine(color = accent.copy(alpha = 0.55f), start = Offset(w * 0.46f, h * 0.30f), end = Offset(w, h * 0.30f), strokeWidth = 1.2f * u)
         }
     }
+}
+
+/** 到期提醒：有效期在 90 天内或已过期时显示一行小字，其余情况什么都不画。 */
+@Composable
+fun ExpiryNote(card: Card, modifier: Modifier = Modifier) {
+    val days = remember(card) { Expiry.daysLeft(card, java.time.LocalDate.now()) } ?: return
+    if (days > Expiry.WARN_DAYS) return
+    Text(
+        text = when {
+            days < 0 -> "已过期"
+            days == 0L -> "今天到期"
+            else -> "$days 天后到期"
+        },
+        style = JkType.caption,
+        color = if (days < 0) Jk.colors.danger else Jk.colors.accent,
+        maxLines = 1,
+        modifier = modifier,
+    )
 }

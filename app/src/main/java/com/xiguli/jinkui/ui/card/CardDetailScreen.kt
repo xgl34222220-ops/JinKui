@@ -59,6 +59,7 @@ import com.xiguli.jinkui.data.model.groupDigits
 import com.xiguli.jinkui.ui.LocalContainer
 import com.xiguli.jinkui.ui.components.ButtonStyle
 import com.xiguli.jinkui.ui.components.CardFace
+import com.xiguli.jinkui.ui.components.ExpiryNote
 import com.xiguli.jinkui.ui.components.JkButton
 import com.xiguli.jinkui.ui.components.JkCard
 import com.xiguli.jinkui.ui.components.JkDialog
@@ -213,7 +214,9 @@ fun CardDetailScreen(cardId: String, onBack: () -> Unit, onEdit: () -> Unit) {
                 title = current.title,
                 type = current.type,
                 colorIndex = current.color,
-                hint = current.faceHint,
+                hint = CardTemplates.face(current).primary,
+                secondaryLabel = CardTemplates.face(current).secondaryLabel,
+                secondary = CardTemplates.face(current).secondary,
                 pinned = current.pinned,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -237,11 +240,39 @@ fun CardDetailScreen(cardId: String, onBack: () -> Unit, onEdit: () -> Unit) {
                 }
             }
 
-            Spacer(Modifier.height(Space.x2))
-            val visibleFields = current.fields.filter { it.value.isNotBlank() }
+            ExpiryNote(current, Modifier.padding(start = Space.x05, top = Space.x1_5))
+            // 按该类型模板的重要程度排序展示；保存的顺序不变。
+            val visibleFields = CardTemplates.displayOrder(current).filter { it.value.isNotBlank() }
+            val sensitiveIds = visibleFields.filter { it.sensitive }.map { it.id }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = Space.x05, top = Space.x1_5),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("信息", style = JkType.small, color = colors.textTertiary, modifier = Modifier.weight(1f))
+                if (sensitiveIds.isNotEmpty()) {
+                    val allShown = revealed.containsAll(sensitiveIds)
+                    JkButton(
+                        text = if (allShown) "全部隐藏" else "全部显示",
+                        style = ButtonStyle.Ghost,
+                        compact = true,
+                        onClick = {
+                            revealed.clear()
+                            if (!allShown) revealed.addAll(sensitiveIds)
+                        },
+                    )
+                } else {
+                    Spacer(Modifier.height(36.dp))
+                }
+            }
             if (visibleFields.isEmpty()) {
                 JkCard(Modifier.fillMaxWidth()) {
-                    Text("还没有填写任何字段", style = JkType.small, color = colors.textTertiary)
+                    Text("这张卡片还是空的", style = JkType.bodyStrong, color = colors.textPrimary)
+                    Spacer(Modifier.height(Space.x05))
+                    Text("填上卡号、密码这些信息后，就能在这里一键复制。", style = JkType.small, color = colors.textTertiary)
+                    Spacer(Modifier.height(Space.x2))
+                    JkButton("去填写", onEdit, style = ButtonStyle.Secondary, compact = true)
                 }
             } else {
                 JkCard(Modifier.fillMaxWidth(), padding = PaddingValues(vertical = Space.x05)) {
@@ -249,6 +280,7 @@ fun CardDetailScreen(cardId: String, onBack: () -> Unit, onEdit: () -> Unit) {
                         if (index > 0) JkDivider(inset = Space.x2)
                         FieldRow(
                             field = field,
+                            emphasis = index == 0,
                             shown = !field.sensitive || field.id in revealed,
                             onToggle = {
                                 if (field.id in revealed) revealed.remove(field.id) else revealed.add(field.id)
@@ -374,7 +406,7 @@ fun CardDetailScreen(cardId: String, onBack: () -> Unit, onEdit: () -> Unit) {
 
 /** 一行字段：点整行即复制；敏感字段默认打码，点眼睛才显示。 */
 @Composable
-private fun FieldRow(field: CardField, shown: Boolean, onToggle: () -> Unit, onCopy: () -> Unit) {
+private fun FieldRow(field: CardField, shown: Boolean, onToggle: () -> Unit, onCopy: () -> Unit, emphasis: Boolean = false) {
     val colors = Jk.colors
     val monospace = field.sensitive || field.kind == FieldKind.NUMBER || field.kind == FieldKind.PASSWORD
     val display = if (field.kind == FieldKind.NUMBER) groupDigits(field.value) else field.value
@@ -390,7 +422,10 @@ private fun FieldRow(field: CardField, shown: Boolean, onToggle: () -> Unit, onC
             Spacer(Modifier.height(Space.x05))
             Text(
                 text = if (shown) display else MASK,
-                style = if (monospace) JkType.mono else JkType.body,
+                // 第一行是这张卡片最要紧的信息，字号放大一级。
+                style = (if (monospace) JkType.mono else JkType.body).let {
+                    if (emphasis) it.copy(fontSize = JkType.title.fontSize, lineHeight = JkType.title.lineHeight) else it
+                },
                 color = if (shown) colors.textPrimary else colors.textSecondary,
             )
         }

@@ -25,6 +25,8 @@ data class AppSettings(
     val keepHistory: Boolean = true,
     /** 首页用牌堆还是列表。纯界面偏好。 */
     val deckView: Boolean = true,
+    /** 上次成功导出加密备份的时间；0 表示还没备份过。 */
+    val lastBackupAt: Long = 0L,
 )
 
 /** 非敏感偏好设置。主题等需要在解锁前读取，因此不放进加密库。 */
@@ -44,6 +46,7 @@ class SettingsRepository(context: Context) {
             .putBoolean(KEY_WIPE, next.wipeOnFailure)
             .putBoolean(KEY_HISTORY, next.keepHistory)
             .putBoolean(KEY_DECK, next.deckView)
+            .putLong(KEY_LAST_BACKUP, next.lastBackupAt)
             .commit()
         state.value = next
     }
@@ -57,6 +60,7 @@ class SettingsRepository(context: Context) {
             wipeOnFailure = prefs.getBoolean(KEY_WIPE, defaults.wipeOnFailure),
             keepHistory = prefs.getBoolean(KEY_HISTORY, defaults.keepHistory),
             deckView = prefs.getBoolean(KEY_DECK, defaults.deckView),
+            lastBackupAt = prefs.getLong(KEY_LAST_BACKUP, defaults.lastBackupAt),
         )
     }
 
@@ -67,6 +71,7 @@ class SettingsRepository(context: Context) {
         private const val KEY_WIPE = "wipe_on_failure"
         private const val KEY_HISTORY = "keep_history"
         private const val KEY_DECK = "home_deck_view"
+        private const val KEY_LAST_BACKUP = "last_backup_at"
 
         val AUTO_LOCK_OPTIONS = listOf(0 to "立即", 30 to "30 秒", 60 to "1 分钟", 300 to "5 分钟", 600 to "10 分钟")
         val CLIPBOARD_OPTIONS = listOf(15 to "15 秒", 30 to "30 秒", 60 to "1 分钟", 120 to "2 分钟")

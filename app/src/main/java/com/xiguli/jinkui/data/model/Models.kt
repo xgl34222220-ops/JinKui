@@ -25,7 +25,8 @@ enum class FieldKind(val key: String) {
     PASSWORD("password"),
     NUMBER("number"),
     DATE("date"),
-    URL("url");
+    URL("url"),
+    PHONE("phone");
 
     companion object {
         fun of(key: String?): FieldKind = entries.firstOrNull { it.key == key } ?: TEXT

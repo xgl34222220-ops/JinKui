@@ -57,6 +57,7 @@ import com.xiguli.jinkui.core.security.findFragmentActivity
 import com.xiguli.jinkui.data.repo.SettingsRepository
 import com.xiguli.jinkui.data.repo.ThemeMode
 import com.xiguli.jinkui.ui.LocalContainer
+import com.xiguli.jinkui.ui.card.formatTime
 import com.xiguli.jinkui.ui.components.BrandMark
 import com.xiguli.jinkui.ui.components.JkBadge
 import com.xiguli.jinkui.ui.components.JkCard
@@ -117,6 +118,7 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
     fun export(target: Uri, password: String, onDone: () -> Unit) = launchBusy {
         try {
             val count = container.backup.export(target, password)
+            container.settings.update { it.copy(lastBackupAt = System.currentTimeMillis()) }
             container.messages.show("已导出 $count 张卡片的加密备份")
             onDone()
         } catch (e: WrongSecretException) {
@@ -329,7 +331,11 @@ fun SettingsScreen(onBack: () -> Unit) {
             JkCard(Modifier.fillMaxWidth(), padding = PaddingValues(vertical = Space.x05)) {
                 JkRow(
                     title = "导出加密备份",
-                    subtitle = "生成 .jkbak 文件，需要主密码才能解开",
+                    subtitle = if (settings.lastBackupAt > 0L) {
+                        "上次备份：${formatTime(settings.lastBackupAt)}"
+                    } else {
+                        "还没有备份过。生成的 .jkbak 文件需要主密码才能解开"
+                    },
                     icon = Icons.Outlined.FileUpload,
                     onClick = {
                         container.lock.holdForExternalActivity()
@@ -518,6 +524,9 @@ private fun PasswordDialog(
             imeAction = ImeAction.Done,
             error = viewModel.dialogError,
         )
+        if (viewModel.busy) {
+            Text("正在用主密码派生密钥并校验，通常需要几秒…", style = JkType.caption, color = Jk.colors.textTertiary)
+        }
     }
 }
 

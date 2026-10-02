@@ -37,6 +37,7 @@ import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.Notes
 import androidx.compose.material.icons.outlined.Numbers
 import androidx.compose.material.icons.outlined.Password
+import androidx.compose.material.icons.outlined.Phone
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.LockOpen
 import androidx.compose.material.icons.outlined.Visibility
@@ -147,6 +148,16 @@ class CardEditViewModel(
 
     fun addField(kind: FieldKind) {
         fields.add(DraftField(CardTemplates.newId(), "", "", sensitive = kind == FieldKind.PASSWORD, kind = kind))
+    }
+
+    /** 这张卡片比它所属类型的模板少了几个字段（按字段名比对）。 */
+    val missingTemplateCount: Int
+        get() = CardTemplates.missingFields(type, fields.map { CardField(it.id, it.label, it.value, it.sensitive, it.kind) }).size
+
+    /** 把模板里缺的字段补到末尾；已有字段和内容不动。 */
+    fun addMissingTemplateFields() {
+        val missing = CardTemplates.missingFields(type, fields.map { CardField(it.id, it.label, it.value, it.sensitive, it.kind) })
+        missing.forEach { fields.add(DraftField(it.id, it.label, "", it.sensitive, it.kind)) }
     }
 
     fun removeExisting(attachment: Attachment) {
@@ -346,6 +357,7 @@ fun CardEditScreen(cardId: String?, newType: CardType?, onClose: () -> Unit) {
                 for (field in viewModel.fields.toList()) {
                     FieldEditor(
                         field = field,
+                        hint = CardTemplates.hintFor(viewModel.type, field.label),
                         onRemove = { viewModel.fields.remove(field) },
                         onGenerate = { generatorFor = field },
                     )
@@ -359,6 +371,17 @@ fun CardEditScreen(cardId: String?, newType: CardType?, onClose: () -> Unit) {
                 onClick = { pickKind = true },
                 modifier = Modifier.fillMaxWidth(),
             )
+            val missing = viewModel.missingTemplateCount
+            if (!viewModel.isNew && missing > 0) {
+                Spacer(Modifier.height(Space.x05))
+                JkButton(
+                    text = "补上「${viewModel.type.label}」模板里缺的 $missing 个字段",
+                    style = ButtonStyle.Ghost,
+                    compact = true,
+                    onClick = viewModel::addMissingTemplateFields,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
 
             JkSectionLabel("备注")
             JkTextField(
@@ -436,7 +459,8 @@ fun CardEditScreen(cardId: String?, newType: CardType?, onClose: () -> Unit) {
             val kinds = listOf(
                 Triple(FieldKind.TEXT, "文本", Icons.Outlined.Notes),
                 Triple(FieldKind.PASSWORD, "密码（默认打码，可一键生成）", Icons.Outlined.Password),
-                Triple(FieldKind.NUMBER, "数字（卡号、手机号）", Icons.Outlined.Numbers),
+                Triple(FieldKind.NUMBER, "数字（卡号、编号）", Icons.Outlined.Numbers),
+                Triple(FieldKind.PHONE, "电话", Icons.Outlined.Phone),
                 Triple(FieldKind.DATE, "日期", Icons.Outlined.CalendarMonth),
                 Triple(FieldKind.URL, "网址", Icons.Outlined.Link),
             )
@@ -468,7 +492,7 @@ fun CardEditScreen(cardId: String?, newType: CardType?, onClose: () -> Unit) {
  * 右上角的小锁切换“敏感”——锁上后内容默认打码。
  */
 @Composable
-private fun FieldEditor(field: DraftField, onRemove: () -> Unit, onGenerate: () -> Unit) {
+private fun FieldEditor(field: DraftField, hint: String, onRemove: () -> Unit, onGenerate: () -> Unit) {
     val colors = Jk.colors
     var revealed by remember { mutableStateOf(false) }
     Column(
@@ -506,12 +530,13 @@ private fun FieldEditor(field: DraftField, onRemove: () -> Unit, onGenerate: () 
             JkBareField(
                 value = field.value,
                 onValueChange = { field.value = it },
-                placeholder = if (field.sensitive) "内容（保存后默认打码）" else "内容",
+                placeholder = hint.ifBlank { if (field.sensitive) "内容（保存后默认打码）" else "内容" },
                 textStyle = if (field.sensitive || field.kind == FieldKind.NUMBER) JkType.mono else JkType.body,
                 hidden = field.sensitive && !revealed,
                 keyboardType = when (field.kind) {
                     FieldKind.NUMBER -> if (field.sensitive) KeyboardType.NumberPassword else KeyboardType.Number
                     FieldKind.URL -> KeyboardType.Uri
+                    FieldKind.PHONE -> KeyboardType.Phone
                     FieldKind.PASSWORD -> KeyboardType.Password
                     else -> if (field.sensitive) KeyboardType.Password else KeyboardType.Text
                 },
