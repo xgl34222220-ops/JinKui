@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 金匮：一只带锁孔的匣子 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:pathData="M36,48h36a4,4 0 0 1 4,4v18a4,4 0 0 1 -4,4h-36a4,4 0 0 1 -4,-4v-18a4,4 0 0 1 4,-4z"
+        android:strokeColor="@color/icon_gold"
+        android:strokeWidth="3.5"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M36,48v-4a8,8 0 0 1 8,-8h20a8,8 0 0 1 8,8v4"
+        android:strokeColor="@color/icon_gold"
+        android:strokeWidth="3.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M54,57a3.2,3.2 0 1 1 0,6.4a3.2,3.2 0 1 1 0,-6.4z"
+        android:fillColor="@color/icon_gold" />
+    <path
+        android:pathData="M54,62v5"
+        android:strokeColor="@color/icon_gold"
+        android:strokeWidth="3"
+        android:strokeLineCap="round" />
+</vector>
