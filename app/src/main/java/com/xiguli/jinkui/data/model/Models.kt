@@ -79,6 +79,18 @@ data class Card(
             return subtitle
         }
 
+    /**
+     * 最值得“一键复制”的字段：一个明文字段（账号、卡主等，不取网址）加一个敏感字段（密码、卡号）。
+     * 都没有时退而取第一个有内容的字段。
+     */
+    val quickCopyFields: List<CardField>
+        get() {
+            val filled = fields.filter { it.value.isNotBlank() }
+            val plain = filled.firstOrNull { !it.sensitive && it.kind != FieldKind.URL }
+            val secret = filled.firstOrNull { it.sensitive }
+            return listOfNotNull(plain, secret).ifEmpty { filled.take(1) }
+        }
+
     fun matches(query: String): Boolean {
         val tokens = query.trim().lowercase().split(Regex("\\s+")).filter { it.isNotEmpty() }
         if (tokens.isEmpty()) return true
@@ -134,3 +146,7 @@ fun groupDigits(value: String): String {
     if (compact.length < 12 || !compact.all(Char::isDigit)) return value
     return compact.chunked(4).joinToString(" ")
 }
+
+/** 牌堆里的顺序：置顶在前，其余按名称。 */
+fun deckOrder(cards: List<Card>): List<Card> =
+    cards.sortedWith(compareByDescending<Card> { it.pinned }.thenBy { it.title.lowercase() })

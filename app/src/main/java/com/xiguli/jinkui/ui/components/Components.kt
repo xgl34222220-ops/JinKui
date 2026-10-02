@@ -226,6 +226,7 @@ fun JkButton(
             style = if (compact) JkType.small else JkType.bodyStrong,
             color = if (active || style == ButtonStyle.Primary) foreground else colors.textTertiary,
             maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }

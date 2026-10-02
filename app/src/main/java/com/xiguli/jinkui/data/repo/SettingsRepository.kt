@@ -23,6 +23,8 @@ data class AppSettings(
     /** 连续输错达到上限后清空全部数据。默认开启。 */
     val wipeOnFailure: Boolean = true,
     val keepHistory: Boolean = true,
+    /** 首页用牌堆还是列表。纯界面偏好。 */
+    val deckView: Boolean = true,
 )
 
 /** 非敏感偏好设置。主题等需要在解锁前读取，因此不放进加密库。 */
@@ -41,6 +43,7 @@ class SettingsRepository(context: Context) {
             .putString(KEY_THEME, next.theme.key)
             .putBoolean(KEY_WIPE, next.wipeOnFailure)
             .putBoolean(KEY_HISTORY, next.keepHistory)
+            .putBoolean(KEY_DECK, next.deckView)
             .commit()
         state.value = next
     }
@@ -53,6 +56,7 @@ class SettingsRepository(context: Context) {
             theme = ThemeMode.of(prefs.getString(KEY_THEME, null)),
             wipeOnFailure = prefs.getBoolean(KEY_WIPE, defaults.wipeOnFailure),
             keepHistory = prefs.getBoolean(KEY_HISTORY, defaults.keepHistory),
+            deckView = prefs.getBoolean(KEY_DECK, defaults.deckView),
         )
     }
 
@@ -62,6 +66,7 @@ class SettingsRepository(context: Context) {
         private const val KEY_THEME = "theme"
         private const val KEY_WIPE = "wipe_on_failure"
         private const val KEY_HISTORY = "keep_history"
+        private const val KEY_DECK = "home_deck_view"
 
         val AUTO_LOCK_OPTIONS = listOf(0 to "立即", 30 to "30 秒", 60 to "1 分钟", 300 to "5 分钟", 600 to "10 分钟")
         val CLIPBOARD_OPTIONS = listOf(15 to "15 秒", 30 to "30 秒", 60 to "1 分钟", 120 to "2 分钟")

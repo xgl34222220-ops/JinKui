@@ -5,7 +5,14 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -30,6 +37,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.ChevronLeft
+import androidx.compose.material.icons.outlined.ChevronRight
+import androidx.compose.material.icons.outlined.Layers
+import androidx.compose.material.icons.outlined.ViewAgenda
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Key
@@ -41,12 +52,20 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.GraphicsLayerScope
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -58,6 +77,8 @@ import com.xiguli.jinkui.data.model.Card
 import com.xiguli.jinkui.data.model.CardField
 import com.xiguli.jinkui.data.model.CardPalette
 import com.xiguli.jinkui.data.model.CardType
+import com.xiguli.jinkui.data.model.deckOrder
+import com.xiguli.jinkui.ui.components.ButtonStyle
 import com.xiguli.jinkui.ui.LocalContainer
 import com.xiguli.jinkui.ui.components.BrandMark
 import com.xiguli.jinkui.ui.components.CardFace
@@ -93,10 +114,25 @@ data class HomeUi(
     val pinned: List<Card> = emptyList(),
     val recent: List<Card> = emptyList(),
     val all: List<Card> = emptyList(),
+    /** 牌堆里的卡：筛选时是结果，否则是全部（置顶在前）。 */
+    val deck: List<Card> = emptyList(),
 )
 
 class HomeViewModel(private val container: AppContainer) : ViewModel() {
     val query = MutableStateFlow("")
+
+    /** 牌堆当前最上面那张的 ID。按 ID 记而不是按序号记，列表增删后位置不会错乱。 */
+    var deckCardId by mutableStateOf<String?>(null)
+
+    fun setQuery(text: String) {
+        query.value = text
+        deckCardId = null
+    }
+
+    fun setFilter(key: String?) {
+        filter.value = key
+        deckCardId = null
+    }
 
     /** 当前筛选项的键："t:类型" 或 "g:标签"；null 为全部。 */
     val filter = MutableStateFlow<String?>(null)
@@ -112,10 +148,7 @@ class HomeViewModel(private val container: AppContainer) : ViewModel() {
             tags.map { "g:$it" to "#$it" }
         val active = selected?.takeIf { key -> filters.any { it.first == key } }
         if (text.isNotBlank() || active != null) {
-            HomeUi(
-                total = cards.size,
-                filters = filters,
-                results = sorted
+            val results = sorted
                     .filter { card ->
                         val inFilter = when {
                             active == null -> true
@@ -124,8 +157,8 @@ class HomeViewModel(private val container: AppContainer) : ViewModel() {
                         }
                         inFilter && card.matches(text)
                     }
-                    .sortedByDescending { it.pinned },
-            )
+                    .sortedByDescending { it.pinned }
+            HomeUi(total = cards.size, filters = filters, results = results, deck = results)
         } else {
             HomeUi(
                 total = cards.size,
@@ -135,6 +168,7 @@ class HomeViewModel(private val container: AppContainer) : ViewModel() {
                     .sortedByDescending { it.lastUsedAt }
                     .take(3),
                 all = sorted,
+                deck = deckOrder(cards),
             )
         }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, HomeUi())
@@ -165,6 +199,8 @@ fun HomeScreen(
     val ui by viewModel.ui.collectAsStateWithLifecycle()
     val query by viewModel.query.collectAsStateWithLifecycle()
     val filter by viewModel.filter.collectAsStateWithLifecycle()
+    val settings by container.settings.flow.collectAsStateWithLifecycle()
+    val deckIndex = ui.deck.indexOfFirst { it.id == viewModel.deckCardId }.coerceAtLeast(0)
     val colors = Jk.colors
 
     var quickCard by remember { mutableStateOf<Card?>(null) }
@@ -192,6 +228,13 @@ fun HomeScreen(
                     )
                 }
                 JkIconButton(Icons.Outlined.Key, "密码生成器", { showGenerator = true })
+                if (ui.total > 0) {
+                    JkIconButton(
+                        icon = if (settings.deckView) Icons.Outlined.ViewAgenda else Icons.Outlined.Layers,
+                        description = if (settings.deckView) "切换为列表" else "切换为牌堆",
+                        onClick = { container.settings.update { it.copy(deckView = !it.deckView) } },
+                    )
+                }
                 JkIconButton(Icons.Outlined.Lock, "立即锁定", { container.vault.lock() })
                 JkIconButton(Icons.Outlined.Settings, "设置", onSettings)
             }
@@ -199,13 +242,13 @@ fun HomeScreen(
             if (ui.total > 0) {
                 JkTextField(
                     value = query,
-                    onValueChange = { viewModel.query.value = it },
+                    onValueChange = { viewModel.setQuery(it) },
                     placeholder = "搜索名称、标签或备注",
                     leading = Icons.Outlined.Search,
                     modifier = Modifier.padding(horizontal = Space.x2_5),
                     trailing = {
                         if (query.isNotEmpty()) {
-                            JkIconButton(Icons.Outlined.Close, "清除", { viewModel.query.value = "" })
+                            JkIconButton(Icons.Outlined.Close, "清除", { viewModel.setQuery("") })
                         } else {
                             Spacer(Modifier.width(Space.x1_5))
                         }
@@ -219,9 +262,9 @@ fun HomeScreen(
                     horizontalArrangement = Arrangement.spacedBy(Space.x1),
                     modifier = Modifier.padding(top = Space.x1_5),
                 ) {
-                    item { JkChip("全部", filter == null, { viewModel.filter.value = null }) }
+                    item { JkChip("全部", filter == null, { viewModel.setFilter(null) }) }
                     items(ui.filters, key = { it.first }) { (key, label) ->
-                        JkChip(label, filter == key, { viewModel.filter.value = if (filter == key) null else key })
+                        JkChip(label, filter == key, { viewModel.setFilter(if (filter == key) null else key) })
                     }
                 }
             }
@@ -248,6 +291,29 @@ fun HomeScreen(
                     Spacer(Modifier.height(Space.x3))
                     JkButton("放进第一张卡片", { showTypes = true }, icon = Icons.Outlined.Add)
                     Spacer(Modifier.height(Space.x6))
+                }
+            } else if (settings.deckView) {
+                if (ui.deck.isEmpty()) {
+                    JkEmpty("没有匹配的卡片", "试试别的关键词，或者换一个筛选项。", Modifier.weight(1f))
+                } else {
+                    val current = ui.deck[deckIndex]
+                    CardDeck(
+                        cards = ui.deck,
+                        index = deckIndex,
+                        onIndexChange = { viewModel.deckCardId = ui.deck[it].id },
+                        onOpen = { onOpen(it.id) },
+                        onLongClick = { quickCard = it },
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                            .padding(top = Space.x1_5),
+                    )
+                    DeckActions(
+                        card = current,
+                        onCopy = { viewModel.copy(current, it) },
+                        onOpen = { onOpen(current.id) },
+                        onCreate = { showTypes = true },
+                    )
                 }
             } else {
                 LazyColumn(
@@ -286,7 +352,7 @@ fun HomeScreen(
             }
         }
 
-        if (ui.total > 0) {
+        if (ui.total > 0 && !settings.deckView) {
             Row(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
@@ -342,6 +408,275 @@ private fun SectionHeader(text: String) {
         color = Jk.colors.textTertiary,
         modifier = Modifier.padding(start = Space.x2_5, top = Space.x2_5, bottom = Space.x1),
     )
+}
+
+private const val DECK_VISIBLE = 3
+private const val CARD_ASPECT = 1.586f
+private val DECK_PEEK = 12.dp
+
+/** 一张牌在牌堆第 [depth] 层时的姿态：每深一层缩小 5%、上移一个露边高度；超出可见层数后淡出。 */
+private fun GraphicsLayerScope.deckPose(depth: Float, peekPx: Float) {
+    val level = depth.coerceAtLeast(0f)
+    val scale = 1f - 0.05f * level
+    transformOrigin = TransformOrigin(0.5f, 0f)
+    scaleX = scale
+    scaleY = scale
+    translationY = -peekPx * level
+    alpha = (DECK_VISIBLE + 1f - level).coerceIn(0f, 1f)
+}
+
+/**
+ * 牌堆：当前卡完整展示，后面的卡从上方露出边缘。
+ *
+ *  - 左滑：最上面的牌跟手移出并回到牌底，后面的牌向前补位；
+ *  - 右滑：上一张从左侧滑回最上面，其余的牌后退一层；
+ *  - 循环浏览，松手不到位则回弹。
+ *
+ * 位移、缩放、旋转都写在 graphicsLayer 里，拖动过程只重绘图层，不触发重组。
+ */
+@Composable
+private fun CardDeck(
+    cards: List<Card>,
+    index: Int,
+    onIndexChange: (Int) -> Unit,
+    onOpen: (Card) -> Unit,
+    onLongClick: (Card) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val count = cards.size
+    val density = LocalDensity.current
+    val scope = rememberCoroutineScope()
+    var drag by remember { mutableFloatStateOf(0f) }
+    var animating by remember { mutableStateOf(false) }
+
+    BoxWithConstraints(modifier = modifier, contentAlignment = Alignment.TopCenter) {
+        val stackSpace = DECK_PEEK * DECK_VISIBLE
+        val indicatorSpace = 52.dp
+        val byWidth = maxWidth - Space.x2_5 * 2
+        val byHeight = (maxHeight - stackSpace - indicatorSpace) * CARD_ASPECT
+        // 屏幕极矮时也保证一个可用的最小宽度，避免算出负数。
+        val cardWidth = maxOf(minOf(byWidth, byHeight, 440.dp), 160.dp)
+        val widthPx = with(density) { cardWidth.toPx() }
+        val peekPx = with(density) { DECK_PEEK.toPx() }
+        val travel = widthPx * 1.2f
+
+        // direction：1 下一张，-1 上一张，0 回弹。
+        val settle: suspend (Int, Float) -> Unit = { direction, velocity ->
+            animating = true
+            try {
+                if (direction == 0) {
+                    animate(drag, 0f, velocity, spring(dampingRatio = 0.78f, stiffness = 380f)) { value, _ -> drag = value }
+                } else {
+                    animate(drag, -direction * travel, velocity, tween(durationMillis = 240)) { value, _ -> drag = value }
+                    onIndexChange((index + direction).mod(count))
+                    drag = 0f
+                }
+            } finally {
+                animating = false
+            }
+        }
+        val dragState = rememberDraggableState { delta -> if (!animating) drag += delta }
+
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(
+                modifier = Modifier
+                    .padding(top = stackSpace)
+                    .width(cardWidth)
+                    .draggable(
+                        state = dragState,
+                        orientation = Orientation.Horizontal,
+                        enabled = count > 1 && !animating,
+                        onDragStopped = { velocity ->
+                            val direction = when {
+                                drag < -widthPx * 0.25f || velocity < -900f -> 1
+                                drag > widthPx * 0.25f || velocity > 900f -> -1
+                                else -> 0
+                            }
+                            settle(direction, velocity)
+                        },
+                    ),
+            ) {
+                val previousIndex = (index - 1).mod(count)
+                // 由远及近绘制。最深的一张平时不可见，滑动时才淡入补位。
+                for (depth in (DECK_VISIBLE + 1) downTo 1) {
+                    if (depth < count) {
+                        val listIndex = (index + depth).mod(count)
+                        val card = cards[listIndex]
+                        key(card.id) {
+                            DeckCard(
+                                card = card,
+                                depth = { depth + (drag / travel).coerceIn(-1f, 1f) },
+                                modifier = Modifier.graphicsLayer {
+                                    val shift = (drag / travel).coerceIn(-1f, 1f)
+                                    deckPose(depth + shift, peekPx)
+                                    // 牌很少时，“上一张”同时也在牌堆后面：它滑回最上面的过程中，后面的那个分身淡出。
+                                    if (listIndex == previousIndex && shift > 0f) alpha *= 1f - shift
+                                },
+                            )
+                        }
+                    }
+                }
+
+                val front = cards[index]
+                key(front.id) {
+                    DeckCard(
+                        card = front,
+                        depth = { (drag / travel).coerceIn(0f, 1f) },
+                        onClick = { onOpen(front) },
+                        onLongClick = { onLongClick(front) },
+                        modifier = Modifier.graphicsLayer {
+                            if (drag < 0f) {
+                                // 像用手捻走一张牌：绕卡片下方的支点转一个小角度。
+                                transformOrigin = TransformOrigin(0.5f, 1.25f)
+                                translationX = drag
+                                rotationZ = drag / widthPx * 7f
+                            } else {
+                                deckPose((drag / travel).coerceIn(0f, 1f), peekPx)
+                            }
+                        },
+                    )
+                }
+
+                if (count > 1) {
+                    val previous = cards[previousIndex]
+                    key("incoming-" + previous.id) {
+                        DeckCard(
+                            card = previous,
+                            depth = { 0f },
+                            modifier = Modifier.graphicsLayer {
+                                val progress = (drag / travel).coerceIn(0f, 1f)
+                                alpha = if (drag > 0f) 1f else 0f
+                                transformOrigin = TransformOrigin(0.5f, 1.25f)
+                                translationX = -(1f - progress) * travel
+                                rotationZ = -(1f - progress) * 7f
+                            },
+                        )
+                    }
+                }
+            }
+
+            DeckIndicator(
+                index = index,
+                count = count,
+                enabled = count > 1 && !animating,
+                onPrevious = { scope.launch { settle(-1, 0f) } },
+                onNext = { scope.launch { settle(1, 0f) } },
+            )
+        }
+    }
+}
+
+/** 牌堆里的一张牌。[depth] 越大压得越暗；只有最上面那张可以点。 */
+@Composable
+private fun DeckCard(
+    card: Card,
+    depth: () -> Float,
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null,
+    onLongClick: (() -> Unit)? = null,
+) {
+    Box(modifier.fillMaxWidth()) {
+        CardFace(
+            title = card.title,
+            type = card.type,
+            colorIndex = card.color,
+            hint = card.faceHint,
+            pinned = card.pinned,
+            aspect = CARD_ASPECT,
+            modifier = Modifier
+                .fillMaxWidth()
+                .then(
+                    if (onClick != null) {
+                        Modifier
+                            .clip(Radius.card)
+                            .combinedClickable(onClickLabel = "查看详情", onClick = onClick, onLongClick = onLongClick)
+                    } else {
+                        Modifier
+                    },
+                ),
+        )
+        Box(
+            Modifier
+                .matchParentSize()
+                .graphicsLayer { alpha = (depth() * 0.1f).coerceIn(0f, 0.45f) }
+                .clip(Radius.card)
+                .background(Color.Black),
+        )
+    }
+}
+
+/** 页指示：不超过 9 张用圆点，更多时显示“第几张 / 共几张”；两侧的箭头可以代替滑动。 */
+@Composable
+private fun DeckIndicator(index: Int, count: Int, enabled: Boolean, onPrevious: () -> Unit, onNext: () -> Unit) {
+    val colors = Jk.colors
+    Row(
+        modifier = Modifier.padding(top = Space.x1),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (count > 1) {
+            JkIconButton(Icons.Outlined.ChevronLeft, "上一张", onPrevious, tint = colors.textTertiary, enabled = enabled)
+        }
+        if (count in 2..9) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(Space.x1 - 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(horizontal = Space.x1),
+            ) {
+                for (position in 0 until count) {
+                    val active = position == index
+                    Box(
+                        Modifier
+                            .height(6.dp)
+                            .width(if (active) 18.dp else 6.dp)
+                            .clip(CircleShape)
+                            .background(if (active) colors.textPrimary else colors.border),
+                    )
+                }
+            }
+        } else {
+            Text(
+                text = "${index + 1} / $count",
+                style = JkType.small,
+                color = colors.textSecondary,
+                modifier = Modifier.padding(horizontal = Space.x1_5),
+            )
+        }
+        if (count > 1) {
+            JkIconButton(Icons.Outlined.ChevronRight, "下一张", onNext, tint = colors.textTertiary, enabled = enabled)
+        }
+    }
+}
+
+/** 牌堆下方的操作：一键复制当前卡最常用的两个字段，进详情，以及新建。 */
+@Composable
+private fun DeckActions(card: Card, onCopy: (CardField) -> Unit, onOpen: () -> Unit, onCreate: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .padding(horizontal = Space.x2_5)
+            .padding(top = Space.x1, bottom = Space.x2),
+        verticalArrangement = Arrangement.spacedBy(Space.x1),
+    ) {
+        val quick = card.quickCopyFields
+        if (quick.isNotEmpty()) {
+            Row(horizontalArrangement = Arrangement.spacedBy(Space.x1)) {
+                for (field in quick) {
+                    JkButton(
+                        text = "复制${field.label}",
+                        onClick = { onCopy(field) },
+                        style = ButtonStyle.Secondary,
+                        icon = Icons.Outlined.ContentCopy,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(Space.x1)) {
+            JkButton("查看详情", onOpen, modifier = Modifier.weight(1f))
+            JkButton("新建", onCreate, style = ButtonStyle.Secondary, icon = Icons.Outlined.Add)
+        }
+    }
 }
 
 /** 置顶区：把最要紧的几张做成真正的“卡面”，横向翻看。 */

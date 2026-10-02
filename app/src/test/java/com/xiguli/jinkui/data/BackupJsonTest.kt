@@ -114,6 +114,34 @@ class BackupJsonTest {
     }
 
     @Test
+    fun deckPutsPinnedFirstThenSortsByTitle() {
+        val a = Card(id = "a", type = CardType.WIFI, title = "b 家里")
+        val b = Card(id = "b", type = CardType.LOGIN, title = "A 邮箱")
+        val c = Card(id = "c", type = CardType.BANK, title = "z 工资卡", pinned = true)
+        assertEquals(listOf("c", "b", "a"), com.xiguli.jinkui.data.model.deckOrder(listOf(a, b, c)).map { it.id })
+        assertTrue(com.xiguli.jinkui.data.model.deckOrder(emptyList()).isEmpty())
+    }
+
+    @Test
+    fun quickCopyPicksOnePlainAndOneSecretField() {
+        val login = Card(
+            id = "c-4",
+            type = CardType.LOGIN,
+            title = "邮箱",
+            fields = listOf(
+                CardField("f-0", "网址", "https://mail.example.com", sensitive = false, kind = FieldKind.URL),
+                CardField("f-1", "账号", "me@example.com", sensitive = false),
+                CardField("f-2", "密码", "S3cret", sensitive = true, kind = FieldKind.PASSWORD),
+                CardField("f-3", "备用码", "", sensitive = true),
+            ),
+        )
+        assertEquals(listOf("账号", "密码"), login.quickCopyFields.map { it.label })
+        val onlyUrl = login.copy(fields = login.fields.take(1))
+        assertEquals(listOf("网址"), onlyUrl.quickCopyFields.map { it.label })
+        assertTrue(Card(id = "c-5", type = CardType.CUSTOM, title = "空").quickCopyFields.isEmpty())
+    }
+
+    @Test
     fun longNumbersAreGroupedForDisplayOnly() {
         assertEquals("6225 8800 0000 0000", com.xiguli.jinkui.data.model.groupDigits("6225880000000000"))
         assertEquals("6225 8800 0000 0000", com.xiguli.jinkui.data.model.groupDigits("6225 8800 0000 0000"))
