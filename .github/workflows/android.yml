@@ -1,0 +1,39 @@
+name: Android CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: 单元测试（加密工具类）
+        run: ./gradlew testDebugUnitTest
+
+      - name: 构建 Debug APK
+        run: ./gradlew assembleDebug
+
+      - name: 离线守卫：APK 不得申请任何联网权限
+        run: |
+          AAPT2=$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)aapt2
+          "$AAPT2" dump permissions app/build/outputs/apk/debug/app-debug.apk | tee permissions.txt
+          if grep -E "android\.permission\.(INTERNET|ACCESS_NETWORK_STATE|ACCESS_WIFI_STATE)" permissions.txt; then
+            echo "::error::发现联网相关权限，违反离线要求"
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jinkui-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
