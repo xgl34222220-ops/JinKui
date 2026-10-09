@@ -1,5 +1,19 @@
 package com.xiguli.jinkui.ui.ledger
 
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.material3.Icon
+import androidx.compose.runtime.Immutable
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
+import com.xiguli.jinkui.data.ledger.LedgerClock
+import com.xiguli.jinkui.ui.theme.Radius
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -53,6 +67,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 
+@Immutable
 data class StatsUi(
     val month: YearMonth,
     val type: TxType,
@@ -61,11 +76,17 @@ data class StatsUi(
     val shares: List<CategoryShare>,
     val trend: List<MonthPoint>,
     val categoriesById: Map<String, LedgerCategory>,
-)
+    val loading: Boolean = false,
+) {
+    companion object {
+        fun placeholder(month: YearMonth, type: TxType) =
+            StatsUi(month, type, Summary.ZERO, Summary.ZERO, emptyList(), emptyList(), emptyMap(), loading = true)
+    }
+}
 
-private const val TREND_MONTHS = 6
+const val TREND_MONTHS = 6
 
-private fun buildStatsUi(data: LedgerData, month: YearMonth, type: TxType, zone: ZoneId): StatsUi {
+fun buildStatsUi(data: LedgerData, month: YearMonth, type: TxType, zone: ZoneId): StatsUi {
     val inMonth = LedgerMath.inMonth(data.transactions, month, zone)
     val trend = LedgerMath.trend(data.transactions, month, TREND_MONTHS, zone)
     return StatsUi(
@@ -82,16 +103,20 @@ private fun buildStatsUi(data: LedgerData, month: YearMonth, type: TxType, zone:
 class LedgerStatsViewModel(private val container: AppContainer) : ViewModel() {
     val month = MutableStateFlow(YearMonth.now())
     val type = MutableStateFlow(TxType.EXPENSE)
+    private var current = YearMonth.now()
 
+    // 第一次计算同样放到后台线程
     val ui: StateFlow<StatsUi> = combine(container.ledger.data, month, type) { data, m, t ->
         buildStatsUi(data, m, t, ZoneId.systemDefault())
     }
         .flowOn(Dispatchers.Default)
-        .stateIn(
-            viewModelScope,
-            SharingStarted.Eagerly,
-            buildStatsUi(container.ledger.data.value, month.value, type.value, ZoneId.systemDefault()),
-        )
+        .stateIn(viewModelScope, SharingStarted.Eagerly, StatsUi.placeholder(month.value, type.value))
+
+    /** 回到前台时：跨了月且正在看本月的，跟到新的本月。 */
+    fun onClockTick(now: YearMonth = YearMonth.now()) {
+        month.value = LedgerClock.follow(month.value, current, now)
+        current = now
+    }
 }
 
 @Composable
@@ -99,8 +124,24 @@ fun LedgerStatsScreen(onBack: () -> Unit) {
     val container = LocalContainer.current
     val viewModel = jkViewModel { LedgerStatsViewModel(container) }
     val ui by viewModel.ui.collectAsStateWithLifecycle()
-    val colors = Jk.colors
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.onClockTick() }
+    LedgerStatsContent(
+        ui = ui,
+        onBack = onBack,
+        onMonth = { viewModel.month.value = it },
+        onType = { viewModel.type.value = it },
+    )
+}
 
+/** 统计页（无状态）：分类构成的环形图与明细、近 6 个月的收支柱状图。 */
+@Composable
+fun LedgerStatsContent(
+    ui: StatsUi,
+    onBack: () -> Unit,
+    onMonth: (YearMonth) -> Unit,
+    onType: (TxType) -> Unit,
+) {
+    val colors = Jk.colors
     Column(
         Modifier
             .fillMaxSize()
@@ -115,80 +156,92 @@ fun LedgerStatsScreen(onBack: () -> Unit) {
                 .navigationBarsPadding()
                 .padding(bottom = Space.x4),
         ) {
-            MonthSwitcher(ui.month, { viewModel.month.value = it }, Modifier.align(Alignment.CenterHorizontally))
+            MonthSwitcher(ui.month, onMonth, Modifier.align(Alignment.CenterHorizontally))
             Spacer(Modifier.height(Space.x1))
             JkSegmented(
                 options = listOf(TxType.EXPENSE to "支出", TxType.INCOME to "收入"),
                 selected = ui.type,
-                onSelect = { viewModel.type.value = it },
+                onSelect = onType,
             )
             Spacer(Modifier.height(Space.x2))
 
             val total = if (ui.type == TxType.EXPENSE) ui.summary.expense else ui.summary.income
             val before = if (ui.type == TxType.EXPENSE) ui.previous.expense else ui.previous.income
-            JkCard(Modifier.fillMaxWidth()) {
-                Text("${ui.month.monthValue}月${ui.type.label}构成", style = JkType.heading, color = colors.textPrimary)
+            JkCard(Modifier.fillMaxWidth().animateContentSize(tween(240)), padding = PaddingValues(Space.x2_5)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    LegendDot(txColor(ui.type))
+                    Spacer(Modifier.width(Space.x1))
+                    Text("${ui.month.monthValue}月${ui.type.label}构成", style = JkType.heading, color = colors.textPrimary)
+                }
                 Spacer(Modifier.height(Space.x2))
-                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    Donut(
-                        ui.shares.map { it.amount },
-                        Modifier.size(180.dp),
-                        description = "${ui.type.label}构成：" + ui.shares.joinToString("；") { share ->
-                            "${categoryLabel(share.categoryId.ifEmpty { null }, ui.categoriesById)} ${(share.ratio * 100).roundToInt()}%"
-                        },
-                    )
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("合计", style = JkType.caption, color = colors.textTertiary)
-                        Text(Money.format(total), style = JkType.heading, color = colors.textPrimary)
-                        val change = LedgerMath.change(total, before)
-                        Text(
-                            text = when {
-                                change == null -> "上月无记录"
-                                change == 0f -> "与上月持平"
-                                else -> "比上月" + (if (change > 0) "多 " else "少 ") + "${(abs(change) * 100).roundToInt()}%"
-                            },
-                            style = JkType.caption,
-                            color = colors.textTertiary,
-                        )
+                if (ui.shares.isEmpty() && !ui.loading) {
+                    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                        LedgerIllustration(LedgerArt.NO_STATS)
+                        Spacer(Modifier.height(Space.x1_5))
+                        Text("这个月还没有${ui.type.label}记录", style = JkType.small, color = colors.textTertiary)
+                        Spacer(Modifier.height(Space.x1))
                     }
-                }
-                Spacer(Modifier.height(Space.x2))
-                if (ui.shares.isEmpty()) {
-                    Text("这个月还没有${ui.type.label}记录", style = JkType.small, color = colors.textTertiary)
-                }
-                ui.shares.forEachIndexed { index, share ->
-                    ShareRow(index, share, ui.categoriesById)
+                } else {
+                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                        Donut(
+                            ui.shares.map { it.amount },
+                            Modifier.size(188.dp),
+                            description = "${ui.type.label}构成：" + ui.shares.joinToString("；") { share ->
+                                "${categoryLabel(share.categoryId.ifEmpty { null }, ui.categoriesById)} ${(share.ratio * 100).roundToInt()}%"
+                            },
+                        )
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("合计", style = JkType.caption, color = colors.textTertiary)
+                            RollingAmount(total, JkType.amount.copy(fontSize = JkType.heading.fontSize), colors.textPrimary)
+                            val change = LedgerMath.change(total, before)
+                            Text(
+                                text = when {
+                                    change == null -> "上月无记录"
+                                    change == 0f -> "与上月持平"
+                                    else -> "比上月" + (if (change > 0) "多 " else "少 ") + "${(abs(change) * 100).roundToInt()}%"
+                                },
+                                style = JkType.caption,
+                                color = colors.textTertiary,
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(Space.x2))
+                    ui.shares.forEachIndexed { index, share ->
+                        ShareRow(index, share, ui.categoriesById, ui.type)
+                    }
                 }
             }
 
             Spacer(Modifier.height(Space.x2))
-            JkCard(Modifier.fillMaxWidth()) {
+            JkCard(Modifier.fillMaxWidth(), padding = PaddingValues(Space.x2_5)) {
                 Text("近 $TREND_MONTHS 个月收支", style = JkType.heading, color = colors.textPrimary)
-                Spacer(Modifier.height(Space.x1))
+                Spacer(Modifier.height(Space.x1_5))
                 Row {
                     Column(Modifier.weight(1f)) {
                         Text("本月支出", style = JkType.caption, color = colors.textTertiary)
-                        Text(Money.format(ui.summary.expense), style = JkType.bodyStrong, color = colors.textPrimary)
+                        RollingAmount(ui.summary.expense, JkType.amount, colors.textPrimary)
                         ChangeNote(LedgerMath.change(ui.summary.expense, ui.previous.expense), higherIsBad = true)
                     }
                     Column(Modifier.weight(1f)) {
                         Text("本月收入", style = JkType.caption, color = colors.textTertiary)
-                        Text(Money.format(ui.summary.income), style = JkType.bodyStrong, color = colors.success)
+                        RollingAmount(ui.summary.income, JkType.amount, colors.income)
                         ChangeNote(LedgerMath.change(ui.summary.income, ui.previous.income), higherIsBad = false)
                     }
                 }
                 Spacer(Modifier.height(Space.x2))
-                TrendBars(
-                    expense = ui.trend.map { it.summary.expense },
-                    income = ui.trend.map { it.summary.income },
-                    labels = ui.trend.map { "${it.month.monthValue}月" },
-                )
+                if (ui.trend.isNotEmpty()) {
+                    TrendBars(
+                        expense = ui.trend.map { it.summary.expense },
+                        income = ui.trend.map { it.summary.income },
+                        labels = ui.trend.map { "${it.month.monthValue}月" },
+                    )
+                }
                 Spacer(Modifier.height(Space.x1_5))
                 val months = ui.trend.filter { it.summary.expense > 0 }
                 if (months.isNotEmpty()) {
                     Text(
                         "有记录的月份平均每月支出 ${Money.format(months.sumOf { it.summary.expense } / months.size)}",
-                        style = JkType.caption,
+                        style = JkType.amountCaption,
                         color = colors.textTertiary,
                     )
                 }
@@ -198,37 +251,48 @@ fun LedgerStatsScreen(onBack: () -> Unit) {
 }
 
 @Composable
-private fun ShareRow(index: Int, share: CategoryShare, byId: Map<String, LedgerCategory>) {
+private fun ShareRow(index: Int, share: CategoryShare, byId: Map<String, LedgerCategory>, type: TxType) {
     val colors = Jk.colors
     val category = byId[share.categoryId]
-    Column(Modifier.padding(vertical = Space.x1)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            LegendDot(chartColor(index))
-            Spacer(Modifier.width(Space.x1))
-            Text(
-                category?.name ?: "未分类",
-                style = JkType.body,
-                color = colors.textPrimary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
-            )
-            Text("${share.count} 笔", style = JkType.caption, color = colors.textTertiary)
-            Spacer(Modifier.width(Space.x1_5))
-            Text("${(share.ratio * 1000).roundToInt() / 10.0}%", style = JkType.small, color = colors.textSecondary)
-            Spacer(Modifier.width(Space.x1_5))
-            Text(Money.format(share.amount), style = JkType.bodyStrong, color = colors.textPrimary)
+    val tone = chartColorOf(index)
+    Row(Modifier.padding(vertical = Space.x1), verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            Modifier
+                .size(36.dp)
+                .clip(Radius.tile)
+                .background(tone.copy(alpha = if (colors.isDark) 0.22f else 0.14f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(categoryIcon(category?.icon), contentDescription = null, tint = tone, modifier = Modifier.size(18.dp))
         }
-        Spacer(Modifier.height(Space.x05))
-        Box(Modifier.padding(start = Space.x2)) {
-            ShareBar(share.ratio, index)
+        Spacer(Modifier.width(Space.x1_5))
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    category?.name ?: "未分类",
+                    style = JkType.body,
+                    color = colors.textPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                Spacer(Modifier.width(Space.x1))
+                Text("${share.count} 笔", style = JkType.amountCaption, color = colors.textTertiary)
+                Spacer(Modifier.weight(1f))
+                Text("${(share.ratio * 1000).roundToInt() / 10.0}%", style = JkType.amountSmall, color = colors.textSecondary)
+                Spacer(Modifier.width(Space.x1_5))
+                Text(Money.format(share.amount), style = JkType.amount, color = colors.textPrimary)
+            }
+            Spacer(Modifier.height(Space.x05))
+            ShareBar(share.ratio, tone)
         }
     }
 }
 
 @Composable
-private fun ShareBar(ratio: Float, index: Int) {
+private fun ShareBar(ratio: Float, tone: Color) {
     val track = Jk.colors.surfaceAlt
+    val shown by animateFloatAsState(ratio.coerceIn(0f, 1f), tween(520, easing = FastOutSlowInEasing), label = "share")
     androidx.compose.foundation.Canvas(
         Modifier
             .fillMaxWidth()
@@ -236,8 +300,8 @@ private fun ShareBar(ratio: Float, index: Int) {
     ) {
         drawRoundRect(track, cornerRadius = androidx.compose.ui.geometry.CornerRadius(size.height / 2f))
         drawRoundRect(
-            chartColor(index),
-            size = size.copy(width = size.width * ratio.coerceIn(0f, 1f)),
+            tone,
+            size = size.copy(width = size.width * shown),
             cornerRadius = androidx.compose.ui.geometry.CornerRadius(size.height / 2f),
         )
     }

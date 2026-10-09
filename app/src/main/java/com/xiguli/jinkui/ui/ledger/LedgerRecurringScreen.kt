@@ -246,7 +246,7 @@ private fun RecurringRow(row: RecurringRowUi, onClick: () -> Unit) {
                     TxType.INCOME -> "+" + Money.format(rule.amount)
                     TxType.TRANSFER -> Money.format(rule.amount)
                 },
-                style = JkType.bodyStrong,
+                style = JkType.amount,
                 color = if (rule.paused || row.blocked != null) colors.textTertiary else amountColor(rule.type),
             )
         },

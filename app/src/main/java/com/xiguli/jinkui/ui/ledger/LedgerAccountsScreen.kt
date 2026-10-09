@@ -142,11 +142,11 @@ fun LedgerAccountsScreen(onBack: () -> Unit) {
         ) {
             item {
                 JkCard(Modifier.fillMaxWidth()) {
-                    Text("净资产", style = JkType.small, color = colors.textTertiary)
-                    Text(
-                        Money.format(ui.netWorth),
-                        style = JkType.display,
-                        color = if (ui.netWorth < 0) colors.danger else colors.textPrimary,
+                    Text("净资产", style = JkType.overline, color = colors.textTertiary)
+                    RollingAmount(
+                        ui.netWorth,
+                        JkType.amountLarge,
+                        if (ui.netWorth < 0) colors.danger else colors.textPrimary,
                     )
                     Text("余额 = 期初余额 + 全部收支与转账，随流水自动更新", style = JkType.caption, color = colors.textTertiary)
                 }
@@ -173,7 +173,7 @@ fun LedgerAccountsScreen(onBack: () -> Unit) {
                             trailing = {
                                 Text(
                                     Money.format(balance),
-                                    style = JkType.bodyStrong,
+                                    style = JkType.amount,
                                     color = when {
                                         balance < 0 -> colors.danger
                                         account.archived -> colors.textTertiary

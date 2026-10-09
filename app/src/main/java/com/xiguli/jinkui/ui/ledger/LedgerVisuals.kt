@@ -1,6 +1,43 @@
 package com.xiguli.jinkui.ui.ledger
 
 import com.xiguli.jinkui.data.ledger.Money
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.material.icons.filled.AccountBalanceWallet
+import androidx.compose.material.icons.filled.Style
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.text
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import com.xiguli.jinkui.ui.theme.JkSize
+import com.xiguli.jinkui.ui.theme.Radius
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.selection.selectable
@@ -107,6 +144,7 @@ import java.time.YearMonth
 /**
  * 首页外壳：上面是当前分区，下面是分区切换栏。
  * 分区内容不再自己处理导航栏留白（由底部切换栏统一处理），卡包页面本身一行未改。
+ * 两个分区之间短暂淡入淡出（只有 180ms，离开的分区随即销毁）。
  */
 @Composable
 fun HomeTabs(
@@ -115,13 +153,16 @@ fun HomeTabs(
     content: @Composable (HomeTab) -> Unit,
 ) {
     Column(Modifier.fillMaxSize()) {
-        Box(
+        Crossfade(
+            targetState = selected,
+            animationSpec = tween(180),
+            label = "homeTab",
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
                 .consumeWindowInsets(WindowInsets.navigationBars),
-        ) {
-            content(selected)
+        ) { tab ->
+            Box(Modifier.fillMaxSize()) { content(tab) }
         }
         HomeTabBar(selected, onSelect)
     }
@@ -145,27 +186,53 @@ private fun HomeTabBar(selected: HomeTab, onSelect: (HomeTab) -> Unit) {
             modifier = Modifier
                 .fillMaxWidth()
                 .navigationBarsPadding()
-                .height(56.dp),
+                .height(64.dp),
         ) {
             for (tab in HomeTab.entries) {
                 val active = tab == selected
+                val haptic = LocalHapticFeedback.current
+                val pill by animateColorAsState(if (active) colors.accentSoft else Color.Transparent, tween(200), label = "tabPill")
+                val tint by animateColorAsState(if (active) colors.accent else colors.textTertiary, tween(200), label = "tabTint")
+                val pillWidth by animateDpAsState(if (active) 56.dp else 32.dp, spring(dampingRatio = 0.8f, stiffness = 600f), label = "tabPillWidth")
                 Column(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxSize()
-                        .selectable(selected = active, role = Role.Tab, onClick = { onSelect(tab) }),
+                        .selectable(
+                            selected = active,
+                            role = Role.Tab,
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClick = {
+                                if (!active) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onSelect(tab)
+                            },
+                        ),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center,
                 ) {
-                    Icon(
-                        imageVector = if (tab == HomeTab.CARDS) Icons.Outlined.Style else Icons.Outlined.AccountBalanceWallet,
-                        contentDescription = null,
-                        tint = if (active) colors.accent else colors.textTertiary,
-                        modifier = Modifier.size(22.dp),
-                    )
+                    Box(
+                        Modifier
+                            .width(pillWidth)
+                            .height(30.dp)
+                            .clip(CircleShape)
+                            .background(pill),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = when (tab) {
+                                HomeTab.CARDS -> if (active) Icons.Filled.Style else Icons.Outlined.Style
+                                HomeTab.LEDGER -> if (active) Icons.Filled.AccountBalanceWallet else Icons.Outlined.AccountBalanceWallet
+                            },
+                            contentDescription = null,
+                            tint = tint,
+                            modifier = Modifier.size(JkSize.icon),
+                        )
+                    }
+                    Spacer(Modifier.height(2.dp))
                     Text(
                         text = tab.label,
-                        style = JkType.caption,
+                        style = if (active) JkType.caption.copy(fontWeight = FontWeight.Medium) else JkType.caption,
                         color = if (active) colors.textPrimary else colors.textTertiary,
                     )
                 }
@@ -235,7 +302,7 @@ fun accountIcon(kind: AccountKind): ImageVector = when (kind) {
     AccountKind.OTHER -> Icons.Outlined.AccountBalanceWallet
 }
 
-/** 图表用的一组低饱和色，与卡面配色同一气质。 */
+/** 图表用的一组低饱和色，与卡面配色同一气质；深色模式下整体提亮一档，保证在墨黑底上分得清。 */
 private val ChartPalette = listOf(
     Color(0xFFB8863B), // 赤金
     Color(0xFF3B5B8C), // 靛蓝
@@ -249,14 +316,50 @@ private val ChartPalette = listOf(
     Color(0xFF6E6A62), // 岩灰
 )
 
-fun chartColor(index: Int): Color = ChartPalette[index.mod(ChartPalette.size)]
+private val ChartPaletteDark = listOf(
+    Color(0xFFD9AE62),
+    Color(0xFF7F9DD0),
+    Color(0xFF6FBF9F),
+    Color(0xFFE58C7C),
+    Color(0xFFAE93D3),
+    Color(0xFF6CC0CB),
+    Color(0xFFC9A887),
+    Color(0xFFA2C274),
+    Color(0xFFD08EAE),
+    Color(0xFFADA79D),
+)
 
-/** 支出、收入、转账在列表里的金额颜色。 */
+fun chartColor(index: Int, dark: Boolean = false): Color {
+    val palette = if (dark) ChartPaletteDark else ChartPalette
+    return palette[index.mod(palette.size)]
+}
+
+/** 当前主题下的图表色。 */
+@Composable
+fun chartColorOf(index: Int): Color = chartColor(index, Jk.colors.isDark)
+
+/** 支出、收入、转账的主色（图标、图例、柱子）。 */
+@Composable
+fun txColor(type: TxType): Color = when (type) {
+    TxType.EXPENSE -> Jk.colors.expense
+    TxType.INCOME -> Jk.colors.income
+    TxType.TRANSFER -> Jk.colors.transfer
+}
+
+/** 支出、收入、转账的浅底（图标底）。 */
+@Composable
+fun txSoft(type: TxType): Color = when (type) {
+    TxType.EXPENSE -> Jk.colors.expenseSoft
+    TxType.INCOME -> Jk.colors.incomeSoft
+    TxType.TRANSFER -> Jk.colors.transferSoft
+}
+
+/** 列表里的金额颜色：支出用正文色（克制），收入用收入色，转账用转账色。 */
 @Composable
 fun amountColor(type: TxType): Color = when (type) {
     TxType.EXPENSE -> Jk.colors.textPrimary
-    TxType.INCOME -> Jk.colors.success
-    TxType.TRANSFER -> Jk.colors.textSecondary
+    TxType.INCOME -> Jk.colors.income
+    TxType.TRANSFER -> Jk.colors.transfer
 }
 
 /** 子分类显示为“餐饮 · 午餐”。 */
@@ -287,6 +390,15 @@ fun dayLabel(date: LocalDate, today: LocalDate = LocalDate.now()): String {
         else -> base
     }
 }
+
+/** 分组头的主标签：“今天”“昨天”或“10月9日”（不是今年的带上年份）。 */
+fun shortDayLabel(date: LocalDate, today: LocalDate = LocalDate.now()): String = when (date) {
+    today -> "今天"
+    today.minusDays(1) -> "昨天"
+    else -> if (date.year == today.year) "${date.monthValue}月${date.dayOfMonth}日" else "${date.year}年${date.monthValue}月${date.dayOfMonth}日"
+}
+
+fun weekdayLabel(date: LocalDate): String = weekdays.getValue(date.dayOfWeek)
 
 fun monthLabel(month: YearMonth): String = "${month.year}年${month.monthValue}月"
 
@@ -359,26 +471,46 @@ fun RoundIcon(icon: ImageVector, tint: Color, modifier: Modifier = Modifier, siz
     }
 }
 
-/** 细进度条；超出时整条变成警示色。 */
+/** 流水行左侧的分类图标底：圆角方块，底色与图标色按支出 / 收入 / 转账区分。 */
+@Composable
+fun CategoryChip(icon: ImageVector, type: TxType, modifier: Modifier = Modifier, size: Dp = JkSize.chip) {
+    Box(
+        modifier = modifier
+            .size(size)
+            .clip(Radius.tile)
+            .background(txSoft(type)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, contentDescription = null, tint = txColor(type), modifier = Modifier.size(size * 0.5f))
+    }
+}
+
+/** 细进度条；超出时整条变成警示色。进度变化时平滑过渡。 */
 @Composable
 fun BudgetBar(ratio: Float, over: Boolean, modifier: Modifier = Modifier) {
     val colors = Jk.colors
-    val fill = when {
-        over -> colors.danger
-        ratio >= 0.8f -> colors.accent
-        else -> colors.success
-    }
+    val fill by animateColorAsState(
+        when {
+            over -> colors.danger
+            ratio >= 0.8f -> colors.accent
+            else -> colors.success
+        },
+        tween(240),
+        label = "budgetColor",
+    )
+    val target = ratio.coerceIn(0f, 1f)
+    val shown by animateFloatAsState(target, tween(520, easing = FastOutSlowInEasing), label = "budgetRatio")
     Box(
         modifier
             .fillMaxWidth()
             .height(6.dp)
             .clip(CircleShape)
             .background(colors.surfaceAlt)
-            .semantics { progressBarRangeInfo = ProgressBarRangeInfo(ratio.coerceIn(0f, 1f), 0f..1f) },
+            .semantics { progressBarRangeInfo = ProgressBarRangeInfo(target, 0f..1f) },
     ) {
         Box(
             Modifier
-                .fillMaxWidth(ratio.coerceIn(0f, 1f))
+                .fillMaxWidth(shown)
                 .height(6.dp)
                 .clip(CircleShape)
                 .background(fill),
@@ -386,16 +518,24 @@ fun BudgetBar(ratio: Float, over: Boolean, modifier: Modifier = Modifier) {
     }
 }
 
-/** 环形占比图。[values] 为各段金额；全为 0 时画一圈底色。 */
+/**
+ * 环形占比图。[values] 为各段金额；全为 0 时画一圈底色。
+ * 段与段之间留固定角度的缝（不靠底色盖住），数据变化时从 12 点方向顺时针展开。
+ */
 @Composable
 fun Donut(
     values: List<Long>,
     modifier: Modifier = Modifier,
-    thickness: Dp = 22.dp,
+    thickness: Dp = 20.dp,
     description: String? = null,
 ) {
     val track = Jk.colors.surfaceAlt
-    val bg = Jk.colors.surface
+    val dark = Jk.colors.isDark
+    val progress = remember { Animatable(0f) }
+    LaunchedEffect(values) {
+        progress.snapTo(0f)
+        progress.animateTo(1f, tween(640, easing = FastOutSlowInEasing))
+    }
     Canvas(if (description != null) modifier.semantics { contentDescription = description } else modifier) {
         val stroke = thickness.toPx()
         val diameter = size.minDimension - stroke
@@ -404,21 +544,25 @@ fun Donut(
         val total = values.sum().toFloat()
         drawArc(track, 0f, 360f, false, topLeft, arcSize, style = Stroke(stroke))
         if (total <= 0f) return@Canvas
+        val segments = values.count { it > 0 }
+        // 缝的角度：约 2dp 的弧长
+        val gap = if (segments > 1) (2.dp.toPx() / (diameter / 2f)) * (180f / Math.PI.toFloat()) else 0f
+        val reveal = 360f * progress.value
         var start = -90f
         values.forEachIndexed { index, value ->
             val sweep = value / total * 360f
             if (sweep <= 0f) return@forEachIndexed
-            drawArc(chartColor(index), start, sweep, false, topLeft, arcSize, style = Stroke(stroke, cap = StrokeCap.Butt))
-            // 段与段之间留一道细缝
-            if (values.count { it > 0 } > 1) {
-                drawArc(bg, start + sweep - 0.6f, 1.2f, false, topLeft, arcSize, style = Stroke(stroke + 2f))
+            val visibleEnd = minOf(start + sweep, -90f + reveal)
+            val drawn = visibleEnd - start - gap
+            if (drawn > 0f) {
+                drawArc(chartColor(index, dark), start + gap / 2f, drawn, false, topLeft, arcSize, style = Stroke(stroke, cap = StrokeCap.Butt))
             }
             start += sweep
         }
     }
 }
 
-/** 月度收支柱状图：每月两根柱子（支出 / 收入），最后一根是当前选中的月份。 */
+/** 月度收支柱状图：每月两根柱子（支出 / 收入），最后一根是当前选中的月份，柱顶标出金额。 */
 @Composable
 fun TrendBars(
     expense: List<Long>,
@@ -430,47 +574,56 @@ fun TrendBars(
     val chartDescription = labels.indices.joinToString("；") { i ->
         "${labels[i]} 支出 ${Money.format(expense.getOrElse(i) { 0L })}，收入 ${Money.format(income.getOrElse(i) { 0L })}"
     }
-    val expenseColor = colors.accent
-    val incomeColor = colors.success
+    val expenseColor = colors.expense
+    val incomeColor = colors.income
     val gridColor = colors.border
+    val grow = remember { Animatable(0f) }
+    LaunchedEffect(expense, income) {
+        grow.snapTo(0f)
+        grow.animateTo(1f, tween(560, easing = FastOutSlowInEasing))
+    }
     Column(modifier) {
         Canvas(
             Modifier
                 .fillMaxWidth()
-                .height(140.dp)
+                .height(148.dp)
                 .semantics { contentDescription = chartDescription },
         ) {
             val max = (expense + income).maxOrNull()?.coerceAtLeast(1L)?.toFloat() ?: 1f
             val n = labels.size.coerceAtLeast(1)
             val slot = size.width / n
-            val bar = (slot * 0.26f).coerceAtMost(14.dp.toPx())
+            val bar = (slot * 0.24f).coerceAtMost(12.dp.toPx())
             val gap = 3.dp.toPx()
             val bottom = size.height
-            for (line in 1..3) {
-                val y = bottom - bottom * line / 3f
-                drawLine(gridColor, Offset(0f, y), Offset(size.width, y), strokeWidth = 1f)
+            val top = 6.dp.toPx()
+            val usable = bottom - top
+            val dash = PathEffect.dashPathEffect(floatArrayOf(3.dp.toPx(), 4.dp.toPx()))
+            for (line in 1..2) {
+                val y = bottom - usable * line / 2f
+                drawLine(gridColor, Offset(0f, y), Offset(size.width, y), strokeWidth = 1f, pathEffect = dash)
             }
             drawLine(gridColor, Offset(0f, bottom - 0.5f), Offset(size.width, bottom - 0.5f), strokeWidth = 1f)
+            val corner = CornerRadius(bar / 2f)
             for (i in 0 until n) {
                 val center = slot * i + slot / 2f
-                val e = expense.getOrElse(i) { 0L } / max * (bottom - 4f)
-                val inc = income.getOrElse(i) { 0L } / max * (bottom - 4f)
-                val alpha = if (i == n - 1) 1f else 0.55f
-                if (e > 0f) {
+                val e = expense.getOrElse(i) { 0L } / max * usable * grow.value
+                val inc = income.getOrElse(i) { 0L } / max * usable * grow.value
+                val current = i == n - 1
+                if (current) {
+                    // 选中月份：一条淡淡的底带
                     drawRoundRect(
-                        color = expenseColor.copy(alpha = alpha),
-                        topLeft = Offset(center - gap / 2f - bar, bottom - e),
-                        size = Size(bar, e),
-                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(3.dp.toPx()),
+                        color = gridColor.copy(alpha = 0.45f),
+                        topLeft = Offset(center - slot * 0.42f, 0f),
+                        size = Size(slot * 0.84f, bottom),
+                        cornerRadius = CornerRadius(8.dp.toPx()),
                     )
                 }
+                val alpha = if (current) 1f else 0.5f
+                if (e > 0f) {
+                    drawRoundRect(expenseColor.copy(alpha = alpha), Offset(center - gap / 2f - bar, bottom - e), Size(bar, e), corner)
+                }
                 if (inc > 0f) {
-                    drawRoundRect(
-                        color = incomeColor.copy(alpha = alpha),
-                        topLeft = Offset(center + gap / 2f, bottom - inc),
-                        size = Size(bar, inc),
-                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(3.dp.toPx()),
-                    )
+                    drawRoundRect(incomeColor.copy(alpha = alpha), Offset(center + gap / 2f, bottom - inc), Size(bar, inc), corner)
                 }
             }
         }
@@ -479,14 +632,14 @@ fun TrendBars(
             labels.forEachIndexed { index, label ->
                 Text(
                     text = label,
-                    style = JkType.caption,
+                    style = if (index == labels.lastIndex) JkType.caption.copy(fontWeight = FontWeight.Medium) else JkType.caption,
                     color = if (index == labels.lastIndex) colors.textPrimary else colors.textTertiary,
                     textAlign = TextAlign.Center,
                     modifier = Modifier.weight(1f),
                 )
             }
         }
-        Spacer(Modifier.height(Space.x1))
+        Spacer(Modifier.height(Space.x1_5))
         Row(verticalAlignment = Alignment.CenterVertically) {
             LegendDot(expenseColor)
             Text("支出", style = JkType.caption, color = colors.textSecondary, modifier = Modifier.padding(start = Space.x05, end = Space.x2))
@@ -504,4 +657,142 @@ fun LegendDot(color: Color, modifier: Modifier = Modifier) {
             .clip(CircleShape)
             .background(color),
     )
+}
+
+// ── 金额滚动 ──────────────────────────────────────────────────────
+
+/**
+ * 会“滚”的金额：数值变化时，变了的那几位上下滚动（变大向上、变小向下），没变的位不动。
+ * 字符按“从右往左第几位”对齐，配合等宽数字（tnum），小数点不会左右跳。
+ * 读屏与测试读到的是完整的金额文字。
+ */
+@Composable
+fun RollingAmount(
+    cents: Long,
+    style: TextStyle,
+    color: Color,
+    modifier: Modifier = Modifier,
+    format: (Long) -> String = { Money.format(it) },
+) {
+    val text = format(cents)
+    var previous by remember { mutableLongStateOf(cents) }
+    val up = cents >= previous
+    SideEffect { previous = cents }
+    Row(modifier.clearAndSetSemantics { this.text = AnnotatedString(text) }) {
+        val chars = text.toCharArray()
+        chars.forEachIndexed { index, ch ->
+            key(chars.size - index) {
+                AnimatedContent(
+                    targetState = ch,
+                    transitionSpec = {
+                        val enter = slideInVertically(tween(260, easing = FastOutSlowInEasing)) { h -> if (up) h else -h } + fadeIn(tween(200))
+                        val exit = slideOutVertically(tween(260, easing = FastOutSlowInEasing)) { h -> if (up) -h else h } + fadeOut(tween(160))
+                        (enter togetherWith exit).using(SizeTransform(clip = true))
+                    },
+                    label = "roll",
+                ) { c ->
+                    Text(c.toString(), style = style, color = color, maxLines = 1)
+                }
+            }
+        }
+    }
+}
+
+// ── 空状态插画（Compose 自绘，不用图片资源） ───────────────────────
+
+enum class LedgerArt { EMPTY_MONTH, NO_MATCH, NO_STATS }
+
+/**
+ * 账本的空状态插画：只用描边、浅底与一两处品牌色，与卡包的空状态同一笔法。
+ *  - [LedgerArt.EMPTY_MONTH]：一本摊开的账簿，旁边一枚铜钱
+ *  - [LedgerArt.NO_MATCH]：一张小票与放大镜
+ *  - [LedgerArt.NO_STATS]：一圈虚线空环与三根矮柱
+ */
+@Composable
+fun LedgerIllustration(art: LedgerArt, modifier: Modifier = Modifier) {
+    val line = Jk.colors.border
+    val ink = Jk.colors.textTertiary.copy(alpha = 0.55f)
+    val fill = Jk.colors.surface
+    val soft = Jk.colors.surfaceAlt
+    val accent = Jk.colors.accent
+    val accentSoft = Jk.colors.accentSoft
+    Canvas(modifier.size(width = 132.dp, height = 96.dp)) {
+        val u = 1.dp.toPx()
+        val w = size.width
+        val h = size.height
+        val stroke = Stroke(width = 1.4f * u)
+        when (art) {
+            LedgerArt.EMPTY_MONTH -> {
+                // 账簿：左右两页，中缝
+                val left = 18f * u
+                val top = 16f * u
+                val pageW = 44f * u
+                val pageH = 64f * u
+                val corner = CornerRadius(8f * u)
+                drawRoundRect(soft, Offset(left + 4f * u, top + 4f * u), Size(pageW * 2f, pageH), corner)
+                drawRoundRect(fill, Offset(left, top), Size(pageW * 2f, pageH), corner)
+                drawRoundRect(line, Offset(left, top), Size(pageW * 2f, pageH), corner, style = stroke)
+                drawLine(line, Offset(left + pageW, top), Offset(left + pageW, top + pageH), strokeWidth = 1.4f * u)
+                for (row in 0 until 4) {
+                    val y = top + 14f * u + row * 12f * u
+                    drawLine(line, Offset(left + 8f * u, y), Offset(left + pageW - 8f * u, y), strokeWidth = 2.6f * u, cap = StrokeCap.Round)
+                    val end = if (row % 2 == 0) pageW - 20f * u else pageW - 12f * u
+                    drawLine(line, Offset(left + pageW + 8f * u, y), Offset(left + pageW + end, y), strokeWidth = 2.6f * u, cap = StrokeCap.Round)
+                }
+                // 铜钱：外圆内方
+                val c = Offset(w - 22f * u, h - 22f * u)
+                drawCircle(accentSoft, 15f * u, c)
+                drawCircle(accent, 15f * u, c, style = Stroke(1.8f * u))
+                drawRect(accent, Offset(c.x - 4.5f * u, c.y - 4.5f * u), Size(9f * u, 9f * u), style = Stroke(1.8f * u))
+            }
+            LedgerArt.NO_MATCH -> {
+                // 小票：底边锯齿
+                val left = 30f * u
+                val top = 10f * u
+                val rw = 52f * u
+                val rh = 70f * u
+                val path = Path().apply {
+                    moveTo(left, top)
+                    lineTo(left + rw, top)
+                    lineTo(left + rw, top + rh)
+                    val teeth = 6
+                    val step = rw / teeth
+                    for (t in teeth - 1 downTo 0) {
+                        lineTo(left + step * t + step / 2f, top + rh - 5f * u)
+                        lineTo(left + step * t, top + rh)
+                    }
+                    close()
+                }
+                drawPath(path, fill)
+                drawPath(path, line, style = stroke)
+                for (row in 0 until 3) {
+                    val y = top + 16f * u + row * 12f * u
+                    drawLine(line, Offset(left + 9f * u, y), Offset(left + rw - (if (row == 1) 22f else 12f) * u, y), strokeWidth = 2.6f * u, cap = StrokeCap.Round)
+                }
+                // 放大镜
+                val c = Offset(left + rw + 12f * u, top + rh - 18f * u)
+                drawCircle(fill, 13f * u, c)
+                drawCircle(accent, 13f * u, c, style = Stroke(2f * u))
+                drawLine(accent, Offset(c.x + 9.5f * u, c.y + 9.5f * u), Offset(c.x + 19f * u, c.y + 19f * u), strokeWidth = 3.2f * u, cap = StrokeCap.Round)
+            }
+            LedgerArt.NO_STATS -> {
+                val c = Offset(44f * u, h / 2f)
+                drawCircle(line, 28f * u, c, style = Stroke(8f * u, pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f * u, 5f * u))))
+                drawCircle(accent, 3f * u, c)
+                val baseY = h - 18f * u
+                val heights = listOf(18f, 30f, 22f)
+                heights.forEachIndexed { i, bh ->
+                    val x = 86f * u + i * 13f * u
+                    drawRoundRect(
+                        if (i == 1) accentSoft else soft,
+                        Offset(x, baseY - bh * u),
+                        Size(8f * u, bh * u),
+                        CornerRadius(4f * u),
+                    )
+                    drawRoundRect(if (i == 1) accent else ink, Offset(x, baseY - bh * u), Size(8f * u, bh * u), CornerRadius(4f * u), style = Stroke(1.2f * u))
+                }
+                drawLine(line, Offset(80f * u, baseY + 0.7f * u), Offset(w - 6f * u, baseY + 0.7f * u), strokeWidth = 1.4f * u, cap = StrokeCap.Round)
+            }
+        }
+    }
 }

@@ -37,6 +37,7 @@ import com.xiguli.jinkui.data.ledger.LedgerCategory
 import com.xiguli.jinkui.data.ledger.LedgerData
 import com.xiguli.jinkui.data.ledger.LedgerMath
 import com.xiguli.jinkui.data.ledger.Money
+import androidx.compose.ui.unit.dp
 import com.xiguli.jinkui.data.ledger.TxType
 import com.xiguli.jinkui.ui.LocalContainer
 import com.xiguli.jinkui.ui.components.ButtonStyle
@@ -142,7 +143,7 @@ fun LedgerBudgetScreen(onBack: () -> Unit) {
                     Spacer(Modifier.height(Space.x1_5))
                     JkButton("设置总预算", { edit = BudgetEdit(null, 0L) }, compact = true)
                 } else {
-                    Text(Money.format(total.budget.amount), style = JkType.display, color = colors.textPrimary)
+                    RollingAmount(total.budget.amount, JkType.amountLarge, colors.textPrimary)
                     Spacer(Modifier.height(Space.x1))
                     BudgetBar(total.ratio, total.over)
                     Spacer(Modifier.height(Space.x1))
@@ -188,7 +189,7 @@ fun LedgerBudgetScreen(onBack: () -> Unit) {
                             .padding(horizontal = Space.x2, vertical = Space.x1_5),
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            RoundIcon(categoryIcon(category?.icon), colors.accent)
+                            CategoryChip(categoryIcon(category?.icon), TxType.EXPENSE, size = 36.dp)
                             Spacer(Modifier.width(Space.x1_5))
                             Column(Modifier.weight(1f)) {
                                 Text(category?.name ?: "已删除的分类", style = JkType.body, color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)

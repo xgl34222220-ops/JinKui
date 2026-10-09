@@ -1,5 +1,19 @@
 package com.xiguli.jinkui.ui.ledger
 
+import android.os.Build
+import android.view.HapticFeedbackConstants
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.semantics.semantics
+import com.xiguli.jinkui.ui.theme.JkSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -256,24 +270,47 @@ fun EntrySheet(
             InfoChip(Icons.Outlined.Schedule, "%02d:%02d".format(clock.hour, clock.minute), { showTime = true })
         }
 
-        // 金额
+        // 金额：左边是这笔的类型与分类，右边等宽数字的金额（颜色随类型）
         Spacer(Modifier.height(Space.x1_5))
-        Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
-            Text(
-                text = "¥ " + amount.ifEmpty { "0" },
-                style = JkType.display,
-                color = if (amount.isEmpty()) colors.textTertiary else colors.textPrimary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                textAlign = TextAlign.End,
-            )
-            if (AmountInput.hasOperator(amount)) {
-                val value = Money.evaluate(amount)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(Radius.control)
+                .background(txSoft(type).copy(alpha = if (colors.isDark) 0.7f else 0.55f))
+                .animateContentSize(tween(200))
+                .padding(horizontal = Space.x2, vertical = Space.x1_5),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(type.label, style = JkType.overline, color = txColor(type))
                 Text(
-                    text = if (value != null) "= ${Money.format(value)}" else "算式不完整",
-                    style = JkType.small,
-                    color = if (value != null && value > 0) colors.textSecondary else colors.danger,
+                    text = if (type == TxType.TRANSFER) "账户之间" else (selectedCategory?.name ?: tops.firstOrNull()?.name ?: "未分类"),
+                    style = JkType.caption,
+                    color = colors.textTertiary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
+            }
+            Column(horizontalAlignment = Alignment.End) {
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text("¥", style = JkType.title, color = colors.textTertiary, modifier = Modifier.padding(end = Space.x05, bottom = 3.dp))
+                    Text(
+                        text = amount.ifEmpty { "0" },
+                        style = JkType.amountLarge,
+                        color = if (amount.isEmpty()) colors.textTertiary else amountColor(type),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        textAlign = TextAlign.End,
+                    )
+                }
+                if (AmountInput.hasOperator(amount)) {
+                    val value = Money.evaluate(amount)
+                    Text(
+                        text = if (value != null) "= ${Money.format(value)}" else "算式不完整",
+                        style = JkType.amountSmall,
+                        color = if (value != null && value > 0) colors.textSecondary else colors.danger,
+                    )
+                }
             }
         }
 
@@ -385,12 +422,15 @@ private fun shortDate(date: LocalDate, today: LocalDate = LocalDate.now()): Stri
 @Composable
 private fun CategoryTile(category: LedgerCategory, selected: Boolean, onClick: () -> Unit) {
     val colors = Jk.colors
+    val tone = txColor(category.type)
+    val bg by animateColorAsState(if (selected) txSoft(category.type) else colors.surface, tween(160), label = "tileBg")
+    val edge by animateColorAsState(if (selected) tone else colors.border, tween(160), label = "tileEdge")
     Column(
         modifier = Modifier
             .width(64.dp)
             .clip(Radius.tile)
-            .background(if (selected) colors.accentSoft else colors.surface)
-            .border(1.dp, if (selected) colors.accent else colors.border, Radius.tile)
+            .background(bg)
+            .border(1.dp, edge, Radius.tile)
             .selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
             .padding(vertical = Space.x1),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -398,8 +438,8 @@ private fun CategoryTile(category: LedgerCategory, selected: Boolean, onClick: (
         Icon(
             categoryIcon(category.icon),
             contentDescription = null,
-            tint = if (selected) colors.accent else colors.textSecondary,
-            modifier = Modifier.size(20.dp),
+            tint = if (selected) tone else colors.textSecondary,
+            modifier = Modifier.size(JkSize.icon),
         )
         Spacer(Modifier.height(2.dp))
         Text(
@@ -484,9 +524,9 @@ fun AccountPickerSheet(
     }
 }
 
-/** 4×4 数字键盘：最后一列是退格、加、减与“完成”。 */
+/** 4×4 数字键盘：最后一列是退格、加、减与“完成”。每个键按下有轻微的缩放、变色与触感反馈。 */
 @Composable
-private fun Keypad(
+internal fun Keypad(
     onKey: (KeypadKey) -> Unit,
     onAgain: (() -> Unit)?,
     onDone: () -> Unit,
@@ -512,18 +552,71 @@ private fun Keypad(
             } else {
                 Spacer(Modifier.weight(1f))
             }
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .height(52.dp)
-                    .clip(Radius.control)
-                    .background(Jk.colors.primary)
-                    .clickable(role = Role.Button, onClickLabel = "保存", onClick = onDone),
-                contentAlignment = Alignment.Center,
+            PressableKey(
+                onClick = onDone,
+                background = Jk.colors.primary,
+                pressedBackground = Jk.colors.primary.copy(alpha = 0.86f),
+                border = null,
+                haptic = confirmHaptic(),
+                modifier = Modifier.semantics { contentDescription = "保存"; role = Role.Button },
             ) {
                 Text("完成", style = JkType.bodyStrong, color = Jk.colors.onPrimary)
             }
         }
+    }
+}
+
+/** API 30 起才有 CONFIRM；更早的系统退回到长按的触感。 */
+private fun confirmHaptic(): Int =
+    if (Build.VERSION.SDK_INT >= 30) HapticFeedbackConstants.CONFIRM else HapticFeedbackConstants.LONG_PRESS
+
+/** 键盘上的一个键：按下时缩到 96%、底色加深一档，并发出键盘触感（跟随系统触感设置）。 */
+@Composable
+private fun RowScope.PressableKey(
+    onClick: () -> Unit,
+    background: Color,
+    pressedBackground: Color,
+    border: Color?,
+    modifier: Modifier = Modifier,
+    onLongClick: (() -> Unit)? = null,
+    haptic: Int = HapticFeedbackConstants.KEYBOARD_TAP,
+    content: @Composable () -> Unit,
+) {
+    val view = LocalView.current
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val scale by animateFloatAsState(if (pressed) 0.96f else 1f, spring(dampingRatio = 0.7f, stiffness = 900f), label = "keyScale")
+    val fill by animateColorAsState(if (pressed) pressedBackground else background, tween(90), label = "keyFill")
+    Box(
+        modifier = Modifier
+            .weight(1f)
+            .height(52.dp)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .clip(Radius.control)
+            .background(fill)
+            .then(if (border != null) Modifier.border(1.dp, border, Radius.control) else Modifier)
+            .combinedClickable(
+                interactionSource = interaction,
+                indication = null,
+                role = Role.Button,
+                onLongClick = onLongClick?.let { long ->
+                    {
+                        view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                        long()
+                    }
+                },
+                onClick = {
+                    view.performHapticFeedback(haptic)
+                    onClick()
+                },
+            )
+            .then(modifier),
+        contentAlignment = Alignment.Center,
+    ) {
+        content()
     }
 }
 
@@ -536,33 +629,26 @@ private fun RowScope.DigitKey(
     description: String? = null,
 ) {
     val colors = Jk.colors
-    Box(
-        modifier = Modifier
-            .weight(1f)
-            .height(52.dp)
-            .clip(Radius.control)
-            .background(if (subtle) colors.surfaceAlt else colors.surface)
-            .border(1.dp, colors.border, Radius.control)
-            .clickable(role = Role.Button, onClick = onClick)
-            .then(if (description != null) Modifier.clearAndSetSemantics { contentDescription = description; role = Role.Button } else Modifier),
-        contentAlignment = Alignment.Center,
+    PressableKey(
+        onClick = onClick,
+        background = if (subtle) colors.surfaceAlt else colors.surface,
+        pressedBackground = if (subtle) colors.border else colors.surfaceAlt,
+        border = colors.border,
+        modifier = if (description != null) Modifier.clearAndSetSemantics { contentDescription = description; role = Role.Button } else Modifier,
     ) {
-        Text(text, style = if (small) JkType.bodyStrong else JkType.title, color = colors.textPrimary)
+        Text(text, style = if (small) JkType.bodyStrong else JkType.title.copy(fontFeatureSettings = "tnum"), color = colors.textPrimary)
     }
 }
 
 @Composable
 private fun RowScope.IconKey(icon: ImageVector, description: String, onClick: () -> Unit, onLongClick: () -> Unit) {
     val colors = Jk.colors
-    Box(
-        modifier = Modifier
-            .weight(1f)
-            .height(52.dp)
-            .clip(Radius.control)
-            .background(colors.surfaceAlt)
-            .border(1.dp, colors.border, Radius.control)
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
-        contentAlignment = Alignment.Center,
+    PressableKey(
+        onClick = onClick,
+        onLongClick = onLongClick,
+        background = colors.surfaceAlt,
+        pressedBackground = colors.border,
+        border = colors.border,
     ) {
         Icon(icon, contentDescription = description, tint = colors.textPrimary, modifier = Modifier.size(22.dp))
     }
