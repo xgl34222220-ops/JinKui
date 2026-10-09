@@ -33,6 +33,19 @@ jobs:
             exit 1
           fi
 
+      - name: 打印 Debug APK 签名证书 SHA-256（应恒为仓库内 app/debug.jks 的指纹）
+        run: |
+          APKSIGNER=$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)apksigner
+          "$APKSIGNER" verify --print-certs app/build/outputs/apk/debug/app-debug.apk | tee signing.txt
+          SHA=$(grep -m1 "SHA-256 digest" signing.txt | awk '{print $NF}')
+          echo "### Debug APK 签名证书 SHA-256" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`$SHA\`" >> "$GITHUB_STEP_SUMMARY"
+          EXPECTED=d10ec61174544bd85b780d9d0a034f3b127ce59c8d3bf2c059987ed888b9010f
+          if [ "$SHA" != "$EXPECTED" ]; then
+            echo "::error::Debug APK 签名与 app/debug.jks 不一致：$SHA"
+            exit 1
+          fi
+
       - uses: actions/upload-artifact@v4
         with:
           name: jinkui-debug-apk

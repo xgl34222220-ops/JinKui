@@ -10,6 +10,7 @@ import com.xiguli.jinkui.core.security.VaultMetaStore
 import com.xiguli.jinkui.data.db.AttachmentStore
 import com.xiguli.jinkui.data.db.VaultDatabase
 import com.xiguli.jinkui.data.repo.BackupRepository
+import com.xiguli.jinkui.data.repo.LedgerRepository
 import com.xiguli.jinkui.data.repo.SettingsRepository
 import com.xiguli.jinkui.data.repo.VaultRepository
 import kotlinx.coroutines.CoroutineScope
@@ -51,7 +52,8 @@ class AppContainer(app: Application) {
 
     val vault = VaultManager(meta, KeystoreManager(), database, attachments, settings)
     val repository = VaultRepository(database, attachments, vault, settings)
-    val backup = BackupRepository(app, vault, repository)
+    val ledger = LedgerRepository(database, vault)
+    val backup = BackupRepository(app, vault, repository, ledger)
     val clipboard = ClipboardGuard(app, settings, meta, scope)
     val lock = LockManager(vault, settings, scope)
 
@@ -62,10 +64,16 @@ class AppContainer(app: Application) {
     val justWiped = mutableStateOf(false)
 
     init {
-        vault.onUnlocked = { repository.load() }
+        vault.onUnlocked = {
+            repository.load()
+            ledger.load()
+        }
         // 锁定只丢弃内存明文；剪贴板按自己的倒计时清空，
         // 否则“复制后切到别的应用粘贴”会因为自动锁定而粘贴不到。
-        vault.onLocked = { repository.clear() }
+        vault.onLocked = {
+            repository.clear()
+            ledger.clear()
+        }
         // 上次运行若留下未清空的剪贴内容，启动时补清。
         clipboard.clearNow()
     }

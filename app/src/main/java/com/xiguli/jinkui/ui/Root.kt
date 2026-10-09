@@ -39,6 +39,14 @@ import com.xiguli.jinkui.ui.card.CardEditScreen
 import com.xiguli.jinkui.ui.components.LocalUserActivity
 import com.xiguli.jinkui.ui.health.HealthScreen
 import com.xiguli.jinkui.ui.home.HomeScreen
+import com.xiguli.jinkui.ui.ledger.HomeTabs
+import com.xiguli.jinkui.ui.ledger.LedgerAccountsScreen
+import com.xiguli.jinkui.ui.ledger.LedgerBudgetScreen
+import com.xiguli.jinkui.ui.ledger.LedgerCategoriesScreen
+import com.xiguli.jinkui.ui.ledger.LedgerRecurringScreen
+import com.xiguli.jinkui.ui.ledger.LedgerScreen
+import com.xiguli.jinkui.ui.ledger.LedgerStatsScreen
+import com.xiguli.jinkui.ui.nav.HomeTab
 import com.xiguli.jinkui.ui.organize.OrganizeScreen
 import com.xiguli.jinkui.ui.lock.LockScreen
 import com.xiguli.jinkui.ui.nav.Navigator
@@ -103,13 +111,28 @@ private fun MainNavigation() {
         key(entry.id) {
             ScreenEnter {
             when (val screen = entry.screen) {
-                Screen.Home -> HomeScreen(
-                    onOpen = { navigator.push(Screen.Detail(it)) },
-                    onCreate = { navigator.push(Screen.Edit(null, it)) },
-                    onSettings = { navigator.push(Screen.Settings) },
-                    onHealth = { navigator.push(Screen.Health) },
-                    onOrganize = { navigator.push(Screen.Organize) },
-                )
+                Screen.Home -> HomeTabs(
+                    selected = navigator.homeTab,
+                    onSelect = { navigator.homeTab = it },
+                ) { tab ->
+                    when (tab) {
+                        HomeTab.CARDS -> HomeScreen(
+                            onOpen = { navigator.push(Screen.Detail(it)) },
+                            onCreate = { navigator.push(Screen.Edit(null, it)) },
+                            onSettings = { navigator.push(Screen.Settings) },
+                            onHealth = { navigator.push(Screen.Health) },
+                            onOrganize = { navigator.push(Screen.Organize) },
+                        )
+                        HomeTab.LEDGER -> LedgerScreen(
+                            onAccounts = { navigator.push(Screen.LedgerAccounts) },
+                            onStats = { navigator.push(Screen.LedgerStats) },
+                            onBudget = { navigator.push(Screen.LedgerBudget) },
+                            onCategories = { navigator.push(Screen.LedgerCategories) },
+                            onRecurring = { navigator.push(Screen.LedgerRecurring) },
+                            onSettings = { navigator.push(Screen.Settings) },
+                        )
+                    }
+                }
                 is Screen.Detail -> CardDetailScreen(
                     cardId = screen.cardId,
                     onBack = { navigator.pop() },
@@ -127,6 +150,11 @@ private fun MainNavigation() {
                     onSettings = { navigator.push(Screen.Settings) },
                 )
                 Screen.Organize -> OrganizeScreen(onBack = { navigator.pop() })
+                Screen.LedgerAccounts -> LedgerAccountsScreen(onBack = { navigator.pop() })
+                Screen.LedgerStats -> LedgerStatsScreen(onBack = { navigator.pop() })
+                Screen.LedgerBudget -> LedgerBudgetScreen(onBack = { navigator.pop() })
+                Screen.LedgerCategories -> LedgerCategoriesScreen(onBack = { navigator.pop() })
+                Screen.LedgerRecurring -> LedgerRecurringScreen(onBack = { navigator.pop() })
             }
             }
         }

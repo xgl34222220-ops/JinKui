@@ -52,6 +52,16 @@ import com.xiguli.jinkui.AppContainer
 import com.xiguli.jinkui.data.model.Attachment
 import com.xiguli.jinkui.data.model.Card
 import com.xiguli.jinkui.data.model.CardField
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import kotlinx.coroutines.delay
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.material3.CircularProgressIndicator
+import com.xiguli.jinkui.data.model.copyText
+import com.xiguli.jinkui.data.model.totpConfig
+import com.xiguli.jinkui.core.crypto.Totp
 import com.xiguli.jinkui.data.model.CardTemplates
 import com.xiguli.jinkui.data.model.FieldKind
 import com.xiguli.jinkui.data.model.HistoryEntry
@@ -107,7 +117,12 @@ class CardDetailViewModel(private val container: AppContainer, private val cardI
     }
 
     fun copy(field: CardField) {
-        val seconds = container.clipboard.copy(field.label, field.value)
+        val text = field.copyText()
+        if (text == null) {
+            container.messages.show("「${field.label}」的密钥无效，请到编辑页修正")
+            return
+        }
+        val seconds = container.clipboard.copy(field.label, text)
         container.messages.show("已复制「${field.label}」，$seconds 秒后清空剪贴板")
     }
 
@@ -259,7 +274,8 @@ fun CardDetailScreen(cardId: String, onBack: () -> Unit, onEdit: () -> Unit) {
             ExpiryNote(current, Modifier.padding(start = Space.x05, top = Space.x1_5))
             // 按该类型模板的重要程度排序展示；保存的顺序不变。
             val visibleFields = remember(current) { CardTemplates.displayOrder(current).filter { it.value.isNotBlank() } }
-            val sensitiveIds = visibleFields.filter { it.sensitive }.map { it.id }
+            // 两步验证字段只显示验证码，没有“显示密钥”这一说
+            val sensitiveIds = visibleFields.filter { it.sensitive && it.kind != FieldKind.TOTP }.map { it.id }
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -294,6 +310,10 @@ fun CardDetailScreen(cardId: String, onBack: () -> Unit, onEdit: () -> Unit) {
                 JkCard(Modifier.fillMaxWidth(), padding = PaddingValues(vertical = Space.x05)) {
                     visibleFields.forEachIndexed { index, field ->
                         if (index > 0) JkDivider(inset = Space.x2)
+                        if (field.kind == FieldKind.TOTP) {
+                            TotpRow(field, onCopy = { viewModel.copy(field) })
+                            return@forEachIndexed
+                        }
                         FieldRow(
                             field = field,
                             emphasis = index == 0,
@@ -419,6 +439,64 @@ fun CardDetailScreen(cardId: String, onBack: () -> Unit, onEdit: () -> Unit) {
                 )
             }
         }
+    }
+}
+
+/**
+ * 两步验证码：每秒刷新一次，显示当前验证码与剩余秒数；点整行复制验证码（经 ClipboardGuard，按设置自动清空）。
+ * 密钥本身从不显示在这里。
+ */
+@Composable
+private fun TotpRow(field: CardField, onCopy: () -> Unit) {
+    val colors = Jk.colors
+    val config = remember(field.value) { field.totpConfig() }
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(config) {
+        while (config != null) {
+            now = System.currentTimeMillis()
+            delay(1_000L - now % 1_000L)
+        }
+    }
+    val code = remember(config, now / 1_000L) { config?.let { Totp.code(it, now) } }
+    val grouped = code?.code?.let { if (it.length == 8) it.chunked(4).joinToString(" ") else it.chunked(3).joinToString(" ") }
+    val label = field.label.ifBlank { "两步验证码" }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(enabled = code != null, onClickLabel = "复制验证码", onClick = onCopy)
+            .semantics(mergeDescendants = true) {
+                if (code != null) contentDescription = "$label ${code.code.toList().joinToString(" ")}，还剩 ${code.secondsLeft} 秒"
+            }
+            .padding(start = Space.x2, end = Space.x05, top = Space.x1_5, bottom = Space.x1_5),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            val subtitle = config?.let { c -> listOf(c.issuer, c.account).filter { it.isNotBlank() }.joinToString(" · ") }.orEmpty()
+            Text(if (subtitle.isEmpty()) label else "$label · $subtitle", style = JkType.caption, color = colors.textTertiary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Spacer(Modifier.height(Space.x05))
+            if (code == null || grouped == null) {
+                Text("密钥无效，请到编辑页修正", style = JkType.body, color = colors.danger)
+            } else {
+                Text(
+                    grouped,
+                    style = JkType.mono.copy(fontSize = JkType.title.fontSize, lineHeight = JkType.title.lineHeight),
+                    color = if (code.secondsLeft <= 5) colors.danger else colors.textPrimary,
+                )
+            }
+        }
+        if (code != null) {
+            Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(
+                    progress = { code.secondsLeft / code.period.toFloat() },
+                    modifier = Modifier.size(28.dp),
+                    color = if (code.secondsLeft <= 5) colors.danger else colors.accent,
+                    trackColor = colors.surfaceAlt,
+                    strokeWidth = 3.dp,
+                )
+                Text("${code.secondsLeft}", style = JkType.caption, color = colors.textSecondary)
+            }
+        }
+        JkIconButton(Icons.Outlined.ContentCopy, "复制验证码", onCopy, tint = colors.textTertiary, enabled = code != null)
     }
 }
 
