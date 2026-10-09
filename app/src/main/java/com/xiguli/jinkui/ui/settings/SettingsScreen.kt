@@ -77,6 +77,20 @@ import com.xiguli.jinkui.ui.theme.JkType
 import com.xiguli.jinkui.ui.theme.Radius
 import com.xiguli.jinkui.ui.theme.Space
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.QrCode2
+import androidx.compose.material3.Icon
+import androidx.compose.runtime.rememberCoroutineScope
+import com.xiguli.jinkui.core.qr.OtpMigration
+import com.xiguli.jinkui.core.qr.OtpQr
+import com.xiguli.jinkui.core.qr.OtpQrResult
+import com.xiguli.jinkui.data.repo.QrImageReader
+import com.xiguli.jinkui.ui.card.OtpBatchSheet
+import com.xiguli.jinkui.ui.theme.JkSize
 
 class SettingsViewModel(private val container: AppContainer) : ViewModel() {
     private val vault = container.vault
@@ -88,6 +102,8 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
         private set
     var biometricEnabled by mutableStateOf(vault.biometricEnabled)
         private set
+    /** 导出 / 导入完成后的结果卡片（标题 + 几行明细）；null 时不显示。 */
+    var result by mutableStateOf<OperationResult?>(null)
 
     fun refreshUnlockMethods() {
         pinEnabled = vault.pinEnabled
@@ -119,8 +135,15 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
         try {
             val exported = container.backup.export(target, password)
             container.settings.update { it.copy(lastBackupAt = System.currentTimeMillis()) }
-            container.messages.show("已导出 ${exported.cards} 张卡片、${exported.transactions} 笔账目的加密备份")
             onDone()
+            result = OperationResult(
+                title = "备份已导出",
+                lines = listOf(
+                    "卡片" to "${exported.cards} 张",
+                    "账目" to "${exported.transactions} 笔",
+                ),
+                note = "请把备份文件存到安全的地方。恢复时需要现在的主密码。",
+            )
         } catch (e: WrongSecretException) {
             dialogError = "主密码不正确"
         }
@@ -129,13 +152,18 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
     fun import(source: Uri, password: String, onDone: () -> Unit) = launchBusy {
         try {
             val summary = container.backup.import(source, password)
-            val ledgerNote = if (summary.ledgerAdded + summary.ledgerUpdated > 0) {
-                "；账本新增 ${summary.ledgerAdded}，更新 ${summary.ledgerUpdated}"
-            } else {
-                ""
-            }
-            container.messages.show("导入完成：新增 ${summary.added}，更新 ${summary.updated}，跳过 ${summary.skipped}$ledgerNote")
             onDone()
+            result = OperationResult(
+                title = "导入完成",
+                lines = buildList {
+                    add("新增卡片" to "${summary.added} 张")
+                    add("更新卡片" to "${summary.updated} 张")
+                    add("跳过（本机较新或相同）" to "${summary.skipped} 张")
+                    add("账本新增 / 更新" to "${summary.ledgerAdded} / ${summary.ledgerUpdated} 条")
+                    if (summary.ledgerSuppressed > 0) add("已删除、未加回" to "${summary.ledgerSuppressed} 条")
+                },
+                note = "导入只合并，不会删除本机已有的卡片或账目。",
+            )
         } catch (e: WrongSecretException) {
             dialogError = e.message
         } catch (e: BackupFormatException) {
@@ -168,6 +196,9 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
     }
 }
 
+/** 一次操作的结果：标题、若干“名称—数值”行与一句说明。 */
+class OperationResult(val title: String, val lines: List<Pair<String, String>>, val note: String? = null)
+
 private sealed interface SettingsDialog {
     data object AutoLock : SettingsDialog
     data object Clipboard : SettingsDialog
@@ -177,6 +208,8 @@ private sealed interface SettingsDialog {
     data class Export(val target: Uri) : SettingsDialog
     data class Import(val source: Uri) : SettingsDialog
     data object Wipe : SettingsDialog
+    data object RemovePin : SettingsDialog
+    data class OtpBatch(val batch: com.xiguli.jinkui.core.qr.MigrationBatch) : SettingsDialog
 }
 
 @Composable
@@ -201,6 +234,26 @@ fun SettingsScreen(onBack: () -> Unit) {
     }
     val importPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         if (uri != null) dialog = SettingsDialog.Import(uri)
+    }
+    // 身份验证器的导出二维码：从相册 / 文件选一张截图，离线识别（不需要相机或存储权限）
+    val scope = rememberCoroutineScope()
+    var scanningOtp by remember { mutableStateOf(false) }
+    val otpPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scanningOtp = true
+        scope.launch {
+            val read = runCatching { QrImageReader.read(context, uri) }
+            scanningOtp = false
+            read.exceptionOrNull()?.let {
+                container.messages.show(it.message ?: "无法读取这张图片")
+                return@launch
+            }
+            when (val parsed = OtpQr.interpret(read.getOrNull())) {
+                is OtpQrResult.Batch -> dialog = SettingsDialog.OtpBatch(parsed.batch)
+                is OtpQrResult.Ok -> dialog = SettingsDialog.OtpBatch(OtpMigration.single(parsed.uri))
+                is OtpQrResult.Rejected -> container.messages.show(parsed.message)
+            }
+        }
     }
 
     Column(
@@ -365,6 +418,21 @@ fun SettingsScreen(onBack: () -> Unit) {
                 modifier = Modifier.padding(start = Space.x05, top = Space.x1),
             )
 
+            JkSectionLabel("两步验证码")
+            JkCard(Modifier.fillMaxWidth(), padding = PaddingValues(vertical = Space.x05)) {
+                JkRow(
+                    title = if (scanningOtp) "正在识别二维码…" else "从身份验证器导入",
+                    subtitle = "选一张 Google 身份验证器“导出账号”的二维码截图，预览后选择要添加的账号",
+                    icon = Icons.Outlined.QrCode2,
+                    onClick = {
+                        if (!scanningOtp) {
+                            container.lock.holdForExternalActivity()
+                            otpPicker.launch("image/*")
+                        }
+                    },
+                )
+            }
+
             JkSectionLabel("其他")
             JkCard(Modifier.fillMaxWidth(), padding = PaddingValues(vertical = Space.x05)) {
                 JkRow(
@@ -389,6 +457,10 @@ fun SettingsScreen(onBack: () -> Unit) {
                 modifier = Modifier.padding(start = Space.x05, top = Space.x2),
             )
         }
+    }
+
+    viewModel.result?.let { done ->
+        ResultDialog(done, onDismiss = { viewModel.result = null })
     }
 
     when (val current = dialog) {
@@ -428,13 +500,23 @@ fun SettingsScreen(onBack: () -> Unit) {
                 title = "移除 PIN",
                 icon = Icons.Outlined.DeleteForever,
                 danger = true,
-                onClick = {
-                    viewModel.removePin()
-                    close()
-                },
+                onClick = { dialog = SettingsDialog.RemovePin },
                 modifier = Modifier.clip(Radius.control),
             )
         }
+        SettingsDialog.RemovePin -> JkDialog(
+            title = "移除 PIN？",
+            onDismiss = close,
+            confirmText = "移除",
+            danger = true,
+            onConfirm = {
+                viewModel.removePin()
+                close()
+            },
+        ) {
+            Text("移除后只能用主密码或生物识别解锁。之后可以随时重新设置。", style = JkType.body, color = colors.textSecondary)
+        }
+        is SettingsDialog.OtpBatch -> OtpBatchSheet(current.batch, onDismiss = close)
         SettingsDialog.ChangePassword -> ChangePasswordDialog(viewModel, close)
         is SettingsDialog.Export -> PasswordDialog(
             title = "导出加密备份",
@@ -465,6 +547,32 @@ fun SettingsScreen(onBack: () -> Unit) {
             onDismiss = close,
             onConfirm = { password -> viewModel.wipe(password) },
         )
+    }
+}
+
+/** 导出 / 导入的结果：一个对勾、标题与逐行明细，数字用等宽字形对齐。 */
+@Composable
+private fun ResultDialog(result: OperationResult, onDismiss: () -> Unit) {
+    val colors = Jk.colors
+    JkDialog(title = result.title, onDismiss = onDismiss, confirmText = "好", onConfirm = onDismiss, dismissText = null) {
+        Box(
+            modifier = Modifier
+                .size(JkSize.chip)
+                .clip(CircleShape)
+                .background(colors.incomeSoft),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.Outlined.Check, contentDescription = null, tint = colors.income, modifier = Modifier.size(JkSize.icon))
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(Space.x05)) {
+            for ((label, value) in result.lines) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(label, style = JkType.small, color = colors.textSecondary, modifier = Modifier.weight(1f))
+                    Text(value, style = JkType.amountSmall, color = colors.textPrimary)
+                }
+            }
+        }
+        if (result.note != null) Text(result.note, style = JkType.caption, color = colors.textTertiary)
     }
 }
 
@@ -527,6 +635,7 @@ private fun PasswordDialog(
             placeholder = "主密码",
             secret = true,
             imeAction = ImeAction.Done,
+            onImeAction = { if (password.isNotEmpty() && !viewModel.busy) onConfirm(password) },
             error = viewModel.dialogError,
         )
         if (viewModel.busy) {

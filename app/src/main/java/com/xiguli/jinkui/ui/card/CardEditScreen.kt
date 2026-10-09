@@ -523,6 +523,7 @@ private fun FieldEditor(field: DraftField, hint: String, onRemove: () -> Unit, o
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var scanning by remember { mutableStateOf(false) }
+    var batch by remember { mutableStateOf<com.xiguli.jinkui.core.qr.MigrationBatch?>(null) }
     val qrPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         if (uri != null) {
             scanning = true
@@ -540,10 +541,23 @@ private fun FieldEditor(field: DraftField, hint: String, onRemove: () -> Unit, o
                         field.value = result.uri
                         container.messages.show("已从二维码填入两步验证码")
                     }
+                    is OtpQrResult.Batch -> {
+                        val usable = result.batch.entries.filter { it.usable }
+                        if (result.batch.entries.size == 1 && usable.size == 1) {
+                            // 只有一个账号：直接填进当前字段
+                            field.value = usable.single().config!!.toUri()
+                            container.messages.show("已从导出二维码填入两步验证码")
+                        } else {
+                            batch = result.batch
+                        }
+                    }
                     is OtpQrResult.Rejected -> container.messages.show(result.message)
                 }
             }
         }
+    }
+    batch?.let { pending ->
+        OtpBatchSheet(pending, onDismiss = { batch = null })
     }
     Column(
         modifier = Modifier
@@ -606,7 +620,13 @@ private fun FieldEditor(field: DraftField, hint: String, onRemove: () -> Unit, o
                 JkIconButton(
                     Icons.Outlined.QrCodeScanner,
                     if (scanning) "正在识别二维码" else "从相册图片识别二维码",
-                    { if (!scanning) qrPicker.launch("image/*") },
+                    {
+                        if (!scanning) {
+                            // 去系统选图期间暂不因切后台而锁定，否则回来时草稿已被清掉
+                            container.lock.holdForExternalActivity()
+                            qrPicker.launch("image/*")
+                        }
+                    },
                     tint = if (scanning) colors.textTertiary else colors.textSecondary,
                 )
             }
