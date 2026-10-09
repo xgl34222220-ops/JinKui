@@ -18,8 +18,16 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
-      - name: 单元测试（加密工具类）
+      - name: 单元测试与界面测试（Robolectric）
         run: ./gradlew testDebugUnitTest
+
+      - name: 上传账本界面截图（Robolectric 渲染）
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jinkui-ui-screenshots
+          path: app/build/outputs/ui-screenshots/
+          if-no-files-found: ignore
 
       - name: 构建 Debug APK
         run: ./gradlew assembleDebug
