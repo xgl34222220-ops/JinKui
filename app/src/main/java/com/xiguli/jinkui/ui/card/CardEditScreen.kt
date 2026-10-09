@@ -72,6 +72,10 @@ import com.xiguli.jinkui.data.model.CardType
 import com.xiguli.jinkui.data.model.FieldKind
 import androidx.compose.material.icons.outlined.Timer
 import com.xiguli.jinkui.core.crypto.Totp
+import com.xiguli.jinkui.data.repo.QrImageReader
+import com.xiguli.jinkui.core.qr.OtpQrResult
+import com.xiguli.jinkui.core.qr.OtpQr
+import androidx.compose.material.icons.outlined.QrCodeScanner
 import com.xiguli.jinkui.data.model.PendingAttachment
 import com.xiguli.jinkui.data.repo.ImageImporter
 import com.xiguli.jinkui.ui.LocalContainer
@@ -514,6 +518,33 @@ fun CardEditScreen(cardId: String?, newType: CardType?, onClose: () -> Unit) {
 private fun FieldEditor(field: DraftField, hint: String, onRemove: () -> Unit, onGenerate: () -> Unit) {
     val colors = Jk.colors
     var revealed by remember { mutableStateOf(false) }
+    // 两步验证码：从相册 / 文件里选一张二维码截图，离线识别后填入（系统选择器授权单张图片，不需要任何权限）
+    val container = LocalContainer.current
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var scanning by remember { mutableStateOf(false) }
+    val qrPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+        if (uri != null) {
+            scanning = true
+            scope.launch {
+                val read = runCatching { QrImageReader.read(context, uri) }
+                scanning = false
+                val error = read.exceptionOrNull()
+                if (error != null) {
+                    container.messages.show(error.message ?: "无法读取这张图片")
+                    return@launch
+                }
+                val text = read.getOrNull()
+                when (val result = OtpQr.interpret(text)) {
+                    is OtpQrResult.Ok -> {
+                        field.value = result.uri
+                        container.messages.show("已从二维码填入两步验证码")
+                    }
+                    is OtpQrResult.Rejected -> container.messages.show(result.message)
+                }
+            }
+        }
+    }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -571,6 +602,14 @@ private fun FieldEditor(field: DraftField, hint: String, onRemove: () -> Unit, o
             if (field.kind == FieldKind.PASSWORD) {
                 JkIconButton(Icons.Outlined.AutoFixHigh, "生成密码", onGenerate)
             }
+            if (field.kind == FieldKind.TOTP) {
+                JkIconButton(
+                    Icons.Outlined.QrCodeScanner,
+                    if (scanning) "正在识别二维码" else "从相册图片识别二维码",
+                    { if (!scanning) qrPicker.launch("image/*") },
+                    tint = if (scanning) colors.textTertiary else colors.textSecondary,
+                )
+            }
             if (field.sensitive) {
                 JkIconButton(
                     icon = if (revealed) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
@@ -584,7 +623,7 @@ private fun FieldEditor(field: DraftField, hint: String, onRemove: () -> Unit, o
         if (field.kind == FieldKind.TOTP) {
             val error = remember(field.value) { Totp.errorOf(field.value) }
             Text(
-                text = error ?: "支持 SHA1 / SHA256 / SHA512、6 或 8 位、30 或 60 秒。密钥只存在本机，加密保存。",
+                text = error ?: "支持 SHA1 / SHA256 / SHA512、6 或 8 位、30 或 60 秒；也可以点右侧图标，从相册里的二维码截图识别。密钥只存在本机，加密保存。",
                 style = JkType.caption,
                 color = if (error != null) colors.danger else colors.textTertiary,
                 modifier = Modifier.padding(start = Space.x2, end = Space.x2, bottom = Space.x1_5),

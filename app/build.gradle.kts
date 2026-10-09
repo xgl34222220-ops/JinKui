@@ -12,8 +12,8 @@ android {
         applicationId = "com.xiguli.jinkui"
         minSdk = 26
         targetSdk = 34
-        versionCode = 11
-        versionName = "0.7.0"
+        versionCode = 12
+        versionName = "0.8.0"
     }
 
     // 固定的调试签名：仓库内的 app/debug.jks，口令公开（jinkui-debug），只用于 debug 构建。
@@ -65,6 +65,14 @@ android {
 
     testOptions {
         unitTests.isReturnDefaultValues = true
+        // Robolectric 界面测试需要合并后的资源与清单
+        unitTests.isIncludeAndroidResources = true
+        unitTests.all {
+            it.maxHeapSize = "2g"
+            // Robolectric 的原生图形（用于界面截图）只支持 x86_64 等平台；其他架构退回 LEGACY，断言照跑
+            val arch = System.getProperty("os.arch").lowercase()
+            it.systemProperty("robolectric.graphicsMode", if (arch == "amd64" || arch == "x86_64") "NATIVE" else "LEGACY")
+        }
     }
 }
 
@@ -91,7 +99,14 @@ dependencies {
     implementation("androidx.sqlite:sqlite-ktx:2.4.0")
     implementation("net.zetetic:sqlcipher-android:4.6.1@aar")
 
+    // 离线识别相册图片里的二维码（两步验证码），纯 Java，Apache-2.0，不联网
+    implementation("com.google.zxing:core:3.5.3")
+
     testImplementation("junit:junit:4.13.2")
+    // 账本页面的界面测试：在 JVM 上用 Robolectric 跑 Compose，不进 APK、不加任何权限或测试用 Activity
+    testImplementation(platform("androidx.compose:compose-bom:2024.09.00"))
+    testImplementation("androidx.compose.ui:ui-test-junit4")
+    testImplementation("org.robolectric:robolectric:4.13")
     testImplementation("org.json:json:20240303")
     // 只用于在 JVM 上跑数据库迁移测试，不进 APK
     testImplementation("org.xerial:sqlite-jdbc:3.46.1.3")
