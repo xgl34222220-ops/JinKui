@@ -12,11 +12,26 @@ android {
         applicationId = "com.xiguli.jinkui"
         minSdk = 26
         targetSdk = 34
-        versionCode = 10
-        versionName = "0.6.0"
+        versionCode = 11
+        versionName = "0.7.0"
+    }
+
+    // 固定的调试签名：仓库内的 app/debug.jks，口令公开（jinkui-debug），只用于 debug 构建。
+    // 这样每次 CI 产出的 Debug APK 签名一致，可以直接覆盖安装、保留数据。
+    // 它不是秘密，绝不能用于 release；release 签名需自行配置。
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file("debug.jks")
+            storePassword = "jinkui-debug"
+            keyAlias = "jinkui-debug"
+            keyPassword = "jinkui-debug"
+        }
     }
 
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("debug")
+        }
         release {
             isMinifyEnabled = true
             isShrinkResources = true
