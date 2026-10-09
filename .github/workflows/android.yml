@@ -21,7 +21,7 @@ jobs:
       - name: 单元测试与界面测试（Robolectric）
         run: ./gradlew testDebugUnitTest
 
-      - name: 上传账本界面截图（Robolectric 渲染）
+      - name: 上传界面截图（卡包与账本，Robolectric 渲染）
         if: always()
         uses: actions/upload-artifact@v4
         with:
