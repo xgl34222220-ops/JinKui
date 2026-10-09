@@ -57,7 +57,8 @@ class FieldCipherTest {
         val local = FieldCipher(ByteArray(32) { 5 })
         val token = local.encrypt("123456", "f")
         local.wipe()
-        assertThrows(WrongSecretException::class.java) { local.decrypt(token, "f") }
+        // 清零后报“已锁定”而不是“密文损坏”：上层据此区分锁定与真正的数据损坏。
+        assertThrows(IllegalStateException::class.java) { local.decrypt(token, "f") }
     }
 
     @Test
