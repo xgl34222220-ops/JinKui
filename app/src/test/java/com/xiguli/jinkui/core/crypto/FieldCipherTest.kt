@@ -4,6 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class FieldCipherTest {
@@ -56,6 +57,27 @@ class FieldCipherTest {
         val local = FieldCipher(ByteArray(32) { 5 })
         val token = local.encrypt("123456", "f")
         local.wipe()
-        assertThrows(WrongSecretException::class.java) { local.decrypt(token, "f") }
+        // 清零后报“已锁定”而不是“密文损坏”：上层据此区分锁定与真正的数据损坏。
+        assertThrows(IllegalStateException::class.java) { local.decrypt(token, "f") }
+    }
+
+    @Test
+    fun wipedCipherRefusesToEncryptOrDecrypt() {
+        val local = FieldCipher(ByteArray(32) { 7 })
+        val token = local.encrypt("secret", "field:c1:f1")
+        local.wipe()
+        assertTrue(local.isWiped)
+        // 锁定后绝不能产出用全零密钥算出来的密文，也不能再解出明文。
+        assertThrows(IllegalStateException::class.java) { local.encrypt("secret", "field:c1:f1") }
+        assertThrows(IllegalStateException::class.java) { local.decrypt(token, "field:c1:f1") }
+        assertThrows(IllegalStateException::class.java) { local.encryptBytes(byteArrayOf(1, 2), "attachment:a") }
+    }
+
+    @Test
+    fun wipingDoesNotTouchTheCallersKeyArray() {
+        val raw = ByteArray(32) { 9 }
+        val local = FieldCipher(raw)
+        local.wipe()
+        assertTrue(raw.all { it == 9.toByte() })
     }
 }

@@ -298,10 +298,15 @@ class VaultManager(
     }
 
     private fun lockInternal() {
-        runCatching { onLocked?.invoke() }
-        keys?.wipe()
+        // 先摘掉会话密钥（仓库据此拒绝再把明文放回内存），再丢弃明文缓存。
+        val session = keys
         keys = null
+        runCatching { onLocked?.invoke() }
+        // 先关库、后清零密钥：database.close() 会等正在进行的事务提交完。
+        // 反过来的话，后台线程可能在密钥已被清零、数据库尚未关闭的空隙里，
+        // 把用全零密钥加密的字段写进库里，下次解锁就成了“数据损坏，无法解密”。
         database.close()
+        session?.wipe()
     }
 
     /** 永久清空本机全部数据：数据库、附件、密钥信封与 Keystore 密钥。 */
@@ -310,10 +315,11 @@ class VaultManager(
     }
 
     private fun wipeLocked() {
-        runCatching { onLocked?.invoke() }
-        keys?.wipe()
+        val session = keys
         keys = null
+        runCatching { onLocked?.invoke() }
         runCatching { database.destroy() }
+        session?.wipe()
         attachments.deleteAll()
         meta.clear()
         keystore.deleteAll()

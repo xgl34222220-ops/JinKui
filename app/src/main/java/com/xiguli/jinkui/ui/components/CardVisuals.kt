@@ -18,6 +18,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AccountBalance
 import androidx.compose.material.icons.outlined.Badge
+import androidx.compose.material.icons.outlined.BrokenImage
 import androidx.compose.material.icons.outlined.Category
 import androidx.compose.material.icons.outlined.DirectionsCar
 import androidx.compose.material.icons.outlined.Flight
@@ -128,6 +129,8 @@ fun decodeSampled(bytes: ByteArray, maxEdge: Int): ImageBitmap? {
     return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)?.asImageBitmap()
 }
 
+private object ImageLoadFailed
+
 /** 附件缩略图 / 大图：[load] 在后台解密并返回图片字节。 */
 @Composable
 fun SecureImage(
@@ -137,15 +140,38 @@ fun SecureImage(
     contentScale: ContentScale = ContentScale.Crop,
     load: suspend () -> ByteArray,
 ) {
-    val bitmap by produceState<ImageBitmap?>(initialValue = null, key) {
+    // null：读取中；Failed：解密或解码失败；否则为位图。
+    val result by produceState<Any?>(initialValue = null, key) {
         value = withContext(Dispatchers.Default) {
-            runCatching { decodeSampled(load(), maxEdge) }.getOrNull()
+            runCatching {
+                val bytes = load()
+                try {
+                    decodeSampled(bytes, maxEdge)
+                } finally {
+                    // 解码完就清掉明文图片字节，不在堆里多留一份。
+                    bytes.fill(0)
+                }
+            }.getOrNull() ?: ImageLoadFailed
         }
     }
     Box(modifier.background(Jk.colors.surfaceAlt), contentAlignment = Alignment.Center) {
-        val current = bitmap
-        if (current != null) {
-            Image(bitmap = current, contentDescription = "附件照片", contentScale = contentScale, modifier = Modifier.matchParentSize())
+        when (val current = result) {
+            is ImageBitmap -> Image(
+                bitmap = current,
+                contentDescription = "附件照片",
+                contentScale = contentScale,
+                modifier = Modifier.matchParentSize(),
+            )
+            ImageLoadFailed -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(
+                    Icons.Outlined.BrokenImage,
+                    contentDescription = null,
+                    tint = Jk.colors.textTertiary,
+                    modifier = Modifier.size(20.dp),
+                )
+                Text("无法读取", style = JkType.caption, color = Jk.colors.textTertiary)
+            }
+            else -> Unit
         }
     }
 }

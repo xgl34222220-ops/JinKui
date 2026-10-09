@@ -82,8 +82,6 @@ import com.xiguli.jinkui.data.model.CardPalette
 import com.xiguli.jinkui.data.model.CardTemplates
 import com.xiguli.jinkui.data.model.CardType
 import com.xiguli.jinkui.data.model.PasswordHealth
-import com.xiguli.jinkui.data.model.deckOrder
-import com.xiguli.jinkui.data.model.sortCards
 import com.xiguli.jinkui.ui.components.ButtonStyle
 import com.xiguli.jinkui.ui.LocalContainer
 import com.xiguli.jinkui.ui.components.BrandMark
@@ -110,24 +108,13 @@ import java.time.LocalDate
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-
-data class HomeUi(
-    val total: Int = 0,
-    /** 筛选项：键 + 显示名。先是出现过的卡片类型，再是标签。 */
-    val filters: List<Pair<String, String>> = emptyList(),
-    /** 正在搜索或筛选时的结果；为 null 表示显示默认分区。 */
-    val results: List<Card>? = null,
-    val pinned: List<Card> = emptyList(),
-    val recent: List<Card> = emptyList(),
-    val all: List<Card> = emptyList(),
-    /** 牌堆里的卡：筛选时是结果，否则是全部（置顶在前）。 */
-    val deck: List<Card> = emptyList(),
-    /** 安全体检发现的问题数，显示在“更多”里。 */
-    val issues: Int = 0,
-)
 
 class HomeViewModel(private val container: AppContainer) : ViewModel() {
     val query = MutableStateFlow("")
@@ -151,42 +138,37 @@ class HomeViewModel(private val container: AppContainer) : ViewModel() {
     /** 列表滚动位置随页面的 ViewModel 保留，进详情再返回不会跳回顶部。 */
     val listState = LazyListState()
 
-    val ui: StateFlow<HomeUi> = combine(container.repository.cards, query, filter, container.settings.flow) { cards, text, selected, settings ->
-        val sorted = sortCards(cards, settings.sortOrder)
-        val issues = PasswordHealth.analyze(cards, LocalDate.now()).issues.size
-        val types = CardType.entries.filter { type -> cards.any { it.type == type } }
-        val tags = cards.flatMap { it.tags }.distinct().sorted()
-        val filters = (if (cards.any { it.pinned }) listOf("p:" to "置顶") else emptyList()) +
-            (if (types.size > 1) types.map { "t:" + it.key to it.label } else emptyList()) +
-            tags.map { "g:$it" to "#$it" }
-        val active = selected?.takeIf { key -> filters.any { it.first == key } }
-        if (text.isNotBlank() || active != null) {
-            val results = sorted
-                    .filter { card ->
-                        val inFilter = when {
-                            active == null -> true
-                            active == "p:" -> card.pinned
-                            active.startsWith("t:") -> card.type.key == active.substring(2)
-                            else -> active.substring(2) in card.tags
-                        }
-                        inFilter && card.matches(text)
-                    }
-                    .sortedByDescending { it.pinned }
-            HomeUi(total = cards.size, filters = filters, results = results, deck = results, issues = issues)
-        } else {
-            HomeUi(
-                total = cards.size,
-                filters = filters,
-                pinned = sorted.filter { it.pinned },
-                recent = cards.filter { !it.pinned && it.lastUsedAt > it.createdAt }
-                    .sortedByDescending { it.lastUsedAt }
-                    .take(3),
-                all = sorted,
-                deck = deckOrder(cards, settings.sortOrder),
-                issues = issues,
-            )
-        }
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, HomeUi())
+    /** 体检只依赖卡片本身：卡片不变时，敲搜索词不会重新跑一遍弱密码 / 重复密码分析。 */
+    private val issues = container.repository.cards
+        .map { cards -> PasswordHealth.analyze(cards, LocalDate.now()).issues.size }
+        .distinctUntilChanged()
+
+    /**
+     * 首屏同步算出初值，避免先闪一下“匣子还是空的”；之后的搜索、筛选、排序都在后台线程计算，
+     * 卡片多时打字也不卡主线程。
+     */
+    val ui: StateFlow<HomeUi> = combine(
+        container.repository.cards,
+        query,
+        filter,
+        container.settings.flow,
+        issues,
+    ) { cards, text, selected, settings, issueCount ->
+        buildHomeUi(cards, text, selected, settings.sortOrder, issueCount)
+    }
+        .flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, initialUi())
+
+    private fun initialUi(): HomeUi {
+        val cards = container.repository.cards.value
+        return buildHomeUi(
+            cards = cards,
+            query = query.value,
+            filter = filter.value,
+            sortOrder = container.settings.current.sortOrder,
+            issues = PasswordHealth.analyze(cards, LocalDate.now()).issues.size,
+        )
+    }
 
     fun togglePin(card: Card) {
         viewModelScope.launch {
@@ -281,7 +263,7 @@ fun HomeScreen(
                     JkTextField(
                         value = query,
                         onValueChange = { viewModel.setQuery(it) },
-                        placeholder = "搜索名称、标签或备注",
+                        placeholder = "搜索名称、标签、账号或备注",
                         leading = Icons.Outlined.Search,
                         modifier = Modifier.padding(horizontal = Space.x2_5),
                         trailing = {

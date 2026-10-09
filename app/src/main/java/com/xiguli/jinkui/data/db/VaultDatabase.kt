@@ -151,7 +151,30 @@ class VaultDatabase(private val context: Context) {
         addedAttachments: List<AttachmentRow>,
         removedAttachmentIds: List<String>,
         newHistory: List<HistoryRow>,
+    ) = transaction { db -> writeCard(db, card, fields, addedAttachments, removedAttachmentIds, newHistory) }
+
+    /**
+     * 整张替换（导入备份时用）：删掉这张卡片原有的字段、附件索引与历史，再写入新内容。
+     * 两步在同一个事务里完成，中途失败时本机原来那张卡片原样保留。
+     */
+    fun replaceCard(
+        card: CardRow,
+        fields: List<FieldRow>,
+        attachments: List<AttachmentRow>,
+        history: List<HistoryRow>,
     ) = transaction { db ->
+        deleteCardRows(db, card.id)
+        writeCard(db, card, fields, attachments, emptyList(), history)
+    }
+
+    private fun writeCard(
+        db: SupportSQLiteDatabase,
+        card: CardRow,
+        fields: List<FieldRow>,
+        addedAttachments: List<AttachmentRow>,
+        removedAttachmentIds: List<String>,
+        newHistory: List<HistoryRow>,
+    ) {
         db.execSQL(
             "INSERT OR REPLACE INTO cards(id,type,title,tags,color,note_enc,pinned,created_at,updated_at,last_used_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
             arrayOf<Any?>(
@@ -189,7 +212,9 @@ class VaultDatabase(private val context: Context) {
         }
     }
 
-    fun deleteCard(id: String) = transaction { db ->
+    fun deleteCard(id: String) = transaction { db -> deleteCardRows(db, id) }
+
+    private fun deleteCardRows(db: SupportSQLiteDatabase, id: String) {
         db.execSQL("DELETE FROM fields WHERE card_id = ?", arrayOf<Any?>(id))
         db.execSQL("DELETE FROM attachments WHERE card_id = ?", arrayOf<Any?>(id))
         db.execSQL("DELETE FROM history WHERE card_id = ?", arrayOf<Any?>(id))
