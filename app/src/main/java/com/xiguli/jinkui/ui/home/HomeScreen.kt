@@ -78,6 +78,7 @@ import androidx.lifecycle.viewModelScope
 import com.xiguli.jinkui.AppContainer
 import com.xiguli.jinkui.data.model.Card
 import com.xiguli.jinkui.data.model.CardField
+import com.xiguli.jinkui.data.model.copyText
 import com.xiguli.jinkui.data.model.CardPalette
 import com.xiguli.jinkui.data.model.CardTemplates
 import com.xiguli.jinkui.data.model.CardType
@@ -98,6 +99,8 @@ import com.xiguli.jinkui.ui.components.JkRow
 import com.xiguli.jinkui.ui.components.JkSheet
 import com.xiguli.jinkui.ui.components.JkTextField
 import com.xiguli.jinkui.ui.components.icon
+import com.xiguli.jinkui.ui.components.pressClickable
+import com.xiguli.jinkui.ui.components.pressScale
 import com.xiguli.jinkui.ui.generator.GeneratorSheet
 import com.xiguli.jinkui.ui.nav.jkViewModel
 import com.xiguli.jinkui.ui.theme.Jk
@@ -177,7 +180,13 @@ class HomeViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun copy(card: Card, field: CardField) {
-        val seconds = container.clipboard.copy(field.label, field.value)
+        // 两步验证字段复制此刻的验证码，而不是密钥
+        val text = field.copyText()
+        if (text == null) {
+            container.messages.show("「${field.label}」的密钥无效，请到编辑页修正")
+            return
+        }
+        val seconds = container.clipboard.copy(field.label, text)
         container.messages.show("已复制「${field.label}」，$seconds 秒后清空剪贴板")
         viewModelScope.launch {
             runCatching { container.repository.markUsed(card.id) }
@@ -280,7 +289,8 @@ fun HomeScreen(
                     LazyRow(
                         contentPadding = PaddingValues(horizontal = Space.x2_5),
                         horizontalArrangement = Arrangement.spacedBy(Space.x1),
-                        modifier = Modifier.padding(top = Space.x1_5),
+                        // JkChip 布局高 48dp（触控区），视觉仍是 32dp：上边距相应减 8dp，筛选条看上去位置不变
+                        modifier = Modifier.padding(top = Space.x05),
                     ) {
                         item { JkChip("全部", filter == null, { viewModel.setFilter(null) }) }
                         items(ui.filters, key = { it.first }) { (key, label) ->
@@ -355,15 +365,17 @@ fun HomeScreen(
             }
 
             if (ui.total > 0) {
+                val press = com.xiguli.jinkui.ui.components.rememberJkPress(0.95f)
                 Row(
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
                         .navigationBarsPadding()
                         .padding(Space.x2_5)
+                        .pressScale(press)
                         .height(52.dp)
                         .clip(CircleShape)
                         .background(colors.primary)
-                        .clickable { showTypes = true }
+                        .pressClickable(press, onClickLabel = "新建卡片", onClick = { showTypes = true })
                         .padding(start = Space.x2, end = Space.x2_5),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -505,7 +517,7 @@ private fun TypePickerSheet(onDismiss: () -> Unit, onPick: (CardType) -> Unit) {
                             modifier = Modifier
                                 .weight(1f)
                                 .clip(Radius.field)
-                                .clickable { onPick(type) },
+                                .clickable(onClickLabel = "新建${type.label}") { onPick(type) },
                         )
                     }
                     if (pair.size == 1) Spacer(Modifier.weight(1f))

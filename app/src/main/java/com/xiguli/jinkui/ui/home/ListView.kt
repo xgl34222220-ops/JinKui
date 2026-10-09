@@ -54,7 +54,15 @@ import com.xiguli.jinkui.data.model.CardType
 import com.xiguli.jinkui.data.model.SortOrder
 import com.xiguli.jinkui.ui.components.ButtonStyle
 import com.xiguli.jinkui.ui.components.CardFace
-import com.xiguli.jinkui.ui.components.EmptyIllustration
+import com.xiguli.jinkui.ui.components.SearchEmptyIllustration
+import com.xiguli.jinkui.ui.components.BankBrand
+import com.xiguli.jinkui.ui.components.JkCopyButton
+import com.xiguli.jinkui.ui.components.pressClickable
+import com.xiguli.jinkui.ui.components.pressScale
+import com.xiguli.jinkui.ui.components.rememberCopyFeedback
+import com.xiguli.jinkui.ui.components.rememberJkPress
+import com.xiguli.jinkui.ui.theme.JkSize
+import androidx.compose.foundation.layout.heightIn
 import com.xiguli.jinkui.ui.components.ExpiryNote
 import com.xiguli.jinkui.ui.components.JkBareField
 import com.xiguli.jinkui.ui.components.JkButton
@@ -97,6 +105,7 @@ internal fun ListHome(
     onSort: (SortOrder) -> Unit,
 ) {
     val colors = Jk.colors
+    val copyFeedback = rememberCopyFeedback()
     Box(Modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
@@ -109,7 +118,8 @@ internal fun ListHome(
                 LazyRow(
                     contentPadding = PaddingValues(horizontal = Space.x2_5),
                     horizontalArrangement = Arrangement.spacedBy(Space.x1),
-                    modifier = Modifier.padding(top = Space.x1_5),
+                    // JkChip 布局高 48dp（触控区），视觉仍是 32dp：上边距相应减 8dp，筛选条看上去位置不变
+                    modifier = Modifier.padding(top = Space.x05),
                 ) {
                     item { JkChip("全部", filter == null, { onFilter(null) }) }
                     items(ui.filters, key = { it.first }) { (key, label) ->
@@ -136,7 +146,12 @@ internal fun ListHome(
                         }
                     }
                     items(results, key = { "r-" + it.id }) { card ->
-                        CardRow(card, { onOpen(card) }, { onLongClick(card) }, { onCopy(card, it) })
+                        CardRow(
+                            card, { onOpen(card) }, { onLongClick(card) },
+                            { copyFeedback.fire(card.id); onCopy(card, it) },
+                            copied = copyFeedback.isCopied(card.id),
+                            modifier = Modifier.animateItem(),
+                        )
                     }
                 } else {
                     if (ui.issues > 0) {
@@ -155,9 +170,10 @@ internal fun ListHome(
                         GroupHeader("全部", ui.all.size) {
                             Row(
                                 modifier = Modifier
+                                    .heightIn(min = JkSize.touch)
                                     .clip(Radius.chip)
-                                    .clickable(onClickLabel = "切换排序") { onSort(ListLayout.nextSort(sortOrder)) }
-                                    .padding(horizontal = Space.x1, vertical = Space.x05),
+                                    .clickable(onClickLabel = "切换排序，当前按${sortOrder.label}") { onSort(ListLayout.nextSort(sortOrder)) }
+                                    .padding(horizontal = Space.x1),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Icon(Icons.Outlined.SwapVert, contentDescription = null, tint = colors.textTertiary, modifier = Modifier.size(14.dp))
@@ -166,8 +182,14 @@ internal fun ListHome(
                             }
                         }
                     }
+                    // 排序切换时行平滑挪到新位置（animateItem），不是整表闪一下
                     items(ui.all, key = { "a-" + it.id }) { card ->
-                        CardRow(card, { onOpen(card) }, { onLongClick(card) }, { onCopy(card, it) })
+                        CardRow(
+                            card, { onOpen(card) }, { onLongClick(card) },
+                            { copyFeedback.fire(card.id); onCopy(card, it) },
+                            copied = copyFeedback.isCopied(card.id),
+                            modifier = Modifier.animateItem(),
+                        )
                     }
                 }
             }
@@ -280,8 +302,8 @@ private fun GroupHeader(title: String, count: Int, trailing: (@Composable () -> 
 
 /** 卡面缩略图：与完整卡面同一套配色和点缀色，左上角类型图标，左下角两道“卡号”细线。 */
 @Composable
-private fun CardThumb(type: CardType, colorIndex: Int, modifier: Modifier = Modifier) {
-    val theme = cardTheme(type, colorIndex)
+private fun CardThumb(type: CardType, colorIndex: Int, modifier: Modifier = Modifier, brand: Color? = null) {
+    val theme = cardTheme(type, colorIndex, brand)
     val shape = RoundedCornerShape(10.dp)
     Box(
         modifier = modifier
@@ -329,22 +351,33 @@ private fun CardThumb(type: CardType, colorIndex: Int, modifier: Modifier = Modi
  * 点整行进详情，长按出快速复制。
  */
 @Composable
-private fun CardRow(card: Card, onClick: () -> Unit, onLongClick: () -> Unit, onCopy: (CardField) -> Unit) {
+private fun CardRow(
+    card: Card,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+    onCopy: (CardField) -> Unit,
+    copied: Boolean = false,
+    modifier: Modifier = Modifier,
+) {
     val colors = Jk.colors
     val face = CardTemplates.face(card)
     val target = ListLayout.copyTarget(card)
+    val brand = BankBrand.of(card)
+    val press = rememberJkPress()
     Row(
-        modifier = Modifier
+        modifier = modifier
             .padding(horizontal = Space.x2_5)
             .fillMaxWidth()
+            .pressScale(press)
             .clip(RowShape)
             .background(colors.surface)
             .border(1.dp, colors.border, RowShape)
-            .combinedClickable(onClickLabel = "查看详情", onClick = onClick, onLongClick = onLongClick)
+            .pressClickable(press, onClickLabel = "查看详情", onClick = onClick, onLongClick = onLongClick, onLongClickLabel = "快速复制")
+            .heightIn(min = 64.dp)
             .padding(start = Space.x1_5, top = Space.x1_5, bottom = Space.x1_5, end = Space.x05),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        CardThumb(card.type, card.color)
+        CardThumb(card.type, card.color, brand = brand)
         Spacer(Modifier.width(Space.x1_5))
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -372,7 +405,8 @@ private fun CardRow(card: Card, onClick: () -> Unit, onLongClick: () -> Unit, on
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = face.primary,
-                    style = if (ListLayout.isMasked(face.primary)) JkType.mono.copy(fontSize = JkType.small.fontSize) else JkType.small,
+                    // 打码的末四位、卡号用等宽数字，上下行对齐
+                    style = if (ListLayout.isMasked(face.primary)) JkType.digitsSmall else JkType.small,
                     color = colors.textSecondary,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -381,15 +415,16 @@ private fun CardRow(card: Card, onClick: () -> Unit, onLongClick: () -> Unit, on
                 if (face.secondary.isNotBlank()) {
                     Text(
                         text = "　${face.secondaryLabel} ${face.secondary}",
-                        style = JkType.small,
+                        style = JkType.digitsSmall,
                         color = colors.textTertiary,
                         maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
             }
         }
         if (target != null) {
-            JkIconButton(Icons.Outlined.ContentCopy, "复制${target.label}", { onCopy(target) }, tint = colors.textTertiary)
+            JkCopyButton(copied, "复制${target.label}", { onCopy(target) })
         } else {
             Spacer(Modifier.width(Space.x1_5))
         }
@@ -423,7 +458,9 @@ private fun PinnedFaces(cards: List<Card>, onOpen: (Card) -> Unit, onLongClick: 
 @Composable
 private fun PinnedFace(card: Card, onOpen: (Card) -> Unit, onLongClick: (Card) -> Unit, modifier: Modifier = Modifier) {
     val face = CardTemplates.face(card)
+    val press = rememberJkPress(0.985f)
     CardFace(
+        brand = BankBrand.of(card),
         title = card.title,
         type = card.type,
         colorIndex = card.color,
@@ -432,8 +469,9 @@ private fun PinnedFace(card: Card, onOpen: (Card) -> Unit, onLongClick: (Card) -
         secondary = face.secondary,
         pinned = true,
         modifier = modifier
+            .pressScale(press)
             .clip(Radius.card)
-            .combinedClickable(onClickLabel = "查看详情", onClick = { onOpen(card) }, onLongClick = { onLongClick(card) }),
+            .pressClickable(press, onClickLabel = "查看详情", onClick = { onOpen(card) }, onLongClick = { onLongClick(card) }, onLongClickLabel = "快速复制"),
     )
 }
 
@@ -455,7 +493,7 @@ private fun RecentTiles(cards: List<Card>, onOpen: (Card) -> Unit, onLongClick: 
                     .combinedClickable(onClickLabel = "查看详情", onClick = { onOpen(card) }, onLongClick = { onLongClick(card) })
                     .padding(Space.x1_5),
             ) {
-                CardThumb(card.type, card.color)
+                CardThumb(card.type, card.color, brand = BankBrand.of(card))
                 Spacer(Modifier.height(Space.x1_5))
                 Text(
                     text = card.title.ifBlank { "未命名" },
@@ -466,7 +504,7 @@ private fun RecentTiles(cards: List<Card>, onOpen: (Card) -> Unit, onLongClick: 
                 )
                 Text(
                     text = CardTemplates.face(card).primary,
-                    style = JkType.caption,
+                    style = JkType.caption.copy(fontFeatureSettings = "tnum"),
                     color = colors.textTertiary,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -486,7 +524,8 @@ private fun HealthStrip(issues: Int, onClick: () -> Unit) {
             .fillMaxWidth()
             .clip(Radius.control)
             .background(colors.accentSoft)
-            .clickable(onClick = onClick)
+            .clickable(onClickLabel = "打开安全体检", onClick = onClick)
+            .heightIn(min = JkSize.touch)
             .padding(horizontal = Space.x2, vertical = Space.x1_5),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -505,7 +544,7 @@ private fun NoResults(onClear: () -> Unit) {
             .padding(horizontal = Space.x4, vertical = Space.x5),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        EmptyIllustration()
+        SearchEmptyIllustration()
         Spacer(Modifier.height(Space.x2_5))
         Text("没有匹配的卡片", style = JkType.heading, color = Jk.colors.textPrimary)
         Spacer(Modifier.height(Space.x05))
@@ -522,13 +561,15 @@ private fun CreateButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
     val shape = RoundedCornerShape(18.dp)
     // 赤金在墨色底上要用亮的一档，在浅色底上用深的一档。
     val gold = if (colors.isDark) LightColors.accent else DarkColors.accent
+    val press = rememberJkPress(0.95f)
     Row(
         modifier = modifier
+            .pressScale(press)
             .height(52.dp)
             .clip(shape)
             .background(colors.primary)
             .border(1.dp, colors.onPrimary.copy(alpha = 0.14f), shape)
-            .clickable(onClickLabel = "新建卡片", onClick = onClick)
+            .pressClickable(press, onClickLabel = "新建卡片", onClick = onClick)
             .padding(start = Space.x2, end = Space.x2_5),
         verticalAlignment = Alignment.CenterVertically,
     ) {
