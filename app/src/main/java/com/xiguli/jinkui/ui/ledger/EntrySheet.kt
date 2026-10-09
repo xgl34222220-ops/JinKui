@@ -111,8 +111,12 @@ fun EntrySheet(
     onDismiss: () -> Unit,
     onSave: (LedgerTransaction, Boolean, () -> Unit) -> Unit,
     onDelete: (LedgerTransaction) -> Unit,
+    /** 校验提示；默认走全局消息条。界面测试传入自己的实现，就不需要 AppContainer。 */
+    onMessage: ((String) -> Unit)? = null,
+    /** 新记一笔时的初始时间（测试用固定值）。 */
+    initialTime: Long? = null,
 ) {
-    val container = LocalContainer.current
+    val message: (String) -> Unit = onMessage ?: LocalContainer.current.messages::show
     val touch = LocalUserActivity.current
     val colors = Jk.colors
     val zone = remember { ZoneId.systemDefault() }
@@ -129,7 +133,7 @@ fun EntrySheet(
     var accountId by remember { mutableStateOf(existing?.accountId ?: lastAccount ?: active.firstOrNull()?.id) }
     // 转账默认转入另一个账户，避免一打开就是“同一账户转给自己”
     var toAccountId by remember { mutableStateOf(existing?.toAccountId ?: active.firstOrNull { it.id != accountId }?.id) }
-    var time by remember { mutableLongStateOf(existing?.occurredAt ?: System.currentTimeMillis()) }
+    var time by remember { mutableLongStateOf(existing?.occurredAt ?: initialTime ?: System.currentTimeMillis()) }
     var note by remember { mutableStateOf(existing?.note ?: "") }
     var tags by remember { mutableStateOf(existing?.tags?.joinToString(" ") ?: "") }
 
@@ -159,12 +163,12 @@ fun EntrySheet(
     fun submit(keepOpen: Boolean) {
         val cents = Money.evaluate(amount)
         if (cents == null || cents <= 0L) {
-            container.messages.show("请输入大于 0 的金额")
+            message("请输入大于 0 的金额")
             return
         }
         val from = accountId
         if (from == null) {
-            container.messages.show("请先在“账户与余额”里添加一个账户")
+            message("请先在“账户与余额”里添加一个账户")
             return
         }
         val tx = LedgerTransaction(
