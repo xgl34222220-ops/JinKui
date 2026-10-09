@@ -66,7 +66,7 @@ val LightColors = JkColors(
     border = Color(0xFFE6E3DC),
     textPrimary = Color(0xFF1A1815),
     textSecondary = Color(0xFF5A554D),
-    textTertiary = Color(0xFF8C867B),
+    textTertiary = Color(0xFF736D62), // 0.9.0：由 8C867B 加深，正文底上对比度 ≥ 4.5（WCAG AA）
     primary = Color(0xFF1A1815),
     onPrimary = Color(0xFFF7F6F3),
     accent = Color(0xFF946616),
@@ -90,7 +90,7 @@ val DarkColors = JkColors(
     border = Color(0xFF2F2B26),
     textPrimary = Color(0xFFF2EEE7),
     textSecondary = Color(0xFFB8B1A6),
-    textTertiary = Color(0xFF857E73),
+    textTertiary = Color(0xFF948D81), // 0.9.0：由 857E73 提亮，卡片底上对比度 ≥ 4.5
     primary = Color(0xFFF2EEE7),
     onPrimary = Color(0xFF141210),
     accent = Color(0xFFD4A857),
@@ -160,6 +160,15 @@ object JkType {
     val amount = bodyStrong.copy(fontFeatureSettings = TABULAR)
     val amountSmall = small.copy(fontFeatureSettings = TABULAR)
     val amountCaption = caption.copy(fontFeatureSettings = TABULAR)
+    /**
+     * 卡号、证件号、打码的末四位等“数字串”：系统字体 + 等宽数字（tnum）+ 略宽的字距，
+     * 上下行的数字对得齐，又不像等宽字体那样生硬。密码明文仍用 [mono]，便于分辨 l / 1 / I。
+     */
+    val digits = body.copy(fontFeatureSettings = TABULAR, letterSpacing = 0.8.sp)
+    val digitsSmall = small.copy(fontFeatureSettings = TABULAR, letterSpacing = 0.6.sp)
+    val digitsLarge = title.copy(fontFeatureSettings = TABULAR, letterSpacing = 1.2.sp, fontWeight = FontWeight.Medium)
+    /** 卡面上的卡号 / 有效期：略加粗、字距更宽，像压印在卡上。 */
+    val cardNumber = small.copy(fontFeatureSettings = TABULAR, letterSpacing = 1.4.sp, fontWeight = FontWeight.Medium)
     /** 小节标题上方的“眉题”（例如“本月支出”）。 */
     val overline = TextStyle(fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.Medium, letterSpacing = 0.6.sp)
 }

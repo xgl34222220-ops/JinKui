@@ -99,6 +99,8 @@ import com.xiguli.jinkui.ui.components.JkRow
 import com.xiguli.jinkui.ui.components.JkSheet
 import com.xiguli.jinkui.ui.components.JkTextField
 import com.xiguli.jinkui.ui.components.icon
+import com.xiguli.jinkui.ui.components.pressClickable
+import com.xiguli.jinkui.ui.components.pressScale
 import com.xiguli.jinkui.ui.generator.GeneratorSheet
 import com.xiguli.jinkui.ui.nav.jkViewModel
 import com.xiguli.jinkui.ui.theme.Jk
@@ -363,15 +365,17 @@ fun HomeScreen(
             }
 
             if (ui.total > 0) {
+                val press = com.xiguli.jinkui.ui.components.rememberJkPress(0.95f)
                 Row(
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
                         .navigationBarsPadding()
                         .padding(Space.x2_5)
+                        .pressScale(press)
                         .height(52.dp)
                         .clip(CircleShape)
                         .background(colors.primary)
-                        .clickable { showTypes = true }
+                        .pressClickable(press, onClickLabel = "新建卡片", onClick = { showTypes = true })
                         .padding(start = Space.x2, end = Space.x2_5),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -513,7 +517,7 @@ private fun TypePickerSheet(onDismiss: () -> Unit, onPick: (CardType) -> Unit) {
                             modifier = Modifier
                                 .weight(1f)
                                 .clip(Radius.field)
-                                .clickable { onPick(type) },
+                                .clickable(onClickLabel = "新建${type.label}") { onPick(type) },
                         )
                     }
                     if (pair.size == 1) Spacer(Modifier.weight(1f))
