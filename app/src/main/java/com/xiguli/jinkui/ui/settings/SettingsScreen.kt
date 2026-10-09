@@ -117,9 +117,9 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
 
     fun export(target: Uri, password: String, onDone: () -> Unit) = launchBusy {
         try {
-            val count = container.backup.export(target, password)
+            val exported = container.backup.export(target, password)
             container.settings.update { it.copy(lastBackupAt = System.currentTimeMillis()) }
-            container.messages.show("已导出 $count 张卡片的加密备份")
+            container.messages.show("已导出 ${exported.cards} 张卡片、${exported.transactions} 笔账目的加密备份")
             onDone()
         } catch (e: WrongSecretException) {
             dialogError = "主密码不正确"
@@ -129,7 +129,12 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
     fun import(source: Uri, password: String, onDone: () -> Unit) = launchBusy {
         try {
             val summary = container.backup.import(source, password)
-            container.messages.show("导入完成：新增 ${summary.added}，更新 ${summary.updated}，跳过 ${summary.skipped}")
+            val ledgerNote = if (summary.ledgerAdded + summary.ledgerUpdated > 0) {
+                "；账本新增 ${summary.ledgerAdded}，更新 ${summary.ledgerUpdated}"
+            } else {
+                ""
+            }
+            container.messages.show("导入完成：新增 ${summary.added}，更新 ${summary.updated}，跳过 ${summary.skipped}$ledgerNote")
             onDone()
         } catch (e: WrongSecretException) {
             dialogError = e.message
@@ -371,7 +376,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                 JkDivider(inset = Space.x6 + Space.x05)
                 JkRow(
                     title = "清空全部数据",
-                    subtitle = "删除本机所有卡片、附件与密钥",
+                    subtitle = "删除本机所有卡片、附件、账本与密钥",
                     icon = Icons.Outlined.DeleteForever,
                     danger = true,
                     onClick = { dialog = SettingsDialog.Wipe },
@@ -453,7 +458,7 @@ fun SettingsScreen(onBack: () -> Unit) {
         )
         SettingsDialog.Wipe -> PasswordDialog(
             title = "清空全部数据？",
-            message = "本机所有卡片、附件照片与密钥将被永久删除，无法恢复。输入主密码确认。",
+            message = "本机所有卡片、附件照片、账本记录与密钥将被永久删除，无法恢复。输入主密码确认。",
             confirmText = "永久清空",
             danger = true,
             viewModel = viewModel,

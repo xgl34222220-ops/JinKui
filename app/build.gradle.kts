@@ -12,8 +12,8 @@ android {
         applicationId = "com.xiguli.jinkui"
         minSdk = 26
         targetSdk = 34
-        versionCode = 9
-        versionName = "0.5.3"
+        versionCode = 10
+        versionName = "0.6.0"
     }
 
     buildTypes {
@@ -78,4 +78,6 @@ dependencies {
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
+    // 只用于在 JVM 上跑数据库迁移测试，不进 APK
+    testImplementation("org.xerial:sqlite-jdbc:3.46.1.3")
 }
