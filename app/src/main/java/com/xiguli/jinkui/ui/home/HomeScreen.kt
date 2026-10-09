@@ -78,6 +78,7 @@ import androidx.lifecycle.viewModelScope
 import com.xiguli.jinkui.AppContainer
 import com.xiguli.jinkui.data.model.Card
 import com.xiguli.jinkui.data.model.CardField
+import com.xiguli.jinkui.data.model.copyText
 import com.xiguli.jinkui.data.model.CardPalette
 import com.xiguli.jinkui.data.model.CardTemplates
 import com.xiguli.jinkui.data.model.CardType
@@ -177,7 +178,13 @@ class HomeViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun copy(card: Card, field: CardField) {
-        val seconds = container.clipboard.copy(field.label, field.value)
+        // 两步验证字段复制此刻的验证码，而不是密钥
+        val text = field.copyText()
+        if (text == null) {
+            container.messages.show("「${field.label}」的密钥无效，请到编辑页修正")
+            return
+        }
+        val seconds = container.clipboard.copy(field.label, text)
         container.messages.show("已复制「${field.label}」，$seconds 秒后清空剪贴板")
         viewModelScope.launch {
             runCatching { container.repository.markUsed(card.id) }

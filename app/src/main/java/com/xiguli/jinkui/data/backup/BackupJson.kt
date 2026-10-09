@@ -135,12 +135,14 @@ object BackupJson {
         val fieldsJson = json.getJSONArray("fields")
         val fields = (0 until fieldsJson.length()).map { index ->
             val field = fieldsJson.getJSONObject(index)
+            val kind = FieldKind.of(field.optString("kind"))
             CardField(
                 id = field.getString("id").also(::requireId),
                 label = field.getString("label"),
                 value = field.getString("value"),
-                sensitive = field.optBoolean("sensitive", false),
-                kind = FieldKind.of(field.optString("kind")),
+                // 两步验证密钥无论备份里怎么标，导入后都是敏感字段
+                sensitive = field.optBoolean("sensitive", false) || kind == FieldKind.TOTP,
+                kind = kind,
             )
         }
         val data = HashMap<String, ByteArray>()

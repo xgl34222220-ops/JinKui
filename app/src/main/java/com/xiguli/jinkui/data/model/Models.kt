@@ -27,7 +27,13 @@ enum class FieldKind(val key: String) {
     NUMBER("number"),
     DATE("date"),
     URL("url"),
-    PHONE("phone");
+    PHONE("phone"),
+
+    /**
+     * 两步验证（TOTP）密钥，0.7.0 起。值是 otpauth://totp/… 文本，永远是敏感字段、永远不参与搜索；
+     * 详情页只显示实时验证码，复制的也是验证码。旧版金匮读到它会当成普通的敏感文本。
+     */
+    TOTP("totp");
 
     companion object {
         fun of(key: String?): FieldKind = entries.firstOrNull { it.key == key } ?: TEXT
@@ -88,9 +94,10 @@ data class Card(
     val quickCopyFields: List<CardField>
         get() {
             val filled = fields.filter { it.value.isNotBlank() }
-            val plain = filled.firstOrNull { !it.sensitive && it.kind != FieldKind.URL }
-            val secret = filled.firstOrNull { it.sensitive }
-            return listOfNotNull(plain, secret).ifEmpty { filled.take(1) }
+            val plain = filled.firstOrNull { !it.sensitive && it.kind != FieldKind.URL && it.kind != FieldKind.TOTP }
+            // 两步验证码不算“最要紧的密码”：它每 30 秒一变，单独在详情页复制
+            val secret = filled.firstOrNull { it.sensitive && it.kind != FieldKind.TOTP }
+            return listOfNotNull(plain, secret).ifEmpty { filled.filter { it.kind != FieldKind.TOTP }.take(1) }
         }
 
     fun matches(query: String): Boolean {
@@ -101,7 +108,7 @@ data class Card(
             append(type.label).append('\n')
             tags.forEach { append(it).append('\n') }
             // 非敏感字段的内容也能搜到（开户行、账号等）；敏感字段永远不参与搜索。
-            fields.forEach { if (!it.sensitive) append(it.value).append('\n') }
+            fields.forEach { if (!it.sensitive && it.kind != FieldKind.TOTP) append(it.value).append('\n') }
             append(note)
         }.lowercase()
         return tokens.all { haystack.contains(it) }
