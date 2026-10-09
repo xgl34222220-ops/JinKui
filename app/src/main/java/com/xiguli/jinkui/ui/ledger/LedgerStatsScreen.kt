@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
@@ -274,7 +275,8 @@ private fun ShareRow(index: Int, share: CategoryShare, byId: Map<String, LedgerC
                     color = colors.textPrimary,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false),
+                    // 名称最多占 120dp，金额始终贴右对齐
+                    modifier = Modifier.widthIn(max = 120.dp),
                 )
                 Spacer(Modifier.width(Space.x1))
                 Text("${share.count} 笔", style = JkType.amountCaption, color = colors.textTertiary)

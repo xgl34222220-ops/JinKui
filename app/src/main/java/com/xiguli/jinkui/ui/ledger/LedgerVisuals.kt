@@ -20,12 +20,9 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.Style
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
-import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
@@ -662,7 +659,7 @@ fun LegendDot(color: Color, modifier: Modifier = Modifier) {
 // ── 金额滚动 ──────────────────────────────────────────────────────
 
 /**
- * 会“滚”的金额：数值变化时，变了的那几位上下滚动（变大向上、变小向下），没变的位不动。
+ * 会“滚”的金额：数值变化时，变了的那几位上下滚动（这一位变大向上、变小向下），没变的位不动。
  * 字符按“从右往左第几位”对齐，配合等宽数字（tnum），小数点不会左右跳。
  * 读屏与测试读到的是完整的金额文字。
  */
@@ -675,9 +672,6 @@ fun RollingAmount(
     format: (Long) -> String = { Money.format(it) },
 ) {
     val text = format(cents)
-    var previous by remember { mutableLongStateOf(cents) }
-    val up = cents >= previous
-    SideEffect { previous = cents }
     Row(modifier.clearAndSetSemantics { this.text = AnnotatedString(text) }) {
         val chars = text.toCharArray()
         chars.forEachIndexed { index, ch ->
@@ -685,6 +679,8 @@ fun RollingAmount(
                 AnimatedContent(
                     targetState = ch,
                     transitionSpec = {
+                        // 方向只由这一位自己的新旧值决定，不依赖外部状态，重组多少次都一样
+                        val up = targetState > initialState
                         val enter = slideInVertically(tween(260, easing = FastOutSlowInEasing)) { h -> if (up) h else -h } + fadeIn(tween(200))
                         val exit = slideOutVertically(tween(260, easing = FastOutSlowInEasing)) { h -> if (up) -h else h } + fadeOut(tween(160))
                         (enter togetherWith exit).using(SizeTransform(clip = true))
