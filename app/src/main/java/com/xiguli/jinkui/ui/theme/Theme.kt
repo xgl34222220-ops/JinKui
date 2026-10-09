@@ -49,6 +49,13 @@ data class JkColors(
     val danger: Color,
     val dangerSoft: Color,
     val success: Color,
+    /** 账本：支出 / 收入 / 转账的主色与浅底（图标底、图例、柱子）。深浅两套各自调过对比度。 */
+    val expense: Color,
+    val expenseSoft: Color,
+    val income: Color,
+    val incomeSoft: Color,
+    val transfer: Color,
+    val transferSoft: Color,
     val isDark: Boolean,
 )
 
@@ -67,6 +74,12 @@ val LightColors = JkColors(
     danger = Color(0xFFB3261E),
     dangerSoft = Color(0xFFF9E7E5),
     success = Color(0xFF2B6B4F),
+    expense = Color(0xFFA9562C),
+    expenseSoft = Color(0xFFF6E8DF),
+    income = Color(0xFF2B6B4F),
+    incomeSoft = Color(0xFFE2EFE8),
+    transfer = Color(0xFF475D86),
+    transferSoft = Color(0xFFE5EAF3),
     isDark = false,
 )
 
@@ -85,6 +98,12 @@ val DarkColors = JkColors(
     danger = Color(0xFFF2857A),
     dangerSoft = Color(0xFF34201D),
     success = Color(0xFF7FC9A4),
+    expense = Color(0xFFE99A72),
+    expenseSoft = Color(0xFF372419),
+    income = Color(0xFF7FC9A4),
+    incomeSoft = Color(0xFF19302A),
+    transfer = Color(0xFF9FB3DA),
+    transferSoft = Color(0xFF1F2636),
     isDark = true,
 )
 
@@ -100,6 +119,17 @@ object Space {
     val x4 = 32.dp
     val x5 = 40.dp
     val x6 = 48.dp
+}
+
+/** 统一的尺寸：触控区、图标、图标底。 */
+object JkSize {
+    /** 最小触控区（Material 无障碍要求）。 */
+    val touch = 48.dp
+    val iconSmall = 16.dp
+    val icon = 20.dp
+    val iconLarge = 22.dp
+    /** 列表行左侧的图标底。 */
+    val chip = 40.dp
 }
 
 object Radius {
@@ -122,6 +152,16 @@ object JkType {
     val small = TextStyle(fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.Normal)
     val caption = TextStyle(fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.Normal)
     val mono = TextStyle(fontSize = 15.sp, lineHeight = 22.sp, fontFamily = FontFamily.Monospace, letterSpacing = 0.5.sp)
+
+    // 金额一律用等宽数字（tnum），上下行的小数点和位数对得齐，数字滚动时也不会左右抖。
+    private const val TABULAR = "tnum"
+    val amountHero = display.copy(fontSize = 34.sp, lineHeight = 42.sp, fontFeatureSettings = TABULAR, letterSpacing = (-0.6).sp)
+    val amountLarge = display.copy(fontFeatureSettings = TABULAR)
+    val amount = bodyStrong.copy(fontFeatureSettings = TABULAR)
+    val amountSmall = small.copy(fontFeatureSettings = TABULAR)
+    val amountCaption = caption.copy(fontFeatureSettings = TABULAR)
+    /** 小节标题上方的“眉题”（例如“本月支出”）。 */
+    val overline = TextStyle(fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.Medium, letterSpacing = 0.6.sp)
 }
 
 object Jk {

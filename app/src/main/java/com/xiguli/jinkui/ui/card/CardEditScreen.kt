@@ -70,6 +70,12 @@ import com.xiguli.jinkui.data.model.CardPalette
 import com.xiguli.jinkui.data.model.CardTemplates
 import com.xiguli.jinkui.data.model.CardType
 import com.xiguli.jinkui.data.model.FieldKind
+import androidx.compose.material.icons.outlined.Timer
+import com.xiguli.jinkui.core.crypto.Totp
+import com.xiguli.jinkui.data.repo.QrImageReader
+import com.xiguli.jinkui.core.qr.OtpQrResult
+import com.xiguli.jinkui.core.qr.OtpQr
+import androidx.compose.material.icons.outlined.QrCodeScanner
 import com.xiguli.jinkui.data.model.PendingAttachment
 import com.xiguli.jinkui.data.repo.ImageImporter
 import com.xiguli.jinkui.ui.LocalContainer
@@ -147,7 +153,8 @@ class CardEditViewModel(
     }
 
     fun addField(kind: FieldKind) {
-        fields.add(DraftField(CardTemplates.newId(), "", "", sensitive = kind == FieldKind.PASSWORD, kind = kind))
+        val label = if (kind == FieldKind.TOTP) "两步验证码" else ""
+        fields.add(DraftField(CardTemplates.newId(), label, "", sensitive = kind == FieldKind.PASSWORD || kind == FieldKind.TOTP, kind = kind))
     }
 
     /** 这张卡片比它所属类型的模板少了几个字段（按字段名比对）。 */
@@ -178,7 +185,8 @@ class CardEditViewModel(
         color = color,
         fields = fields
             .filter { it.label.isNotBlank() || it.value.isNotBlank() }
-            .map { CardField(it.id, it.label.trim().ifEmpty { "未命名" }, it.value, it.sensitive, it.kind) },
+            // 两步验证密钥永远是敏感字段
+            .map { CardField(it.id, it.label.trim().ifEmpty { "未命名" }, it.value, it.sensitive || it.kind == FieldKind.TOTP, it.kind) },
         note = note,
         attachments = existingAttachments.toList(),
         pinned = original?.pinned ?: false,
@@ -192,6 +200,17 @@ class CardEditViewModel(
         if (title.isBlank()) {
             titleError = true
             return
+        }
+        // 两步验证：先校验，再统一存成规范的 otpauth URI（粘贴的纯 Base32 密钥也会转成 URI）
+        for (field in fields) {
+            if (field.kind != FieldKind.TOTP || field.value.isBlank()) continue
+            val config = try {
+                Totp.parse(field.value)
+            } catch (e: IllegalArgumentException) {
+                container.messages.show("「${field.label.ifBlank { "两步验证码" }}」：${e.message ?: "密钥无效"}")
+                return
+            }
+            field.value = config.toUri()
         }
         saving = true
         viewModelScope.launch {
@@ -463,7 +482,11 @@ fun CardEditScreen(cardId: String?, newType: CardType?, onClose: () -> Unit) {
                 Triple(FieldKind.PHONE, "电话", Icons.Outlined.Phone),
                 Triple(FieldKind.DATE, "日期", Icons.Outlined.CalendarMonth),
                 Triple(FieldKind.URL, "网址", Icons.Outlined.Link),
-            )
+                Triple(FieldKind.TOTP, "两步验证码（粘贴 otpauth:// 链接或密钥）", Icons.Outlined.Timer),
+            ).let { list ->
+                // 登录密码卡片最常用两步验证，放到最前面
+                if (viewModel.type == CardType.LOGIN) list.sortedByDescending { it.first == FieldKind.TOTP } else list
+            }
             for ((kind, label, icon) in kinds) {
                 JkRow(
                     title = label,
@@ -495,6 +518,33 @@ fun CardEditScreen(cardId: String?, newType: CardType?, onClose: () -> Unit) {
 private fun FieldEditor(field: DraftField, hint: String, onRemove: () -> Unit, onGenerate: () -> Unit) {
     val colors = Jk.colors
     var revealed by remember { mutableStateOf(false) }
+    // 两步验证码：从相册 / 文件里选一张二维码截图，离线识别后填入（系统选择器授权单张图片，不需要任何权限）
+    val container = LocalContainer.current
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var scanning by remember { mutableStateOf(false) }
+    val qrPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+        if (uri != null) {
+            scanning = true
+            scope.launch {
+                val read = runCatching { QrImageReader.read(context, uri) }
+                scanning = false
+                val error = read.exceptionOrNull()
+                if (error != null) {
+                    container.messages.show(error.message ?: "无法读取这张图片")
+                    return@launch
+                }
+                val text = read.getOrNull()
+                when (val result = OtpQr.interpret(text)) {
+                    is OtpQrResult.Ok -> {
+                        field.value = result.uri
+                        container.messages.show("已从二维码填入两步验证码")
+                    }
+                    is OtpQrResult.Rejected -> container.messages.show(result.message)
+                }
+            }
+        }
+    }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -514,12 +564,14 @@ private fun FieldEditor(field: DraftField, hint: String, onRemove: () -> Unit, o
                 textColor = colors.textSecondary,
                 modifier = Modifier.weight(1f),
             )
-            JkIconButton(
-                icon = if (field.sensitive) Icons.Outlined.Lock else Icons.Outlined.LockOpen,
-                description = if (field.sensitive) "敏感字段，点按改为普通" else "普通字段，点按改为敏感",
-                onClick = { field.sensitive = !field.sensitive },
-                tint = if (field.sensitive) colors.accent else colors.textTertiary,
-            )
+            if (field.kind != FieldKind.TOTP) {
+                JkIconButton(
+                    icon = if (field.sensitive) Icons.Outlined.Lock else Icons.Outlined.LockOpen,
+                    description = if (field.sensitive) "敏感字段，点按改为普通" else "普通字段，点按改为敏感",
+                    onClick = { field.sensitive = !field.sensitive },
+                    tint = if (field.sensitive) colors.accent else colors.textTertiary,
+                )
+            }
             JkIconButton(Icons.Outlined.Close, "删除字段", onRemove, tint = colors.textTertiary)
         }
         JkDivider()
@@ -530,14 +582,17 @@ private fun FieldEditor(field: DraftField, hint: String, onRemove: () -> Unit, o
             JkBareField(
                 value = field.value,
                 onValueChange = { field.value = it },
-                placeholder = hint.ifBlank { if (field.sensitive) "内容（保存后默认打码）" else "内容" },
+                placeholder = when {
+                    field.kind == FieldKind.TOTP -> "粘贴 otpauth://totp/… 链接或 Base32 密钥"
+                    else -> hint.ifBlank { if (field.sensitive) "内容（保存后默认打码）" else "内容" }
+                },
                 textStyle = if (field.sensitive || field.kind == FieldKind.NUMBER) JkType.mono else JkType.body,
                 hidden = field.sensitive && !revealed,
                 keyboardType = when (field.kind) {
                     FieldKind.NUMBER -> if (field.sensitive) KeyboardType.NumberPassword else KeyboardType.Number
                     FieldKind.URL -> KeyboardType.Uri
                     FieldKind.PHONE -> KeyboardType.Phone
-                    FieldKind.PASSWORD -> KeyboardType.Password
+                    FieldKind.PASSWORD, FieldKind.TOTP -> KeyboardType.Password
                     else -> if (field.sensitive) KeyboardType.Password else KeyboardType.Text
                 },
                 modifier = Modifier
@@ -546,6 +601,14 @@ private fun FieldEditor(field: DraftField, hint: String, onRemove: () -> Unit, o
             )
             if (field.kind == FieldKind.PASSWORD) {
                 JkIconButton(Icons.Outlined.AutoFixHigh, "生成密码", onGenerate)
+            }
+            if (field.kind == FieldKind.TOTP) {
+                JkIconButton(
+                    Icons.Outlined.QrCodeScanner,
+                    if (scanning) "正在识别二维码" else "从相册图片识别二维码",
+                    { if (!scanning) qrPicker.launch("image/*") },
+                    tint = if (scanning) colors.textTertiary else colors.textSecondary,
+                )
             }
             if (field.sensitive) {
                 JkIconButton(
@@ -556,6 +619,15 @@ private fun FieldEditor(field: DraftField, hint: String, onRemove: () -> Unit, o
             } else {
                 Spacer(Modifier.width(Space.x1_5))
             }
+        }
+        if (field.kind == FieldKind.TOTP) {
+            val error = remember(field.value) { Totp.errorOf(field.value) }
+            Text(
+                text = error ?: "支持 SHA1 / SHA256 / SHA512、6 或 8 位、30 或 60 秒；也可以点右侧图标，从相册里的二维码截图识别。密钥只存在本机，加密保存。",
+                style = JkType.caption,
+                color = if (error != null) colors.danger else colors.textTertiary,
+                modifier = Modifier.padding(start = Space.x2, end = Space.x2, bottom = Space.x1_5),
+            )
         }
     }
 }

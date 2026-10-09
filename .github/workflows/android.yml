@@ -18,8 +18,16 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
-      - name: 单元测试（加密工具类）
+      - name: 单元测试与界面测试（Robolectric）
         run: ./gradlew testDebugUnitTest
+
+      - name: 上传账本界面截图（Robolectric 渲染）
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jinkui-ui-screenshots
+          path: app/build/outputs/ui-screenshots/
+          if-no-files-found: ignore
 
       - name: 构建 Debug APK
         run: ./gradlew assembleDebug
@@ -30,6 +38,19 @@ jobs:
           "$AAPT2" dump permissions app/build/outputs/apk/debug/app-debug.apk | tee permissions.txt
           if grep -E "android\.permission\.(INTERNET|ACCESS_NETWORK_STATE|ACCESS_WIFI_STATE)" permissions.txt; then
             echo "::error::发现联网相关权限，违反离线要求"
+            exit 1
+          fi
+
+      - name: 打印 Debug APK 签名证书 SHA-256（应恒为仓库内 app/debug.jks 的指纹）
+        run: |
+          APKSIGNER=$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)apksigner
+          "$APKSIGNER" verify --print-certs app/build/outputs/apk/debug/app-debug.apk | tee signing.txt
+          SHA=$(grep -m1 "SHA-256 digest" signing.txt | awk '{print $NF}')
+          echo "### Debug APK 签名证书 SHA-256" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`$SHA\`" >> "$GITHUB_STEP_SUMMARY"
+          EXPECTED=d10ec61174544bd85b780d9d0a034f3b127ce59c8d3bf2c059987ed888b9010f
+          if [ "$SHA" != "$EXPECTED" ]; then
+            echo "::error::Debug APK 签名与 app/debug.jks 不一致：$SHA"
             exit 1
           fi
 
