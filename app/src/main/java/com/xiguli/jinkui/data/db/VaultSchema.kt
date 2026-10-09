@@ -5,12 +5,13 @@ package com.xiguli.jinkui.data.db
  *
  *  - 版本 1（0.1.0 – 0.5.3）：cards / fields / attachments / history。
  *  - 版本 2（0.6.0）：新增账本四张表，旧表不动。
+ *  - 版本 3（0.7.0）：新增周期记账规则表，旧表不动。
  *
  * 新装用户执行 [create]：版本 1 的建表语句加上之后的全部迁移，保证新装与升级得到同一套结构。
  * 迁移只允许“加”，不得丢弃或改写用户已有的数据。
  */
 object VaultSchema {
-    const val VERSION = 2
+    const val VERSION = 3
 
     private val V1 = listOf(
         """CREATE TABLE cards(
@@ -96,7 +97,19 @@ object VaultSchema {
         )""",
     )
 
-    private val MIGRATIONS: Map<Int, List<String>> = mapOf(2 to V2)
+    /**
+     * 2 → 3：周期记账规则。金额、账户、分类、频率、起止日期、备注和生成进度全部在 data_enc 里，
+     * 明文列只有 ID 与更新时间。
+     */
+    private val V3 = listOf(
+        """CREATE TABLE ledger_recurring(
+            id TEXT PRIMARY KEY NOT NULL,
+            updated_at INTEGER NOT NULL,
+            data_enc TEXT NOT NULL
+        )""",
+    )
+
+    private val MIGRATIONS: Map<Int, List<String>> = mapOf(2 to V2, 3 to V3)
 
     /** 新装：建出最新结构。 */
     fun create(): List<String> = V1 + upgrade(1, VERSION)

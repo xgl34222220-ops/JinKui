@@ -64,6 +64,66 @@ object LedgerJson {
 
     fun readBudgetAmount(text: String): Long = JSONObject(text).getLong("amount")
 
+    /**
+     * 周期记账规则：除 ID 与更新时间外的一切都在这里，数据库载荷与备份共用同一形态。
+     * 日期写成 ISO 字符串（"2026-10-15"），与时区无关。
+     */
+    fun recurringJson(rule: LedgerRecurring): JSONObject = JSONObject()
+        .put("type", rule.type.key)
+        .put("amount", rule.amount)
+        .put("accountId", rule.accountId)
+        .put("toAccountId", rule.toAccountId ?: JSONObject.NULL)
+        .put("categoryId", rule.categoryId ?: JSONObject.NULL)
+        .put("note", rule.note)
+        .put("tags", JSONArray(rule.tags))
+        .put("frequency", rule.frequency.key)
+        .put("start", rule.startDate.toString())
+        .put("minute", rule.minuteOfDay)
+        .put("end", rule.endDate?.toString() ?: JSONObject.NULL)
+        .put("next", rule.nextIndex)
+        .put("paused", rule.paused)
+        .put("createdAt", rule.createdAt)
+
+    fun recurringPayload(rule: LedgerRecurring): String = recurringJson(rule).toString()
+
+    /** 解析规则；[id] 与 [updatedAt] 来自数据库明文列或备份。内容不合法时抛 [IllegalArgumentException] / JSONException。 */
+    fun readRecurring(id: String, updatedAt: Long, json: JSONObject): LedgerRecurring {
+        val amount = json.getLong("amount")
+        require(amount in 1..Money.MAX_CENTS) { "金额越界" }
+        val minute = json.optInt("minute", 9 * 60)
+        require(minute in 0..1439) { "时间无效" }
+        val next = json.optInt("next", 0)
+        require(next in 0..RecurringMath.MAX_INDEX) { "进度无效" }
+        val start = java.time.LocalDate.parse(json.getString("start"))
+        val end = json.optNullableString("end")?.let(java.time.LocalDate::parse)
+        // DateTimeParseException 是 RuntimeException，统一转成 IllegalArgumentException
+        return LedgerRecurring(
+            id = id,
+            type = TxType.of(json.optString("type")),
+            amount = amount,
+            accountId = json.getString("accountId").also(::requireId),
+            toAccountId = json.optNullableString("toAccountId")?.also(::requireId),
+            categoryId = json.optNullableString("categoryId")?.also(::requireId),
+            note = json.optString("note", ""),
+            tags = json.optStringList("tags"),
+            frequency = RecurFrequency.of(json.optString("frequency")),
+            startDate = start,
+            minuteOfDay = minute,
+            endDate = end,
+            nextIndex = next,
+            paused = json.optBoolean("paused", false),
+            createdAt = json.optLong("createdAt", 0L),
+            updatedAt = updatedAt,
+        )
+    }
+
+    fun readRecurringPayload(id: String, updatedAt: Long, text: String): LedgerRecurring =
+        try {
+            readRecurring(id, updatedAt, JSONObject(text))
+        } catch (e: java.time.format.DateTimeParseException) {
+            throw IllegalArgumentException("日期无效", e)
+        }
+
     // ── 备份 ──────────────────────────────────────────────────────
 
     fun toBackup(data: LedgerData): JSONObject {
@@ -123,11 +183,16 @@ object LedgerJson {
                     .put("updatedAt", b.updatedAt),
             )
         }
+        val recurring = JSONArray()
+        for (r in data.recurring) {
+            recurring.put(recurringJson(r).put("id", r.id).put("updatedAt", r.updatedAt))
+        }
         return JSONObject()
             .put("accounts", accounts)
             .put("categories", categories)
             .put("transactions", transactions)
             .put("budgets", budgets)
+            .put("recurring", recurring)
     }
 
     /** 解析备份里的账本一节。ID 只接受 UUID 形态；金额必须是合法范围内的非负整数分。 */
@@ -182,8 +247,16 @@ object LedgerJson {
                 updatedAt = b.optLong("updatedAt", 0L),
             )
         }
-        require(accounts.size + categories.size + transactions.size + budgets.size <= MAX_RECORDS) { "账本记录数量异常" }
-        return LedgerData(accounts, categories, transactions, budgets)
+        // 0.7.0 之前的备份没有 "recurring"，按空处理
+        val recurring = json.optJSONArray("recurring").objects().map { r ->
+            try {
+                readRecurring(r.getString("id").also(::requireId), r.optLong("updatedAt", 0L), r)
+            } catch (e: java.time.format.DateTimeParseException) {
+                throw IllegalArgumentException("日期无效", e)
+            }
+        }
+        require(accounts.size + categories.size + transactions.size + budgets.size + recurring.size <= MAX_RECORDS) { "账本记录数量异常" }
+        return LedgerData(accounts, categories, transactions, budgets, recurring)
     }
 
     private fun requireId(id: String) {

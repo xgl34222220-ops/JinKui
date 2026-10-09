@@ -43,6 +43,7 @@ import com.xiguli.jinkui.ui.ledger.HomeTabs
 import com.xiguli.jinkui.ui.ledger.LedgerAccountsScreen
 import com.xiguli.jinkui.ui.ledger.LedgerBudgetScreen
 import com.xiguli.jinkui.ui.ledger.LedgerCategoriesScreen
+import com.xiguli.jinkui.ui.ledger.LedgerRecurringScreen
 import com.xiguli.jinkui.ui.ledger.LedgerScreen
 import com.xiguli.jinkui.ui.ledger.LedgerStatsScreen
 import com.xiguli.jinkui.ui.nav.HomeTab
@@ -127,6 +128,7 @@ private fun MainNavigation() {
                             onStats = { navigator.push(Screen.LedgerStats) },
                             onBudget = { navigator.push(Screen.LedgerBudget) },
                             onCategories = { navigator.push(Screen.LedgerCategories) },
+                            onRecurring = { navigator.push(Screen.LedgerRecurring) },
                             onSettings = { navigator.push(Screen.Settings) },
                         )
                     }
@@ -152,6 +154,7 @@ private fun MainNavigation() {
                 Screen.LedgerStats -> LedgerStatsScreen(onBack = { navigator.pop() })
                 Screen.LedgerBudget -> LedgerBudgetScreen(onBack = { navigator.pop() })
                 Screen.LedgerCategories -> LedgerCategoriesScreen(onBack = { navigator.pop() })
+                Screen.LedgerRecurring -> LedgerRecurringScreen(onBack = { navigator.pop() })
             }
             }
         }

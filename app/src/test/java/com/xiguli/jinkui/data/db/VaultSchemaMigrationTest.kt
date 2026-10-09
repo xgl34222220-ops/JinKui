@@ -110,9 +110,26 @@ class VaultSchemaMigrationTest {
     }
 
     @Test
-    fun upgradedSchemaMatchesFreshInstall() {
+    fun upgradeFromV2ToV3AddsRecurringAndKeepsLedger() {
         seedV1()
         migrate(1, 2)
+        exec("INSERT INTO ledger_accounts VALUES('acc-cash',0,0,1,1,'ENC')")
+        exec("INSERT INTO ledger_transactions VALUES('t-1','expense',100,'acc-cash',NULL,NULL,1,1,'ENC')")
+        migrate(2, 3)
+        assertEquals(3, count("PRAGMA user_version"))
+        assertEquals(1, count("SELECT COUNT(*) FROM ledger_transactions"))
+        assertEquals(2, count("SELECT COUNT(*) FROM cards"))
+        assertEquals(0, count("SELECT COUNT(*) FROM ledger_recurring"))
+        exec("INSERT INTO ledger_recurring VALUES('r-1',1,'ENC')")
+        // 周期记账用 INSERT OR IGNORE 写流水：同一 ID 第二次写入不覆盖、不重复
+        exec("INSERT OR IGNORE INTO ledger_transactions VALUES('t-1','expense',999,'acc-cash',NULL,NULL,2,2,'ENC2')")
+        assertEquals(1, count("SELECT COUNT(*) FROM ledger_transactions WHERE occurred_at = 100"))
+    }
+
+    @Test
+    fun upgradedSchemaMatchesFreshInstall() {
+        seedV1()
+        migrate(1, VaultSchema.VERSION)
         val fresh = DriverManager.getConnection("jdbc:sqlite::memory:")
         fresh.use { connection ->
             VaultSchema.create().forEach { sql -> connection.createStatement().use { it.execute(sql) } }

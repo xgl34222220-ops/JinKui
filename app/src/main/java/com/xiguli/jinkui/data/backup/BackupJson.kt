@@ -32,13 +32,15 @@ class BackupContent(
  * 备份内容的 JSON 结构。
  *
  *  - schema 1（0.1.0 – 0.5.3）：只有 cards。
- *  - schema 2（0.6.0 起）：增加 ledger（账户、分类、流水、预算）。仍能导入 schema 1 的旧备份。
+ *  - schema 2（0.6.0）：增加 ledger（账户、分类、流水、预算）。
+ *  - schema 3（0.7.0 起）：ledger 里增加 recurring（周期记账规则）；卡片字段可以是 totp（两步验证密钥）。
+ *    仍能导入 schema 1、2 的旧备份；旧版金匮会拒绝 schema 3，而不是悄悄丢掉新内容。
  *这段 JSON 只在内存里以明文存在，
  * 落盘前一定经过 [com.xiguli.jinkui.core.crypto.BackupCodec] 加密。
  */
 object BackupJson {
     private const val APP = "jinkui"
-    private const val SCHEMA = 2
+    const val SCHEMA = 3
     private const val MAX_CARDS = 20_000
 
     fun encode(cards: List<BackupCard>, exportedAt: Long, ledger: LedgerData = LedgerData.EMPTY): ByteArray {

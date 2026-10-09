@@ -307,6 +307,7 @@ object LedgerMerge {
             categories = pick(local.categories, incoming.categories, { it.id }, { it.updatedAt }),
             transactions = pick(local.transactions, incoming.transactions, { it.id }, { it.updatedAt }),
             budgets = pick(local.budgets, incoming.budgets, { it.id }, { it.updatedAt }),
+            recurring = pick(local.recurring, incoming.recurring, { it.id }, { it.updatedAt }),
         )
         return LedgerMergePlan(write, added, updated, skipped)
     }

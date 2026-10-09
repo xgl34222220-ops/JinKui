@@ -33,11 +33,13 @@ import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.MoreHoriz
 import androidx.compose.material.icons.outlined.PieChart
+import androidx.compose.material.icons.outlined.Repeat
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -168,6 +170,13 @@ class LedgerViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    fun runRecurring() {
+        viewModelScope.launch {
+            val made = runCatching { container.ledger.runRecurring() }.getOrDefault(0)
+            if (made > 0) container.messages.show("周期记账已自动记上 $made 笔")
+        }
+    }
+
     fun delete(tx: LedgerTransaction) {
         viewModelScope.launch {
             runCatching { container.ledger.deleteTransaction(tx.id) }
@@ -184,6 +193,7 @@ fun LedgerScreen(
     onBudget: () -> Unit,
     onCategories: () -> Unit,
     onSettings: () -> Unit,
+    onRecurring: () -> Unit = {},
 ) {
     val container = LocalContainer.current
     val viewModel = jkViewModel { LedgerViewModel(container) }
@@ -198,6 +208,9 @@ fun LedgerScreen(
     var pickAccount by remember { mutableStateOf(false) }
     var pickCategory by remember { mutableStateOf(false) }
     var showSearch by remember { mutableStateOf(false) }
+
+    // 每次回到账本页补记到期的周期记账（例如解锁状态下跨过了午夜）。
+    LaunchedEffect(Unit) { viewModel.runRecurring() }
 
     Box(Modifier.fillMaxSize()) {
         LazyColumn(
@@ -420,6 +433,16 @@ fun LedgerScreen(
                 onClick = {
                     showMore = false
                     onBudget()
+                },
+            )
+            JkRow(
+                title = "周期记账",
+                subtitle = "房租、工资、订阅等固定收支自动记上",
+                icon = Icons.Outlined.Repeat,
+                modifier = Modifier.clip(Radius.control),
+                onClick = {
+                    showMore = false
+                    onRecurring()
                 },
             )
             JkRow(

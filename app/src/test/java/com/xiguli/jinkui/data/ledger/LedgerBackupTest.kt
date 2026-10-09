@@ -59,7 +59,7 @@ class LedgerBackupTest {
     @Test
     fun newBackupsDeclareSchemaTwo() {
         val root = JSONObject(String(BackupJson.encode(listOf(card), 1L, ledger), Charsets.UTF_8))
-        assertEquals(2, root.getInt("schema"))
+        assertEquals(BackupJson.SCHEMA, root.getInt("schema"))
         assertTrue(root.has("ledger"))
     }
 

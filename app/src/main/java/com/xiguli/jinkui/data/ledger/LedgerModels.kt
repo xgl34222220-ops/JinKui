@@ -98,10 +98,13 @@ data class LedgerData(
     val categories: List<LedgerCategory> = emptyList(),
     val transactions: List<LedgerTransaction> = emptyList(),
     val budgets: List<LedgerBudget> = emptyList(),
+    /** 周期记账规则（0.7.0 起）。 */
+    val recurring: List<LedgerRecurring> = emptyList(),
     /** 解密失败（数据损坏）而没有载入的记录数。 */
     val unreadable: Int = 0,
 ) {
-    val isEmpty: Boolean get() = accounts.isEmpty() && categories.isEmpty() && transactions.isEmpty() && budgets.isEmpty()
+    val isEmpty: Boolean
+        get() = accounts.isEmpty() && categories.isEmpty() && transactions.isEmpty() && budgets.isEmpty() && recurring.isEmpty()
 
     companion object {
         val EMPTY = LedgerData()

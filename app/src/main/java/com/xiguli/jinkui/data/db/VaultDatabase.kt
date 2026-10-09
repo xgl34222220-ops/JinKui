@@ -85,12 +85,19 @@ class LedgerBudgetRow(
     val dataEnc: String,
 )
 
+class LedgerRecurringRow(
+    val id: String,
+    val updatedAt: Long,
+    val dataEnc: String,
+)
+
 /** 一次写入的一批账本记录（导入备份、首次预置）。 */
 class LedgerBatch(
     val accounts: List<LedgerAccountRow> = emptyList(),
     val categories: List<LedgerCategoryRow> = emptyList(),
     val transactions: List<LedgerTxRow> = emptyList(),
     val budgets: List<LedgerBudgetRow> = emptyList(),
+    val recurring: List<LedgerRecurringRow> = emptyList(),
 )
 
 /**
@@ -310,6 +317,27 @@ class VaultDatabase(private val context: Context) {
             LedgerBudgetRow(it.getString(0), if (it.isNull(1)) null else it.getString(1), it.getLong(2), it.getString(3))
         }
 
+    fun ledgerRecurring(): List<LedgerRecurringRow> =
+        read("SELECT id,updated_at,data_enc FROM ledger_recurring") {
+            LedgerRecurringRow(it.getString(0), it.getLong(1), it.getString(2))
+        }
+
+    fun saveLedgerRecurring(row: LedgerRecurringRow) = transaction { db -> writeRecurring(db, row) }
+
+    /** 只删除规则；它已经生成的流水保留。 */
+    fun deleteLedgerRecurring(id: String) = transaction { db ->
+        db.execSQL("DELETE FROM ledger_recurring WHERE id = ?", arrayOf<Any?>(id))
+    }
+
+    /**
+     * 周期记账：在一个事务里写入新生成的流水并推进规则进度。
+     * 流水用 INSERT OR IGNORE：同一个 ID（同一规则同一天）已经存在时不会覆盖用户改过的那一笔，也不会重复。
+     */
+    fun applyRecurring(transactions: List<LedgerTxRow>, rules: List<LedgerRecurringRow>) = transaction { db ->
+        transactions.forEach { writeTransaction(db, it, ignoreExisting = true) }
+        rules.forEach { writeRecurring(db, it) }
+    }
+
     fun ledgerCategoryCount(): Int = read("SELECT COUNT(*) FROM ledger_categories") { it.getInt(0) }.single()
 
     /** 一个事务内写入整批账本记录（同 ID 覆盖）。 */
@@ -318,6 +346,7 @@ class VaultDatabase(private val context: Context) {
         batch.categories.forEach { writeCategory(db, it) }
         batch.transactions.forEach { writeTransaction(db, it) }
         batch.budgets.forEach { writeBudget(db, it) }
+        batch.recurring.forEach { writeRecurring(db, it) }
     }
 
     fun saveLedgerTransaction(row: LedgerTxRow) = transaction { db -> writeTransaction(db, row) }
@@ -362,9 +391,16 @@ class VaultDatabase(private val context: Context) {
         )
     }
 
-    private fun writeTransaction(db: SupportSQLiteDatabase, row: LedgerTxRow) {
+    private fun writeRecurring(db: SupportSQLiteDatabase, row: LedgerRecurringRow) {
         db.execSQL(
-            "INSERT OR REPLACE INTO ledger_transactions(id,type,occurred_at,account_id,to_account_id,category_id,created_at,updated_at,data_enc) VALUES(?,?,?,?,?,?,?,?,?)",
+            "INSERT OR REPLACE INTO ledger_recurring(id,updated_at,data_enc) VALUES(?,?,?)",
+            arrayOf<Any?>(row.id, row.updatedAt, row.dataEnc),
+        )
+    }
+
+    private fun writeTransaction(db: SupportSQLiteDatabase, row: LedgerTxRow, ignoreExisting: Boolean = false) {
+        db.execSQL(
+            (if (ignoreExisting) "INSERT OR IGNORE" else "INSERT OR REPLACE") + " INTO ledger_transactions(id,type,occurred_at,account_id,to_account_id,category_id,created_at,updated_at,data_enc) VALUES(?,?,?,?,?,?,?,?,?)",
             arrayOf<Any?>(
                 row.id, row.type, row.occurredAt, row.accountId, row.toAccountId, row.categoryId,
                 row.createdAt, row.updatedAt, row.dataEnc,

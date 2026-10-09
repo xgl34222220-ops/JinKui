@@ -7,6 +7,7 @@ import com.xiguli.jinkui.data.db.LedgerAccountRow
 import com.xiguli.jinkui.data.db.LedgerBatch
 import com.xiguli.jinkui.data.db.LedgerBudgetRow
 import com.xiguli.jinkui.data.db.LedgerCategoryRow
+import com.xiguli.jinkui.data.db.LedgerRecurringRow
 import com.xiguli.jinkui.data.db.LedgerTxRow
 import com.xiguli.jinkui.data.db.VaultDatabase
 import com.xiguli.jinkui.data.ledger.AccountKind
@@ -18,7 +19,12 @@ import com.xiguli.jinkui.data.ledger.LedgerDefaults
 import com.xiguli.jinkui.data.ledger.LedgerJson
 import com.xiguli.jinkui.data.ledger.LedgerMath
 import com.xiguli.jinkui.data.ledger.LedgerMerge
+import com.xiguli.jinkui.data.ledger.LedgerRecurring
 import com.xiguli.jinkui.data.ledger.LedgerTransaction
+import com.xiguli.jinkui.data.ledger.RecurringMath
+import java.time.ZoneId
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import com.xiguli.jinkui.data.ledger.TxType
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -92,7 +98,77 @@ class LedgerRepository(
         val budgets = decodeAll(database.ledgerBudgets()) { row ->
             LedgerBudget(row.id, row.categoryId, LedgerJson.readBudgetAmount(keys.field.decrypt(row.dataEnc, budgetContext(row.id))), row.updatedAt)
         }
-        publish { LedgerData(accounts, categories, transactions, budgets, unreadable) }
+        val recurring = decodeAll(database.ledgerRecurring()) { row ->
+            LedgerJson.readRecurringPayload(row.id, row.updatedAt, keys.field.decrypt(row.dataEnc, recurringContext(row.id)))
+        }
+        publish { LedgerData(accounts, categories, transactions, budgets, recurring, unreadable) }
+        // 解锁后立刻补记到期的周期记账；失败不影响账本打开
+        runCatching { runRecurring() }
+    }
+
+    // ── 周期记账 ──────────────────────────────────────────────────
+
+    private val recurringLock = Mutex()
+
+    /**
+     * 生成到期的周期记账（解锁时、回到账本页时调用）。不需要后台任务，也不联网。
+     * 新流水与规则进度在一个事务里写入；同一规则同一天的流水 ID 固定，绝不会重复生成。
+     * 返回新生成的笔数。
+     */
+    suspend fun runRecurring(
+        now: Long = System.currentTimeMillis(),
+        zone: ZoneId = ZoneId.systemDefault(),
+    ): Int = withContext(Dispatchers.IO) {
+        recurringLock.withLock {
+            val keys = keys()
+            val batch = RecurringMath.generate(state.value, now, zone)
+            if (batch.isEmpty) return@withLock 0
+            database.applyRecurring(batch.transactions.map { it.toRow(keys) }, batch.rules.map { it.toRow(keys) })
+            val newIds = batch.transactions.mapTo(HashSet()) { it.id }
+            val advanced = batch.rules.associateBy { it.id }
+            publish { data ->
+                data.copy(
+                    transactions = data.transactions.filterNot { it.id in newIds } + batch.transactions,
+                    recurring = data.recurring.map { advanced[it.id] ?: it },
+                )
+            }
+            batch.transactions.size
+        }
+    }
+
+    suspend fun saveRecurring(rule: LedgerRecurring): LedgerRecurring = withContext(Dispatchers.IO) {
+        val saved = recurringLock.withLock {
+            val keys = keys()
+            val current = state.value
+            val normalized = rule.copy(
+                note = rule.note.trim().take(500),
+                tags = rule.tags.map { it.trim() }.filter { it.isNotEmpty() }.distinct(),
+                toAccountId = if (rule.type == TxType.TRANSFER) rule.toAccountId else null,
+                categoryId = if (rule.type == TxType.TRANSFER) null else rule.categoryId,
+            )
+            RecurringMath.validate(normalized, current.accounts)?.let { throw LedgerInputException(it) }
+            val previous = current.recurring.firstOrNull { it.id == rule.id }
+            val now = System.currentTimeMillis()
+            val saved = normalized.copy(
+                nextIndex = RecurringMath.indexAfterEdit(previous, normalized),
+                createdAt = previous?.createdAt ?: now,
+                updatedAt = now,
+            )
+            database.saveLedgerRecurring(saved.toRow(keys))
+            publish { data -> data.copy(recurring = data.recurring.filterNot { it.id == saved.id } + saved) }
+            saved
+        }
+        runRecurring()
+        state.value.recurring.firstOrNull { it.id == saved.id } ?: saved
+    }
+
+    /** 删除规则；它已经生成的流水保留，余额不受影响。 */
+    suspend fun deleteRecurring(id: String) = withContext(Dispatchers.IO) {
+        recurringLock.withLock {
+            keys()
+            database.deleteLedgerRecurring(id)
+            publish { data -> data.copy(recurring = data.recurring.filterNot { it.id == id }) }
+        }
     }
 
     /** 与卡片仓库相同：锁定之后完成的后台操作不能再把明文放回内存。 */
@@ -161,6 +237,9 @@ class LedgerRepository(
     suspend fun deleteAccount(id: String) = withContext(Dispatchers.IO) {
         if (LedgerMath.usageOf(id, state.value.transactions) > 0) {
             throw LedgerInputException("这个账户还有流水，不能删除，可以改为停用")
+        }
+        if (state.value.recurring.any { it.accountId == id || it.toAccountId == id }) {
+            throw LedgerInputException("有周期记账在用这个账户，请先修改或删除那条周期记账")
         }
         database.deleteLedgerAccount(id)
         publish { data -> data.copy(accounts = data.accounts.filterNot { it.id == id }) }
@@ -234,6 +313,7 @@ class LedgerRepository(
                         categories = write.categories.map { it.toRow(keys) },
                         transactions = write.transactions.map { it.toRow(keys) },
                         budgets = write.budgets.map { it.toRow(keys) },
+                        recurring = write.recurring.map { it.toRow(keys) },
                     ),
                 )
             }
@@ -265,11 +345,17 @@ class LedgerRepository(
         keys.field.encrypt(LedgerJson.budgetPayload(this), budgetContext(id)),
     )
 
+    private fun LedgerRecurring.toRow(keys: SessionKeys) = LedgerRecurringRow(
+        id, updatedAt,
+        keys.field.encrypt(LedgerJson.recurringPayload(this), recurringContext(id)),
+    )
+
     private companion object {
         // AAD：每段密文绑定到自己的记录，挪到别处无法解密。
         fun accountContext(id: String) = "ledger:account:$id"
         fun categoryContext(id: String) = "ledger:category:$id"
         fun transactionContext(id: String) = "ledger:tx:$id"
         fun budgetContext(id: String) = "ledger:budget:$id"
+        fun recurringContext(id: String) = "ledger:recurring:$id"
     }
 }

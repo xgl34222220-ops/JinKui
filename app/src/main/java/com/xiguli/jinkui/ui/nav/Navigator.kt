@@ -24,6 +24,7 @@ sealed interface Screen {
     data object LedgerStats : Screen
     data object LedgerBudget : Screen
     data object LedgerCategories : Screen
+    data object LedgerRecurring : Screen
 }
 
 /** 首页底部的两个分区。 */
