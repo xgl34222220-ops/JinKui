@@ -287,7 +287,8 @@ fun HomeScreen(
                     LazyRow(
                         contentPadding = PaddingValues(horizontal = Space.x2_5),
                         horizontalArrangement = Arrangement.spacedBy(Space.x1),
-                        modifier = Modifier.padding(top = Space.x1_5),
+                        // JkChip 布局高 48dp（触控区），视觉仍是 32dp：上边距相应减 8dp，筛选条看上去位置不变
+                        modifier = Modifier.padding(top = Space.x05),
                     ) {
                         item { JkChip("全部", filter == null, { viewModel.setFilter(null) }) }
                         items(ui.filters, key = { it.first }) { (key, label) ->

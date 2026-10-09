@@ -1,6 +1,16 @@
 package com.xiguli.jinkui.ui.components
 
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.slideInVertically
+import androidx.compose.material3.minimumInteractiveComponentSize
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.LocalIndication
@@ -470,6 +480,10 @@ fun JkSwitch(checked: Boolean, onCheckedChange: (Boolean) -> Unit, enabled: Bool
     )
 }
 
+/**
+ * 小标签 / 筛选项。视觉上仍是 32dp 高，但布局与触控区补足到 48dp（minimumInteractiveComponentSize），
+ * 相邻两枚之间不会抢点；选中态用 semantics 告诉读屏。
+ */
 @Composable
 fun JkChip(
     text: String,
@@ -478,20 +492,25 @@ fun JkChip(
     modifier: Modifier = Modifier,
 ) {
     val colors = Jk.colors
+    val background by animateColorAsState(if (selected) colors.primary else colors.surface, tween(160), label = "chipBg")
+    val borderColor by animateColorAsState(if (selected) colors.primary else colors.border, tween(160), label = "chipBorder")
+    val content by animateColorAsState(if (selected) colors.onPrimary else colors.textSecondary, tween(160), label = "chipText")
     Box(
         modifier = modifier
+            .minimumInteractiveComponentSize()
             .height(32.dp)
             .clip(Radius.chip)
-            .background(if (selected) colors.primary else colors.surface)
-            .border(BorderStroke(1.dp, if (selected) colors.primary else colors.border), Radius.chip)
+            .background(background)
+            .border(BorderStroke(1.dp, borderColor), Radius.chip)
             .clickable(onClick = onClick)
+            .semantics { this.selected = selected }
             .padding(horizontal = Space.x1_5),
         contentAlignment = Alignment.Center,
     ) {
         Text(
             text = text,
             style = JkType.small,
-            color = if (selected) colors.onPrimary else colors.textSecondary,
+            color = content,
             maxLines = 1,
         )
     }
@@ -605,6 +624,13 @@ fun JkSheet(
                 ),
             contentAlignment = Alignment.BottomCenter,
         ) {
+            // 只做进入动画（从底部滑上来）；关闭时立刻移除，面板里的明文不多停留一帧。
+            var shown by remember { mutableStateOf(false) }
+            LaunchedEffect(Unit) { shown = true }
+            AnimatedVisibility(
+                visible = shown,
+                enter = slideInVertically(spring(dampingRatio = 0.9f, stiffness = 520f)) { it / 2 } + fadeIn(tween(140)),
+            ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -641,20 +667,27 @@ fun JkSheet(
                 }
                 content()
             }
+            }
         }
     }
 }
 
 /** 页面中央的空状态 / 说明。 */
 @Composable
-fun JkEmpty(title: String, message: String, modifier: Modifier = Modifier, action: (@Composable () -> Unit)? = null) {
+fun JkEmpty(
+    title: String,
+    message: String,
+    modifier: Modifier = Modifier,
+    illustration: @Composable () -> Unit = { EmptyIllustration() },
+    action: (@Composable () -> Unit)? = null,
+) {
     Column(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = Space.x4, vertical = Space.x6),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        EmptyIllustration()
+        illustration()
         Spacer(Modifier.height(Space.x2_5))
         Text(title, style = JkType.heading, color = Jk.colors.textPrimary)
         Spacer(Modifier.height(Space.x1))
