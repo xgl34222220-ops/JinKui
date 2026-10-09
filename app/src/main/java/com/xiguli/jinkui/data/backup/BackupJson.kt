@@ -1,6 +1,8 @@
 package com.xiguli.jinkui.data.backup
 
 import com.xiguli.jinkui.core.crypto.BackupFormatException
+import com.xiguli.jinkui.data.ledger.LedgerData
+import com.xiguli.jinkui.data.ledger.LedgerJson
 import com.xiguli.jinkui.data.model.Attachment
 import com.xiguli.jinkui.data.model.Card
 import com.xiguli.jinkui.data.model.CardField
@@ -20,16 +22,26 @@ class BackupCard(
     val history: List<HistoryEntry>,
 )
 
+/** 一份备份的全部内容。0.6.0 之前的备份没有账本，[ledger] 为空。 */
+class BackupContent(
+    val cards: List<BackupCard>,
+    val ledger: LedgerData,
+)
+
 /**
- * 备份内容的 JSON 结构。这段 JSON 只在内存里以明文存在，
+ * 备份内容的 JSON 结构。
+ *
+ *  - schema 1（0.1.0 – 0.5.3）：只有 cards。
+ *  - schema 2（0.6.0 起）：增加 ledger（账户、分类、流水、预算）。仍能导入 schema 1 的旧备份。
+ *这段 JSON 只在内存里以明文存在，
  * 落盘前一定经过 [com.xiguli.jinkui.core.crypto.BackupCodec] 加密。
  */
 object BackupJson {
     private const val APP = "jinkui"
-    private const val SCHEMA = 1
+    private const val SCHEMA = 2
     private const val MAX_CARDS = 20_000
 
-    fun encode(cards: List<BackupCard>, exportedAt: Long): ByteArray {
+    fun encode(cards: List<BackupCard>, exportedAt: Long, ledger: LedgerData = LedgerData.EMPTY): ByteArray {
         val root = JSONObject()
         root.put("app", APP)
         root.put("schema", SCHEMA)
@@ -37,11 +49,16 @@ object BackupJson {
         val array = JSONArray()
         for (item in cards) array.put(cardToJson(item))
         root.put("cards", array)
+        root.put("ledger", LedgerJson.toBackup(ledger))
         return root.toString().toByteArray(Charsets.UTF_8)
     }
 
+    /** 只取卡片部分。 */
     @Throws(BackupFormatException::class)
-    fun decode(bytes: ByteArray): List<BackupCard> {
+    fun decode(bytes: ByteArray): List<BackupCard> = decodeAll(bytes).cards
+
+    @Throws(BackupFormatException::class)
+    fun decodeAll(bytes: ByteArray): BackupContent {
         try {
             val root = JSONObject(String(bytes, Charsets.UTF_8))
             if (root.optString("app") != APP) throw BackupFormatException("备份内容不是金匮的数据")
@@ -49,7 +66,9 @@ object BackupJson {
             if (schema !in 1..SCHEMA) throw BackupFormatException("备份数据版本 $schema 暂不支持，请升级金匮")
             val array = root.getJSONArray("cards")
             if (array.length() > MAX_CARDS) throw BackupFormatException("备份中的卡片数量异常")
-            return (0 until array.length()).map { cardFromJson(array.getJSONObject(it)) }
+            val cards = (0 until array.length()).map { cardFromJson(array.getJSONObject(it)) }
+            val ledger = root.optJSONObject("ledger")?.let(LedgerJson::fromBackup) ?: LedgerData.EMPTY
+            return BackupContent(cards, ledger)
         } catch (e: JSONException) {
             throw BackupFormatException("备份内容结构不完整")
         } catch (e: IllegalArgumentException) {
