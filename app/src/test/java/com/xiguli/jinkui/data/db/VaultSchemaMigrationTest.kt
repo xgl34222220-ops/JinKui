@@ -127,6 +127,24 @@ class VaultSchemaMigrationTest {
     }
 
     @Test
+    fun upgradeFromV3ToV4AddsTombstonesAndKeepsEverything() {
+        seedV1()
+        migrate(1, 3)
+        exec("INSERT INTO ledger_accounts VALUES('acc-cash',0,0,1,1,'ENC')")
+        exec("INSERT INTO ledger_transactions VALUES('r20261001-r-1','expense',100,'acc-cash',NULL,NULL,1,1,'ENC')")
+        exec("INSERT INTO ledger_recurring VALUES('r-1',1,'ENC')")
+        migrate(3, 4)
+        assertEquals(4, count("PRAGMA user_version"))
+        assertEquals(2, count("SELECT COUNT(*) FROM cards"))
+        assertEquals(1, count("SELECT COUNT(*) FROM ledger_transactions"))
+        assertEquals(1, count("SELECT COUNT(*) FROM ledger_recurring"))
+        assertEquals(0, count("SELECT COUNT(*) FROM ledger_tombstones"))
+        exec("INSERT OR REPLACE INTO ledger_tombstones VALUES('r20261002-r-1','tx',5)")
+        exec("INSERT OR REPLACE INTO ledger_tombstones VALUES('r20261002-r-1','tx',6)")
+        assertEquals(1, count("SELECT COUNT(*) FROM ledger_tombstones WHERE deleted_at = 6"))
+    }
+
+    @Test
     fun upgradedSchemaMatchesFreshInstall() {
         seedV1()
         migrate(1, VaultSchema.VERSION)

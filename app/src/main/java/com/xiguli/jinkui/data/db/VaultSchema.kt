@@ -6,12 +6,13 @@ package com.xiguli.jinkui.data.db
  *  - 版本 1（0.1.0 – 0.5.3）：cards / fields / attachments / history。
  *  - 版本 2（0.6.0）：新增账本四张表，旧表不动。
  *  - 版本 3（0.7.0）：新增周期记账规则表，旧表不动。
+ *  - 版本 4（0.9.0）：新增账本删除标记表，旧表不动。
  *
  * 新装用户执行 [create]：版本 1 的建表语句加上之后的全部迁移，保证新装与升级得到同一套结构。
  * 迁移只允许“加”，不得丢弃或改写用户已有的数据。
  */
 object VaultSchema {
-    const val VERSION = 3
+    const val VERSION = 4
 
     private val V1 = listOf(
         """CREATE TABLE cards(
@@ -109,7 +110,19 @@ object VaultSchema {
         )""",
     )
 
-    private val MIGRATIONS: Map<Int, List<String>> = mapOf(2 to V2, 3 to V3)
+    /**
+     * 3 → 4：删除标记。用户删掉的周期生成流水与周期规则在这里留一个 ID，
+     * 之后补记周期记账、导入旧备份时都不会把它们加回来。只有 ID、种类与删除时间，没有任何内容。
+     */
+    private val V4 = listOf(
+        """CREATE TABLE ledger_tombstones(
+            id TEXT PRIMARY KEY NOT NULL,
+            kind TEXT NOT NULL,
+            deleted_at INTEGER NOT NULL
+        )""",
+    )
+
+    private val MIGRATIONS: Map<Int, List<String>> = mapOf(2 to V2, 3 to V3, 4 to V4)
 
     /** 新装：建出最新结构。 */
     fun create(): List<String> = V1 + upgrade(1, VERSION)

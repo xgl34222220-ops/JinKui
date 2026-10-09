@@ -8,6 +8,7 @@ import com.xiguli.jinkui.data.db.LedgerBatch
 import com.xiguli.jinkui.data.db.LedgerBudgetRow
 import com.xiguli.jinkui.data.db.LedgerCategoryRow
 import com.xiguli.jinkui.data.db.LedgerRecurringRow
+import com.xiguli.jinkui.data.db.LedgerTombstoneRow
 import com.xiguli.jinkui.data.db.LedgerTxRow
 import com.xiguli.jinkui.data.db.VaultDatabase
 import com.xiguli.jinkui.data.ledger.AccountKind
@@ -20,6 +21,7 @@ import com.xiguli.jinkui.data.ledger.LedgerJson
 import com.xiguli.jinkui.data.ledger.LedgerMath
 import com.xiguli.jinkui.data.ledger.LedgerMerge
 import com.xiguli.jinkui.data.ledger.LedgerRecurring
+import com.xiguli.jinkui.data.ledger.LedgerTombstone
 import com.xiguli.jinkui.data.ledger.LedgerTransaction
 import com.xiguli.jinkui.data.ledger.RecurringMath
 import java.time.ZoneId
@@ -33,7 +35,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import org.json.JSONException
 
-class LedgerImportSummary(val added: Int, val updated: Int, val skipped: Int)
+class LedgerImportSummary(val added: Int, val updated: Int, val skipped: Int, val suppressed: Int = 0)
 
 /** 校验没通过时抛出，[message] 直接给用户看。 */
 class LedgerInputException(message: String) : Exception(message)
@@ -101,7 +103,11 @@ class LedgerRepository(
         val recurring = decodeAll(database.ledgerRecurring()) { row ->
             LedgerJson.readRecurringPayload(row.id, row.updatedAt, keys.field.decrypt(row.dataEnc, recurringContext(row.id)))
         }
-        publish { LedgerData(accounts, categories, transactions, budgets, recurring, unreadable) }
+        // 删除标记没有密文，只是 ID；种类不认识的（更新版本写入的）原样保留在库里，这里不用
+        val tombstones = database.ledgerTombstones()
+            .filter { it.kind in LedgerTombstone.KINDS }
+            .map { LedgerTombstone(it.id, it.kind, it.deletedAt) }
+        publish { LedgerData(accounts, categories, transactions, budgets, recurring, unreadable, tombstones) }
         // 解锁后立刻补记到期的周期记账；失败不影响账本打开
         runCatching { runRecurring() }
     }
@@ -162,12 +168,18 @@ class LedgerRepository(
         state.value.recurring.firstOrNull { it.id == saved.id } ?: saved
     }
 
-    /** 删除规则；它已经生成的流水保留，余额不受影响。 */
+    /** 删除规则；它已经生成的流水保留，余额不受影响。记下删除标记，导入旧备份时不会把规则加回来。 */
     suspend fun deleteRecurring(id: String) = withContext(Dispatchers.IO) {
         recurringLock.withLock {
             keys()
-            database.deleteLedgerRecurring(id)
-            publish { data -> data.copy(recurring = data.recurring.filterNot { it.id == id }) }
+            val tombstone = LedgerTombstone(id, LedgerTombstone.KIND_RECURRING, System.currentTimeMillis())
+            database.deleteLedgerRecurring(id, tombstone.toRow())
+            publish { data ->
+                data.copy(
+                    recurring = data.recurring.filterNot { it.id == id },
+                    tombstones = data.tombstones.filterNot { it.id == id } + tombstone,
+                )
+            }
         }
     }
 
@@ -203,9 +215,25 @@ class LedgerRepository(
         saved
     }
 
+    /**
+     * 删除一笔流水。周期记账生成的流水同时记下删除标记：
+     * 之后补记不会再生成这一天，导入旧备份也不会把它加回来。
+     */
     suspend fun deleteTransaction(id: String) = withContext(Dispatchers.IO) {
-        database.deleteLedgerTransaction(id)
-        publish { data -> data.copy(transactions = data.transactions.filterNot { it.id == id }) }
+        val tombstone = if (RecurringMath.isGeneratedId(id)) {
+            LedgerTombstone(id, LedgerTombstone.KIND_TX, System.currentTimeMillis())
+        } else {
+            null
+        }
+        recurringLock.withLock {
+            database.deleteLedgerTransaction(id, tombstone?.toRow())
+            publish { data ->
+                data.copy(
+                    transactions = data.transactions.filterNot { it.id == id },
+                    tombstones = if (tombstone == null) data.tombstones else data.tombstones.filterNot { it.id == id } + tombstone,
+                )
+            }
+        }
     }
 
     // ── 账户 ──────────────────────────────────────────────────────
@@ -314,13 +342,14 @@ class LedgerRepository(
                         transactions = write.transactions.map { it.toRow(keys) },
                         budgets = write.budgets.map { it.toRow(keys) },
                         recurring = write.recurring.map { it.toRow(keys) },
+                        tombstones = write.tombstones.map { it.toRow() },
                     ),
                 )
             }
         } finally {
             runCatching { load() }
         }
-        LedgerImportSummary(plan.added, plan.updated, plan.skipped)
+        LedgerImportSummary(plan.added, plan.updated, plan.skipped, plan.suppressed)
     }
 
     // ── 行转换 ────────────────────────────────────────────────────
@@ -344,6 +373,8 @@ class LedgerRepository(
         id, categoryId, updatedAt,
         keys.field.encrypt(LedgerJson.budgetPayload(this), budgetContext(id)),
     )
+
+    private fun LedgerTombstone.toRow() = LedgerTombstoneRow(id, kind, deletedAt)
 
     private fun LedgerRecurring.toRow(keys: SessionKeys) = LedgerRecurringRow(
         id, updatedAt,

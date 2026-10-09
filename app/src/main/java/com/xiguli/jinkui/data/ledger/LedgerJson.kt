@@ -187,7 +187,12 @@ object LedgerJson {
         for (r in data.recurring) {
             recurring.put(recurringJson(r).put("id", r.id).put("updatedAt", r.updatedAt))
         }
+        val tombstones = JSONArray()
+        for (t in data.tombstones) {
+            tombstones.put(JSONObject().put("id", t.id).put("kind", t.kind).put("deletedAt", t.deletedAt))
+        }
         return JSONObject()
+            .put("tombstones", tombstones)
             .put("accounts", accounts)
             .put("categories", categories)
             .put("transactions", transactions)
@@ -255,8 +260,14 @@ object LedgerJson {
                 throw IllegalArgumentException("日期无效", e)
             }
         }
-        require(accounts.size + categories.size + transactions.size + budgets.size + recurring.size <= MAX_RECORDS) { "账本记录数量异常" }
-        return LedgerData(accounts, categories, transactions, budgets, recurring)
+        // 0.9.0 之前的备份没有 "tombstones"，按空处理；不认识的种类忽略
+        val tombstones = json.optJSONArray("tombstones").objects().mapNotNull { t ->
+            val kind = t.getString("kind")
+            if (kind !in LedgerTombstone.KINDS) return@mapNotNull null
+            LedgerTombstone(t.getString("id").also(::requireId), kind, t.optLong("deletedAt", 0L))
+        }
+        require(accounts.size + categories.size + transactions.size + budgets.size + recurring.size + tombstones.size <= MAX_RECORDS) { "账本记录数量异常" }
+        return LedgerData(accounts, categories, transactions, budgets, recurring, tombstones = tombstones)
     }
 
     private fun requireId(id: String) {

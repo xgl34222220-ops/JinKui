@@ -77,10 +77,16 @@ object RecurringMath {
      */
     fun generate(data: LedgerData, now: Long, zone: ZoneId): RecurBatch {
         val existing = data.transactions.mapTo(HashSet()) { it.id }
+        // 用户删掉的生成流水不再生成；被删除的规则（例如从旧备份里带回来的）不再生成任何流水
+        val deadRules = HashSet<String>()
+        for (t in data.tombstones) {
+            if (t.kind == LedgerTombstone.KIND_RECURRING) deadRules += t.id else existing += t.id
+        }
         val transactions = ArrayList<LedgerTransaction>()
         val rules = ArrayList<LedgerRecurring>()
         var truncated = false
         for (rule in data.recurring) {
+            if (rule.id in deadRules) continue
             if (blockedReason(rule, data.accounts) != null) continue
             val plan = due(rule, now, zone)
             truncated = truncated || plan.truncated
@@ -175,6 +181,11 @@ object RecurringMath {
 
     /** 生成流水的 ID：规则 ID + 日期。同一规则同一天只会有这一个 ID。 */
     fun transactionId(ruleId: String, date: LocalDate): String = "r${date.format(DAY)}-$ruleId".take(64)
+
+    private val GENERATED_ID = Regex("r\\d{8}-[A-Za-z0-9-]+")
+
+    /** 是不是周期记账生成的流水 ID（手动记的流水是 UUID，不会以 r + 8 位日期开头）。 */
+    fun isGeneratedId(id: String): Boolean = GENERATED_ID.matches(id)
 
     /** 按规则生成一笔流水（时间戳由调用方给出，以便测试）。 */
     fun transactionFor(rule: LedgerRecurring, occurrence: RecurOccurrence, now: Long): LedgerTransaction =

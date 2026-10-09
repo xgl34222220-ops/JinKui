@@ -92,12 +92,15 @@ class LedgerRecurringRow(
 )
 
 /** 一次写入的一批账本记录（导入备份、首次预置）。 */
+class LedgerTombstoneRow(val id: String, val kind: String, val deletedAt: Long)
+
 class LedgerBatch(
     val accounts: List<LedgerAccountRow> = emptyList(),
     val categories: List<LedgerCategoryRow> = emptyList(),
     val transactions: List<LedgerTxRow> = emptyList(),
     val budgets: List<LedgerBudgetRow> = emptyList(),
     val recurring: List<LedgerRecurringRow> = emptyList(),
+    val tombstones: List<LedgerTombstoneRow> = emptyList(),
 )
 
 /**
@@ -324,10 +327,16 @@ class VaultDatabase(private val context: Context) {
 
     fun saveLedgerRecurring(row: LedgerRecurringRow) = transaction { db -> writeRecurring(db, row) }
 
-    /** 只删除规则；它已经生成的流水保留。 */
-    fun deleteLedgerRecurring(id: String) = transaction { db ->
+    /** 只删除规则；它已经生成的流水保留。同一事务里记下删除标记，旧备份里的这条规则不会被加回来。 */
+    fun deleteLedgerRecurring(id: String, tombstone: LedgerTombstoneRow? = null) = transaction { db ->
         db.execSQL("DELETE FROM ledger_recurring WHERE id = ?", arrayOf<Any?>(id))
+        tombstone?.let { writeTombstone(db, it) }
     }
+
+    fun ledgerTombstones(): List<LedgerTombstoneRow> =
+        read("SELECT id,kind,deleted_at FROM ledger_tombstones") {
+            LedgerTombstoneRow(it.getString(0), it.getString(1), it.getLong(2))
+        }
 
     /**
      * 周期记账：在一个事务里写入新生成的流水并推进规则进度。
@@ -347,12 +356,15 @@ class VaultDatabase(private val context: Context) {
         batch.transactions.forEach { writeTransaction(db, it) }
         batch.budgets.forEach { writeBudget(db, it) }
         batch.recurring.forEach { writeRecurring(db, it) }
+        batch.tombstones.forEach { writeTombstone(db, it) }
     }
 
     fun saveLedgerTransaction(row: LedgerTxRow) = transaction { db -> writeTransaction(db, row) }
 
-    fun deleteLedgerTransaction(id: String) = transaction { db ->
+    /** 删除流水；[tombstone] 不为空时（周期生成的流水）在同一事务里记下删除标记。 */
+    fun deleteLedgerTransaction(id: String, tombstone: LedgerTombstoneRow? = null) = transaction { db ->
         db.execSQL("DELETE FROM ledger_transactions WHERE id = ?", arrayOf<Any?>(id))
+        tombstone?.let { writeTombstone(db, it) }
     }
 
     fun saveLedgerAccount(row: LedgerAccountRow) = transaction { db -> writeAccount(db, row) }
@@ -395,6 +407,13 @@ class VaultDatabase(private val context: Context) {
         db.execSQL(
             "INSERT OR REPLACE INTO ledger_recurring(id,updated_at,data_enc) VALUES(?,?,?)",
             arrayOf<Any?>(row.id, row.updatedAt, row.dataEnc),
+        )
+    }
+
+    private fun writeTombstone(db: SupportSQLiteDatabase, row: LedgerTombstoneRow) {
+        db.execSQL(
+            "INSERT OR REPLACE INTO ledger_tombstones(id,kind,deleted_at) VALUES(?,?,?)",
+            arrayOf<Any?>(row.id, row.kind, row.deletedAt),
         )
     }
 

@@ -31,6 +31,8 @@ class ImportSummary(
     /** 账本里新增 / 更新的记录数（账户、分类、流水、预算合计）。 */
     val ledgerAdded: Int = 0,
     val ledgerUpdated: Int = 0,
+    /** 因为删除标记而没有加回来的账本记录数（删掉的周期生成流水 / 周期规则）。 */
+    val ledgerSuppressed: Int = 0,
 )
 
 /**

@@ -279,36 +279,56 @@ class LedgerMergePlan(
     val added: Int,
     val updated: Int,
     val skipped: Int,
+    /** 因为本机或备份里有删除标记而没有加回来的记录数。 */
+    val suppressed: Int = 0,
 )
 
 /**
  * 账本合并规则，与卡片一致：本机没有的记录直接加入；两边都有时保留更新时间较新的一份；
  * 不会删除本机已有的任何记录。同一份备份里重复的 ID 以更新时间最新的为准。
+ *
+ * 删除标记（0.9.0 起）：本机或备份任一边标记为已删除的周期生成流水 / 周期规则不会被加回来；
+ * 备份里的删除标记一并记到本机，但本机仍然存在的记录不受影响（导入从不删除本机记录），
+ * 也不为它记标记。写入的标记在 [LedgerMergePlan.toWrite] 的 tombstones 里。
  */
 object LedgerMerge {
     fun plan(local: LedgerData, incoming: LedgerData): LedgerMergePlan {
         var added = 0
         var updated = 0
         var skipped = 0
-        fun <T> pick(local: List<T>, incoming: List<T>, id: (T) -> String, time: (T) -> Long): List<T> {
+        var suppressed = 0
+        val dead = HashSet<String>()
+        local.tombstones.forEach { dead += it.id }
+        incoming.tombstones.forEach { dead += it.id }
+        fun <T> pick(local: List<T>, incoming: List<T>, id: (T) -> String, time: (T) -> Long, honorTombstones: Boolean = false): List<T> {
             val existing = local.associateBy(id)
             val latest = incoming.groupBy(id).values.map { group -> group.maxBy(time) }
             return latest.filter { item ->
                 val current = existing[id(item)]
                 when {
+                    honorTombstones && id(item) in dead -> { suppressed++; false }
                     current == null -> { added++; true }
                     time(current) >= time(item) -> { skipped++; false }
                     else -> { updated++; true }
                 }
             }
         }
+        val localIds = HashSet<String>().apply {
+            local.transactions.forEach { add(it.id) }
+            local.recurring.forEach { add(it.id) }
+        }
+        val known = local.tombstones.mapTo(HashSet()) { it.id }
+        val newTombstones = incoming.tombstones
+            .groupBy { it.id }.values.map { group -> group.maxBy { it.deletedAt } }
+            .filter { it.id !in known && it.id !in localIds }
         val write = LedgerData(
             accounts = pick(local.accounts, incoming.accounts, { it.id }, { it.updatedAt }),
             categories = pick(local.categories, incoming.categories, { it.id }, { it.updatedAt }),
-            transactions = pick(local.transactions, incoming.transactions, { it.id }, { it.updatedAt }),
+            transactions = pick(local.transactions, incoming.transactions, { it.id }, { it.updatedAt }, honorTombstones = true),
             budgets = pick(local.budgets, incoming.budgets, { it.id }, { it.updatedAt }),
-            recurring = pick(local.recurring, incoming.recurring, { it.id }, { it.updatedAt }),
+            recurring = pick(local.recurring, incoming.recurring, { it.id }, { it.updatedAt }, honorTombstones = true),
+            tombstones = newTombstones,
         )
-        return LedgerMergePlan(write, added, updated, skipped)
+        return LedgerMergePlan(write, added, updated, skipped, suppressed)
     }
 }

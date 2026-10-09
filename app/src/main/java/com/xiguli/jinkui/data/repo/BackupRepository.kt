@@ -72,7 +72,7 @@ class BackupRepository(
         val cards = repository.restore(content.cards)
         // 0.6.0 之前的备份没有账本，这一步什么也不写。
         val ledgerSummary = ledger.restore(content.ledger)
-        ImportSummary(cards.added, cards.updated, cards.skipped, ledgerSummary.added, ledgerSummary.updated)
+        ImportSummary(cards.added, cards.updated, cards.skipped, ledgerSummary.added, ledgerSummary.updated, ledgerSummary.suppressed)
     }
 
     private fun readLimited(source: Uri): ByteArray {

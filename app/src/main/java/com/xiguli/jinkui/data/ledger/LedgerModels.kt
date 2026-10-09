@@ -102,12 +102,28 @@ data class LedgerData(
     val recurring: List<LedgerRecurring> = emptyList(),
     /** 解密失败（数据损坏）而没有载入的记录数。 */
     val unreadable: Int = 0,
+    /** 删除记录（0.9.0 起）：用户删掉的周期生成流水与周期规则，导入旧备份时不再加回来。 */
+    val tombstones: List<LedgerTombstone> = emptyList(),
 ) {
     val isEmpty: Boolean
         get() = accounts.isEmpty() && categories.isEmpty() && transactions.isEmpty() && budgets.isEmpty() && recurring.isEmpty()
 
     companion object {
         val EMPTY = LedgerData()
+    }
+}
+
+/**
+ * 一条“已删除”标记。只记两类会被旧备份或周期记账“复活”的记录：
+ *  - [KIND_TX]：周期记账生成的流水（ID 由规则 + 日期决定，删掉后同一 ID 可能被再次生成或从旧备份加回）；
+ *  - [KIND_RECURRING]：周期记账规则本身（旧备份里还留着它，加回来会接着生成）。
+ * 只有 ID、种类与删除时间，不含金额、备注等内容。
+ */
+data class LedgerTombstone(val id: String, val kind: String, val deletedAt: Long) {
+    companion object {
+        const val KIND_TX = "tx"
+        const val KIND_RECURRING = "recurring"
+        val KINDS = setOf(KIND_TX, KIND_RECURRING)
     }
 }
 
