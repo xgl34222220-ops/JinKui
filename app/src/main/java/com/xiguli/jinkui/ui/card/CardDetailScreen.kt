@@ -497,12 +497,15 @@ fun CardDetailContent(
         }
 
         Spacer(Modifier.height(Space.x2))
-        Text(
-            text = "创建于 ${formatTime(card.createdAt)}　更新于 ${formatTime(card.updatedAt)}",
-            style = JkType.caption.copy(fontFeatureSettings = "tnum"),
-            color = colors.textTertiary,
+        // 两段各自成块：字号放大时整段换行，不会把日期和时间拆到两行
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(Space.x1_5),
             modifier = Modifier.padding(start = Space.x05),
-        )
+        ) {
+            for (line in listOf("创建于 ${formatTime(card.createdAt)}", "更新于 ${formatTime(card.updatedAt)}")) {
+                Text(line, style = JkType.caption.copy(fontFeatureSettings = "tnum"), color = colors.textTertiary, maxLines = 1, softWrap = false)
+            }
+        }
     }
 }
 
