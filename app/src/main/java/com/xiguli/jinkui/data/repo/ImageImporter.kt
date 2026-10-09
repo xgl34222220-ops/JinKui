@@ -10,6 +10,7 @@ import com.xiguli.jinkui.data.model.CardTemplates
 import com.xiguli.jinkui.data.model.PendingAttachment
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import java.io.InputStream
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -24,8 +25,7 @@ object ImageImporter {
 
     suspend fun load(context: Context, uri: Uri): PendingAttachment = withContext(Dispatchers.IO) {
         val raw = (context.contentResolver.openInputStream(uri) ?: throw java.io.IOException("无法读取图片"))
-            .use { it.readBytes() }
-        if (raw.size > MAX_SOURCE_BYTES) throw java.io.IOException("图片过大（上限 30 MB）")
+            .use { readLimited(it, MAX_SOURCE_BYTES) }
 
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeByteArray(raw, 0, raw.size, bounds)
@@ -53,6 +53,19 @@ object ImageImporter {
             mime = "image/jpeg",
             bytes = out.toByteArray(),
         )
+    }
+
+    /** 边读边计数：超过上限立即停下，不会先把一个超大文件整个读进内存再判断。 */
+    internal fun readLimited(input: InputStream, limit: Int): ByteArray {
+        val out = ByteArrayOutputStream()
+        val buffer = ByteArray(64 * 1024)
+        while (true) {
+            val read = input.read(buffer)
+            if (read < 0) break
+            if (out.size() + read > limit) throw java.io.IOException("图片过大（上限 ${limit / (1024 * 1024)} MB）")
+            out.write(buffer, 0, read)
+        }
+        return out.toByteArray()
     }
 
     private fun rotationOf(raw: ByteArray): Float = runCatching {

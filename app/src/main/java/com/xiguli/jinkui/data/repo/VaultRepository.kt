@@ -1,5 +1,6 @@
 package com.xiguli.jinkui.data.repo
 
+import com.xiguli.jinkui.core.crypto.WrongSecretException
 import com.xiguli.jinkui.core.security.SessionKeys
 import com.xiguli.jinkui.core.security.VaultManager
 import com.xiguli.jinkui.data.backup.BackupCard
@@ -44,7 +45,7 @@ class VaultRepository(
         val keys = keys()
         val fields = database.fields().groupBy { it.cardId }
         val attachments = database.attachments().groupBy { it.cardId }
-        state.value = database.cards().map { row ->
+        val loaded = database.cards().map { row ->
             Card(
                 id = row.id,
                 type = CardType.of(row.type),
@@ -70,6 +71,17 @@ class VaultRepository(
                 lastUsedAt = row.lastUsedAt,
             )
         }
+        publish { loaded }
+    }
+
+    /**
+     * 更新内存中的卡片列表。后台操作完成时金匮可能刚好被锁定：
+     * 这时不能再把明文放回内存，直接丢弃。
+     */
+    private fun publish(transform: (List<Card>) -> List<Card>) {
+        if (vault.keys == null) return
+        state.value = transform(state.value)
+        if (vault.keys == null) state.value = emptyList()
     }
 
     /** 锁定时调用：丢弃内存中的全部明文。 */
@@ -116,25 +128,31 @@ class VaultRepository(
             emptyList()
         }
 
-        database.saveCard(
-            card = saved.toRow(keys),
-            fields = saved.fields.mapIndexed { index, field ->
-                FieldRow(
-                    id = field.id,
-                    cardId = saved.id,
-                    position = index,
-                    label = field.label.trim(),
-                    valueEnc = keys.field.encrypt(field.value, fieldContext(saved.id, field.id)),
-                    sensitive = field.sensitive,
-                    kind = field.kind.key,
-                )
-            },
-            addedAttachments = newAttachments.map { AttachmentRow(it.id, saved.id, it.name, it.mime, it.size, it.createdAt) },
-            removedAttachmentIds = removedAttachmentIds,
-            newHistory = history,
-        )
+        try {
+            database.saveCard(
+                card = saved.toRow(keys),
+                fields = saved.fields.mapIndexed { index, field ->
+                    FieldRow(
+                        id = field.id,
+                        cardId = saved.id,
+                        position = index,
+                        label = field.label.trim(),
+                        valueEnc = keys.field.encrypt(field.value, fieldContext(saved.id, field.id)),
+                        sensitive = field.sensitive,
+                        kind = field.kind.key,
+                    )
+                },
+                addedAttachments = newAttachments.map { AttachmentRow(it.id, saved.id, it.name, it.mime, it.size, it.createdAt) },
+                removedAttachmentIds = removedAttachmentIds,
+                newHistory = history,
+            )
+        } catch (e: Exception) {
+            // 数据库没写进去：刚落盘的新附件没有任何记录引用它，删掉，免得成为孤儿文件。
+            newAttachments.forEach { files.delete(it.id) }
+            throw e
+        }
         removedAttachmentIds.forEach(files::delete)
-        state.value = state.value.filterNot { it.id == saved.id } + saved
+        publish { cards -> cards.filterNot { it.id == saved.id } + saved }
         saved
     }
 
@@ -142,19 +160,19 @@ class VaultRepository(
         val card = find(id)
         database.deleteCard(id)
         card?.attachments?.forEach { files.delete(it.id) }
-        state.value = state.value.filterNot { it.id == id }
+        publish { cards -> cards.filterNot { it.id == id } }
     }
 
     suspend fun setPinned(id: String, pinned: Boolean) = withContext(Dispatchers.IO) {
         database.setPinned(id, pinned)
-        state.value = state.value.map { if (it.id == id) it.copy(pinned = pinned) else it }
+        publish { cards -> cards.map { if (it.id == id) it.copy(pinned = pinned) else it } }
     }
 
     /** 记录一次使用（查看或复制），用于“最近使用”。 */
     suspend fun markUsed(id: String) = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
         database.touch(id, now)
-        state.value = state.value.map { if (it.id == id) it.copy(lastUsedAt = now) else it }
+        publish { cards -> cards.map { if (it.id == id) it.copy(lastUsedAt = now) else it } }
     }
 
     suspend fun history(cardId: String): List<HistoryEntry> = withContext(Dispatchers.IO) {
@@ -199,24 +217,25 @@ class VaultRepository(
         var added = 0
         var updated = 0
         var skipped = 0
-        for (item in items) {
-            val incoming = item.card
-            val existing = find(incoming.id)
-            if (existing != null && existing.updatedAt >= incoming.updatedAt) {
-                skipped++
-                continue
-            }
-            existing?.attachments?.forEach { files.delete(it.id) }
-            for (attachment in incoming.attachments) {
-                val data = item.attachmentData[attachment.id] ?: continue
-                files.write(attachment.id, keys.attachment.encryptBytes(data, attachmentContext(attachment.id)))
-            }
-            val attachments = incoming.attachments.filter { item.attachmentData.containsKey(it.id) }
-            val card = incoming.copy(attachments = attachments)
-            database.deleteCard(card.id)
-            database.saveCard(
-                card = card.toRow(keys),
-                fields = card.fields.mapIndexed { index, field ->
+        // 同一份备份里若出现重复 ID，以更新时间较新的那份为准。
+        val latest = items.groupBy { it.card.id }.values.map { group -> group.maxBy { it.card.updatedAt } }
+        try {
+            for (item in latest) {
+                val incoming = item.card
+                val existing = find(incoming.id)
+                if (existing != null && existing.updatedAt >= incoming.updatedAt) {
+                    skipped++
+                    continue
+                }
+                val attachments = incoming.attachments.filter { item.attachmentData.containsKey(it.id) }
+                val card = incoming.copy(attachments = attachments)
+                val plan = AttachmentPlan.of(
+                    existing = existing?.attachments.orEmpty().map { it.id },
+                    incoming = attachments.map { it.id },
+                )
+                // 先把字段、备注、历史全部加密好，再动磁盘与数据库。
+                val row = card.toRow(keys)
+                val fieldRows = card.fields.mapIndexed { index, field ->
                     FieldRow(
                         id = field.id,
                         cardId = card.id,
@@ -226,16 +245,33 @@ class VaultRepository(
                         sensitive = field.sensitive,
                         kind = field.kind.key,
                     )
-                },
-                addedAttachments = attachments.map { AttachmentRow(it.id, card.id, it.name, it.mime, it.size, it.createdAt) },
-                removedAttachmentIds = emptyList(),
-                newHistory = item.history.map {
+                }
+                val historyRows = item.history.map {
                     HistoryRow(it.id, card.id, it.label, keys.field.encrypt(it.value, historyContext(it.id)), it.changedAt)
-                },
-            )
-            if (existing == null) added++ else updated++
+                }
+                try {
+                    for (attachment in attachments) {
+                        val data = item.attachmentData.getValue(attachment.id)
+                        files.write(attachment.id, keys.attachment.encryptBytes(data, attachmentContext(attachment.id)))
+                    }
+                    // 删除旧内容与写入新内容在同一个事务里：中途失败时本机原来那张卡片原样保留。
+                    database.replaceCard(
+                        card = row,
+                        fields = fieldRows,
+                        attachments = attachments.map { AttachmentRow(it.id, card.id, it.name, it.mime, it.size, it.createdAt) },
+                        history = historyRows,
+                    )
+                } catch (e: Exception) {
+                    plan.deleteOnFailure.forEach(files::delete)
+                    throw e
+                }
+                plan.deleteAfterCommit.forEach(files::delete)
+                if (existing == null) added++ else updated++
+            }
+        } finally {
+            // 即使中途出错，也让内存与数据库保持一致（已锁定时 load 会直接失败，忽略即可）。
+            runCatching { load() }
         }
-        load()
         ImportSummary(added, updated, skipped)
     }
 
@@ -252,8 +288,13 @@ class VaultRepository(
         lastUsedAt = lastUsedAt,
     )
 
+    /** 只有密文本身校验失败才显示占位；锁定等其他异常照常抛出，不能把占位文字当成数据。 */
     private fun decryptOrPlaceholder(keys: SessionKeys, token: String, context: String): String =
-        runCatching { keys.field.decrypt(token, context) }.getOrDefault(UNREADABLE)
+        try {
+            keys.field.decrypt(token, context)
+        } catch (e: WrongSecretException) {
+            UNREADABLE
+        }
 
     private companion object {
         const val UNREADABLE = "（数据损坏，无法解密）"

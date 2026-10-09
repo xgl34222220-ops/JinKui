@@ -98,6 +98,10 @@ class CardDetailViewModel(private val container: AppContainer, private val cardI
     var history by mutableStateOf<List<HistoryEntry>?>(null)
         private set
 
+    /** 读取历史失败（例如刚好被锁定）。与“没有记录”区分开，免得误以为旧密码丢了。 */
+    var historyFailed by mutableStateOf(false)
+        private set
+
     init {
         viewModelScope.launch { runCatching { repository.markUsed(cardId) } }
     }
@@ -118,15 +122,26 @@ class CardDetailViewModel(private val container: AppContainer, private val cardI
     }
 
     fun loadHistory() {
+        history = null
+        historyFailed = false
         viewModelScope.launch {
-            history = runCatching { repository.history(cardId) }.getOrDefault(emptyList())
+            runCatching { repository.history(cardId) }
+                .onSuccess { history = it }
+                .onFailure {
+                    historyFailed = true
+                    history = emptyList()
+                }
         }
     }
 
     fun clearHistory() {
         viewModelScope.launch {
             runCatching { repository.clearHistory(cardId) }
-            history = emptyList()
+                .onSuccess {
+                    history = emptyList()
+                    container.messages.show("已清空历史密码")
+                }
+                .onFailure { container.messages.show("清空失败：${it.message.orEmpty()}") }
         }
     }
 
@@ -210,13 +225,14 @@ fun CardDetailScreen(cardId: String, onBack: () -> Unit, onEdit: () -> Unit) {
                 .padding(horizontal = Space.x2_5)
                 .padding(top = Space.x05, bottom = Space.x4),
         ) {
+            val face = remember(current) { CardTemplates.face(current) }
             CardFace(
                 title = current.title,
                 type = current.type,
                 colorIndex = current.color,
-                hint = CardTemplates.face(current).primary,
-                secondaryLabel = CardTemplates.face(current).secondaryLabel,
-                secondary = CardTemplates.face(current).secondary,
+                hint = face.primary,
+                secondaryLabel = face.secondaryLabel,
+                secondary = face.secondary,
                 pinned = current.pinned,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -242,7 +258,7 @@ fun CardDetailScreen(cardId: String, onBack: () -> Unit, onEdit: () -> Unit) {
 
             ExpiryNote(current, Modifier.padding(start = Space.x05, top = Space.x1_5))
             // 按该类型模板的重要程度排序展示；保存的顺序不变。
-            val visibleFields = CardTemplates.displayOrder(current).filter { it.value.isNotBlank() }
+            val visibleFields = remember(current) { CardTemplates.displayOrder(current).filter { it.value.isNotBlank() } }
             val sensitiveIds = visibleFields.filter { it.sensitive }.map { it.id }
             Row(
                 modifier = Modifier
@@ -374,6 +390,8 @@ fun CardDetailScreen(cardId: String, onBack: () -> Unit, onEdit: () -> Unit) {
     if (showHistory) {
         HistorySheet(
             entries = viewModel.history,
+            failed = viewModel.historyFailed,
+            onRetry = viewModel::loadHistory,
             onDismiss = { showHistory = false },
             onCopy = { viewModel.copyText(it.label, it.value) },
             onClear = viewModel::clearHistory,
@@ -443,15 +461,23 @@ private fun FieldRow(field: CardField, shown: Boolean, onToggle: () -> Unit, onC
 @Composable
 private fun HistorySheet(
     entries: List<HistoryEntry>?,
+    failed: Boolean,
+    onRetry: () -> Unit,
     onDismiss: () -> Unit,
     onCopy: (HistoryEntry) -> Unit,
     onClear: () -> Unit,
 ) {
     val colors = Jk.colors
     val revealed = remember { mutableStateListOf<String>() }
+    var confirmClear by remember { mutableStateOf(false) }
     JkSheet(onDismiss = onDismiss, title = "历史密码") {
         when {
             entries == null -> Text("正在读取…", style = JkType.small, color = colors.textTertiary)
+            failed -> {
+                Text("历史记录读取失败。", style = JkType.small, color = colors.danger)
+                Spacer(Modifier.height(Space.x1_5))
+                JkButton("重试", onRetry, style = ButtonStyle.Secondary, compact = true)
+            }
             entries.isEmpty() -> Text(
                 "还没有记录。敏感字段被修改时，旧值会保存在这里。可以在设置里关闭这项记录。",
                 style = JkType.small,
@@ -490,8 +516,22 @@ private fun HistorySheet(
                     }
                 }
                 Spacer(Modifier.height(Space.x2))
-                JkButton("清空这张卡片的历史", onClear, style = ButtonStyle.Danger, modifier = Modifier.fillMaxWidth())
+                JkButton("清空这张卡片的历史", { confirmClear = true }, style = ButtonStyle.Danger, modifier = Modifier.fillMaxWidth())
             }
+        }
+    }
+    if (confirmClear) {
+        JkDialog(
+            title = "清空历史密码？",
+            onDismiss = { confirmClear = false },
+            confirmText = "清空",
+            danger = true,
+            onConfirm = {
+                confirmClear = false
+                onClear()
+            },
+        ) {
+            Text("这张卡片保存的 ${entries?.size ?: 0} 条旧值会被永久删除，无法恢复。", style = JkType.body, color = colors.textSecondary)
         }
     }
 }

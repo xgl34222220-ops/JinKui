@@ -29,7 +29,10 @@ class ClipboardGuard(
     /** 返回清空前的秒数，供界面提示。 */
     fun copy(label: String, text: String): Int {
         val clip = ClipData.newPlainText(label, text)
-        clip.description.extras = PersistableBundle().apply { putBoolean(EXTRA_IS_SENSITIVE, true) }
+        clip.description.extras = PersistableBundle().apply {
+            putBoolean(EXTRA_IS_SENSITIVE, true)
+            putBoolean(EXTRA_OWNER, true)
+        }
         manager.setPrimaryClip(clip)
         meta.clipboardPending = true
         val seconds = settings.current.clipboardSeconds
@@ -45,6 +48,13 @@ class ClipboardGuard(
         clearJob?.cancel()
         clearJob = null
         if (!meta.clipboardPending) return
+        // 用户在倒计时期间又从别的应用复制了东西：那是他自己的内容，不该被金匮清掉。
+        // 系统不让后台应用读剪贴板时拿不到描述（null），这时按原逻辑清空，宁可多清不可漏清。
+        val owned = runCatching { manager.primaryClipDescription }.getOrNull()?.let { isOwnClip(it.extras) }
+        if (!shouldClear(owned)) {
+            meta.clipboardPending = false
+            return
+        }
         runCatching {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 manager.clearPrimaryClip()
@@ -55,8 +65,19 @@ class ClipboardGuard(
         meta.clipboardPending = false
     }
 
-    private companion object {
+    companion object {
         // 等同于 ClipDescription.EXTRA_IS_SENSITIVE（API 33 才有常量，旧系统会忽略它）。
-        const val EXTRA_IS_SENSITIVE = "android.content.extra.IS_SENSITIVE"
+        private const val EXTRA_IS_SENSITIVE = "android.content.extra.IS_SENSITIVE"
+
+        /** 标记“这条剪贴内容是金匮放进去的”。 */
+        private const val EXTRA_OWNER = "com.xiguli.jinkui.extra.CLIP_OWNER"
+
+        private fun isOwnClip(extras: PersistableBundle?): Boolean = extras?.getBoolean(EXTRA_OWNER, false) == true
+
+        /**
+         * [owned]：剪贴板当前内容是否是金匮复制的；null 表示无法得知（读不到或剪贴板为空）。
+         * 只有确知内容已被别的应用替换时才跳过清空。
+         */
+        fun shouldClear(owned: Boolean?): Boolean = owned != false
     }
 }

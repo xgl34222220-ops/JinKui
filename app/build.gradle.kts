@@ -12,8 +12,8 @@ android {
         applicationId = "com.xiguli.jinkui"
         minSdk = 26
         targetSdk = 34
-        versionCode = 8
-        versionName = "0.5.2"
+        versionCode = 9
+        versionName = "0.5.3"
     }
 
     buildTypes {
