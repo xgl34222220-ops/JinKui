@@ -9,6 +9,7 @@ import com.xiguli.jinkui.data.db.LedgerBudgetRow
 import com.xiguli.jinkui.data.db.LedgerCategoryRow
 import com.xiguli.jinkui.data.db.LedgerTxRow
 import com.xiguli.jinkui.data.db.VaultDatabase
+import com.xiguli.jinkui.data.ledger.AccountKind
 import com.xiguli.jinkui.data.ledger.LedgerAccount
 import com.xiguli.jinkui.data.ledger.LedgerBudget
 import com.xiguli.jinkui.data.ledger.LedgerCategory
@@ -65,6 +66,10 @@ class LedgerRepository(
                 unreadable++
                 null
             } catch (e: JSONException) {
+                unreadable++
+                null
+            } catch (e: IllegalArgumentException) {
+                // 包括 NumberFormatException：载荷能解密但内容不合法，同样按损坏略过，而不是让整个账本打不开
                 unreadable++
                 null
             }
@@ -136,8 +141,13 @@ class LedgerRepository(
         val current = state.value
         val now = System.currentTimeMillis()
         val previous = current.accounts.firstOrNull { it.id == account.id }
+        if (kotlin.math.abs(account.openingBalance) > com.xiguli.jinkui.data.ledger.Money.MAX_CENTS) {
+            throw LedgerInputException("期初余额超出范围")
+        }
         val saved = account.copy(
             name = name.take(40),
+            // 只有银行卡 / 信用卡账户能关联卡片；改成别的种类时去掉关联，免得留下看不见的引用
+            cardId = account.cardId.takeIf { account.kind == AccountKind.BANK || account.kind == AccountKind.CREDIT },
             position = previous?.position ?: ((current.accounts.maxOfOrNull { it.position } ?: -1) + 1),
             createdAt = previous?.createdAt ?: now,
             updatedAt = now,
@@ -168,6 +178,12 @@ class LedgerRepository(
         if (category.parentId != null && (parent == null || parent.parentId != null)) {
             throw LedgerInputException("分类最多两级")
         }
+        if (category.parentId == category.id) throw LedgerInputException("分类最多两级")
+        // 已经有子分类的一级分类不能再挂到别的分类下面，否则会变成三级
+        if (category.parentId != null && current.categories.any { it.parentId == category.id }) {
+            throw LedgerInputException("这个分类下面还有子分类，不能再移到其他分类下")
+        }
+        if (parent != null && parent.type != category.type) throw LedgerInputException("子分类要和上级分类同为支出或收入")
         val previous = current.categories.firstOrNull { it.id == category.id }
         val siblings = current.categories.filter { it.parentId == category.parentId && it.type == category.type }
         val saved = category.copy(

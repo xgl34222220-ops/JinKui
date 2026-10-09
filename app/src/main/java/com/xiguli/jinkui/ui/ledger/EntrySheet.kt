@@ -29,6 +29,7 @@ import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.Icon
+import androidx.compose.material3.SelectableDates
 import androidx.compose.material3.Text
 import androidx.compose.material3.TimePicker
 import androidx.compose.material3.rememberDatePickerState
@@ -40,6 +41,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.material3.minimumInteractiveComponentSize
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -106,7 +113,8 @@ fun EntrySheet(
     var amount by remember { mutableStateOf(existing?.amount?.let(Money::plain) ?: "") }
     var categoryId by remember { mutableStateOf(existing?.categoryId) }
     var accountId by remember { mutableStateOf(existing?.accountId ?: lastAccount ?: active.firstOrNull()?.id) }
-    var toAccountId by remember { mutableStateOf(existing?.toAccountId) }
+    // 转账默认转入另一个账户，避免一打开就是“同一账户转给自己”
+    var toAccountId by remember { mutableStateOf(existing?.toAccountId ?: active.firstOrNull { it.id != accountId }?.id) }
     var time by remember { mutableLongStateOf(existing?.occurredAt ?: System.currentTimeMillis()) }
     var note by remember { mutableStateOf(existing?.note ?: "") }
     var tags by remember { mutableStateOf(existing?.tags?.joinToString(" ") ?: "") }
@@ -282,13 +290,20 @@ fun EntrySheet(
         val picking = if (pickTo) "转入账户" else if (type == TxType.TRANSFER) "转出账户" else "选择账户"
         AccountPickerSheet(
             title = picking,
-            accounts = active,
+            // 选转入账户时不列出转出账户本身
+            accounts = if (pickTo) active.filter { it.id != accountId } else active,
             onDismiss = {
                 pickFrom = false
                 pickTo = false
             },
             onPick = { account ->
-                if (pickTo) toAccountId = account.id else accountId = account.id
+                if (pickTo) {
+                    toAccountId = account.id
+                } else {
+                    // 新的转出账户正好是转入账户时，两者对调，而不是留下一个注定保存失败的组合
+                    if (type == TxType.TRANSFER && account.id == toAccountId) toAccountId = accountId
+                    accountId = account.id
+                }
                 pickFrom = false
                 pickTo = false
             },
@@ -297,7 +312,15 @@ fun EntrySheet(
 
     if (showDate) {
         val initial = Instant.ofEpochMilli(time).atZone(zone).toLocalDate().atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
-        val state = rememberDatePickerState(initialSelectedDateMillis = initial)
+        // 只能选到今天：将来的开销请用“周期记账”。DatePicker 的毫秒是 UTC 零点。
+        val todayUtc = LocalDate.now(zone).atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
+        val state = rememberDatePickerState(
+            initialSelectedDateMillis = initial,
+            selectableDates = object : SelectableDates {
+                override fun isSelectableDate(utcTimeMillis: Long): Boolean = utcTimeMillis <= todayUtc || utcTimeMillis == initial
+                override fun isSelectableYear(year: Int): Boolean = year <= LocalDate.now(zone).year || year == LocalDate.ofEpochDay(initial / 86_400_000L).year
+            },
+        )
         DatePickerDialog(
             onDismissRequest = { showDate = false },
             properties = SecureDialog,
@@ -368,7 +391,7 @@ private fun CategoryTile(category: LedgerCategory, selected: Boolean, onClick: (
             .clip(Radius.tile)
             .background(if (selected) colors.accentSoft else colors.surface)
             .border(1.dp, if (selected) colors.accent else colors.border, Radius.tile)
-            .clickable(onClick = onClick)
+            .selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
             .padding(vertical = Space.x1),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
@@ -396,7 +419,7 @@ private fun AccountChip(label: String, account: LedgerAccount?, onClick: () -> U
         modifier = modifier
             .clip(Radius.control)
             .border(1.dp, colors.border, Radius.control)
-            .clickable(onClick = onClick)
+            .clickable(role = Role.Button, onClickLabel = "选择$label" + "账户", onClick = onClick)
             .padding(horizontal = Space.x1_5, vertical = Space.x1_5),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -416,10 +439,12 @@ private fun InfoChip(icon: ImageVector, text: String, onClick: () -> Unit) {
     val colors = Jk.colors
     Row(
         modifier = Modifier
+            // 视觉高度 32dp，触控区补足到 48dp
+            .minimumInteractiveComponentSize()
             .height(32.dp)
             .clip(Radius.chip)
             .background(colors.surfaceAlt)
-            .clickable(onClick = onClick)
+            .clickable(role = Role.Button, onClick = onClick)
             .padding(horizontal = Space.x1_5),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -473,17 +498,17 @@ private fun Keypad(
         }
         Row(horizontalArrangement = Arrangement.spacedBy(Space.x1)) {
             for (d in "456") DigitKey(d.toString(), { onKey(KeypadKey.Digit(d)) })
-            DigitKey("+", { onKey(KeypadKey.Plus) }, subtle = true)
+            DigitKey("+", { onKey(KeypadKey.Plus) }, subtle = true, description = "加")
         }
         Row(horizontalArrangement = Arrangement.spacedBy(Space.x1)) {
             for (d in "789") DigitKey(d.toString(), { onKey(KeypadKey.Digit(d)) })
-            DigitKey("−", { onKey(KeypadKey.Minus) }, subtle = true)
+            DigitKey("−", { onKey(KeypadKey.Minus) }, subtle = true, description = "减")
         }
         Row(horizontalArrangement = Arrangement.spacedBy(Space.x1)) {
-            DigitKey(".", { onKey(KeypadKey.Dot) })
+            DigitKey(".", { onKey(KeypadKey.Dot) }, description = "小数点")
             DigitKey("0", { onKey(KeypadKey.Digit('0')) })
             if (onAgain != null) {
-                DigitKey("再记", onAgain, subtle = true, small = true)
+                DigitKey("再记", onAgain, subtle = true, small = true, description = "保存并再记一笔")
             } else {
                 Spacer(Modifier.weight(1f))
             }
@@ -493,7 +518,7 @@ private fun Keypad(
                     .height(52.dp)
                     .clip(Radius.control)
                     .background(Jk.colors.primary)
-                    .clickable(onClick = onDone),
+                    .clickable(role = Role.Button, onClickLabel = "保存", onClick = onDone),
                 contentAlignment = Alignment.Center,
             ) {
                 Text("完成", style = JkType.bodyStrong, color = Jk.colors.onPrimary)
@@ -503,7 +528,13 @@ private fun Keypad(
 }
 
 @Composable
-private fun RowScope.DigitKey(text: String, onClick: () -> Unit, subtle: Boolean = false, small: Boolean = false) {
+private fun RowScope.DigitKey(
+    text: String,
+    onClick: () -> Unit,
+    subtle: Boolean = false,
+    small: Boolean = false,
+    description: String? = null,
+) {
     val colors = Jk.colors
     Box(
         modifier = Modifier
@@ -512,7 +543,8 @@ private fun RowScope.DigitKey(text: String, onClick: () -> Unit, subtle: Boolean
             .clip(Radius.control)
             .background(if (subtle) colors.surfaceAlt else colors.surface)
             .border(1.dp, colors.border, Radius.control)
-            .clickable(onClick = onClick),
+            .clickable(role = Role.Button, onClick = onClick)
+            .then(if (description != null) Modifier.clearAndSetSemantics { contentDescription = description; role = Role.Button } else Modifier),
         contentAlignment = Alignment.Center,
     ) {
         Text(text, style = if (small) JkType.bodyStrong else JkType.title, color = colors.textPrimary)

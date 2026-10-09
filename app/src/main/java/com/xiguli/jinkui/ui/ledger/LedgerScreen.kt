@@ -45,6 +45,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
@@ -100,6 +101,8 @@ data class LedgerUi(
     val filterActive: Boolean,
     val monthCount: Int,
     val unreadable: Int,
+    /** 流水里最晚的月份，允许月份切换翻到将来日期的记录。 */
+    val latestMonth: YearMonth?,
 )
 
 fun buildLedgerUi(data: LedgerData, month: YearMonth, filter: TxFilter, zone: ZoneId): LedgerUi {
@@ -117,6 +120,7 @@ fun buildLedgerUi(data: LedgerData, month: YearMonth, filter: TxFilter, zone: Zo
         filterActive = filter.isActive,
         monthCount = inMonth.size,
         unreadable = data.unreadable,
+        latestMonth = LedgerMath.latestMonth(data.transactions, zone),
     )
 }
 
@@ -225,6 +229,7 @@ fun LedgerScreen(
                     month = ui.month,
                     onChange = viewModel::setMonth,
                     modifier = Modifier.padding(horizontal = Space.x1_5),
+                    latest = ui.latestMonth,
                 )
             }
             item(key = "summary") {
@@ -308,7 +313,7 @@ fun LedgerScreen(
                 .height(52.dp)
                 .clip(CircleShape)
                 .background(colors.primary)
-                .clickable { creating = true }
+                .clickable(role = Role.Button) { creating = true }
                 .padding(start = Space.x2, end = Space.x2_5),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -534,7 +539,7 @@ private fun TransactionRow(tx: LedgerTransaction, ui: LedgerUi, onClick: () -> U
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .clickable(onClickLabel = "修改这笔", onClick = onClick)
             .padding(horizontal = Space.x2_5, vertical = Space.x1_5),
         verticalAlignment = Alignment.CenterVertically,
     ) {

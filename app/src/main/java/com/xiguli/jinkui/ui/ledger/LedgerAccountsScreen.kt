@@ -81,7 +81,7 @@ private fun buildAccountsUi(data: LedgerData): AccountsUi {
         accounts = data.accounts.sortedWith(compareBy<LedgerAccount> { it.archived }.thenBy { it.position }),
         balances = balances,
         netWorth = LedgerMath.netWorth(balances),
-        usage = data.accounts.associate { it.id to LedgerMath.usageOf(it.id, data.transactions) },
+        usage = LedgerMath.usageCounts(data.transactions),
     )
 }
 

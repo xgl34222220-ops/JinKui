@@ -130,7 +130,13 @@ fun LedgerStatsScreen(onBack: () -> Unit) {
                 Text("${ui.month.monthValue}月${ui.type.label}构成", style = JkType.heading, color = colors.textPrimary)
                 Spacer(Modifier.height(Space.x2))
                 Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    Donut(ui.shares.map { it.amount }, Modifier.size(180.dp))
+                    Donut(
+                        ui.shares.map { it.amount },
+                        Modifier.size(180.dp),
+                        description = "${ui.type.label}构成：" + ui.shares.joinToString("；") { share ->
+                            "${categoryLabel(share.categoryId.ifEmpty { null }, ui.categoriesById)} ${(share.ratio * 100).roundToInt()}%"
+                        },
+                    )
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text("合计", style = JkType.caption, color = colors.textTertiary)
                         Text(Money.format(total), style = JkType.heading, color = colors.textPrimary)

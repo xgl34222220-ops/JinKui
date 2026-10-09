@@ -154,11 +154,10 @@ fun LedgerBudgetScreen(onBack: () -> Unit) {
                             color = if (total.over) colors.danger else colors.textSecondary,
                         )
                     }
-                    val today = LocalDate.now()
-                    if (ui.month == YearMonth.from(today) && !total.over) {
-                        val daysLeft = ui.month.lengthOfMonth() - today.dayOfMonth + 1
+                    val allowance = LedgerMath.dailyAllowance(total, ui.month, LocalDate.now())
+                    if (allowance != null) {
                         Text(
-                            "本月还剩 $daysLeft 天，每天可用约 ${Money.format(total.remaining / daysLeft)}",
+                            "本月还剩 ${allowance.daysLeft} 天，每天可用约 ${Money.format(allowance.perDay)}",
                             style = JkType.caption,
                             color = colors.textTertiary,
                             modifier = Modifier.padding(top = Space.x05),

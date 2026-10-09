@@ -287,4 +287,72 @@ class LedgerMathTest {
         assertTrue(again.toWrite.isEmpty)
         assertEquals(0, again.added + again.updated)
     }
+
+    // ── 0.7.0 复查补充 ──────────────────────────────────────────
+
+    @Test
+    fun usageCountsSinglePassMatchesUsageOf() {
+        val txs = listOf(
+            tx(TxType.EXPENSE, 100, at(2026, 10, 1), cash.id),
+            tx(TxType.TRANSFER, 100, at(2026, 10, 2), bank.id, to = cash.id),
+            tx(TxType.TRANSFER, 100, at(2026, 10, 3), credit.id, to = credit.id),
+        )
+        val counts = LedgerMath.usageCounts(txs)
+        assertEquals(2, counts[cash.id])
+        assertEquals(1, counts[bank.id])
+        // 异常数据：同一账户转给自己只算一笔
+        assertEquals(1, counts[credit.id])
+        for (account in accounts) assertEquals(LedgerMath.usageOf(account.id, txs), counts[account.id] ?: 0)
+    }
+
+    @Test
+    fun latestMonthFindsFutureRecords() {
+        assertNull(LedgerMath.latestMonth(emptyList(), zone))
+        val txs = listOf(tx(TxType.EXPENSE, 1, at(2026, 10, 1)), tx(TxType.EXPENSE, 1, at(2027, 2, 1)))
+        assertEquals(YearMonth.of(2027, 2), LedgerMath.latestMonth(txs, zone))
+    }
+
+    @Test
+    fun monthBoundaryUsesLocalMidnightNotUtc() {
+        // 上海 11 月 1 日 00:30 是 UTC 10 月 31 日 16:30，应算 11 月
+        val justAfter = at(2026, 11, 1, 0, 30)
+        val justBefore = at(2026, 10, 31, 23, 59)
+        val txs = listOf(tx(TxType.EXPENSE, 1, justAfter), tx(TxType.EXPENSE, 2, justBefore))
+        assertEquals(listOf(1L), LedgerMath.inMonth(txs, YearMonth.of(2026, 11), zone).map { it.amount })
+        assertEquals(listOf(2L), LedgerMath.inMonth(txs, YearMonth.of(2026, 10), zone).map { it.amount })
+        // 换到 UTC 看，两笔都落在 10 月
+        assertEquals(2, LedgerMath.inMonth(txs, YearMonth.of(2026, 10), ZoneId.of("UTC")).size)
+    }
+
+    @Test
+    fun dailyAllowanceOnlyForCurrentMonthWithRemaining() {
+        val budget = LedgerBudget(LedgerBudget.TOTAL_ID, null, 31_00)
+        val october = YearMonth.of(2026, 10)
+        // 10 月 1 日：31 天
+        assertEquals(DailyAllowance(31, 100), LedgerMath.dailyAllowance(BudgetProgress(budget, 0), october, LocalDate.of(2026, 10, 1)))
+        // 最后一天：剩余全给今天
+        assertEquals(DailyAllowance(1, 1_000), LedgerMath.dailyAllowance(BudgetProgress(budget, 21_00), october, LocalDate.of(2026, 10, 31)))
+        // 除不尽向下取整到分
+        assertEquals(DailyAllowance(3, 33), LedgerMath.dailyAllowance(BudgetProgress(LedgerBudget("b", null, 100), 0), october, LocalDate.of(2026, 10, 29)))
+        // 不是本月、刚好用完、超支：不显示
+        assertNull(LedgerMath.dailyAllowance(BudgetProgress(budget, 0), october, LocalDate.of(2026, 11, 1)))
+        assertNull(LedgerMath.dailyAllowance(BudgetProgress(budget, 31_00), october, LocalDate.of(2026, 10, 5)))
+        assertNull(LedgerMath.dailyAllowance(BudgetProgress(budget, 40_00), october, LocalDate.of(2026, 10, 5)))
+    }
+
+    @Test
+    fun budgetWithNoDataIsZeroSpent() {
+        val progress = LedgerMath.budgetProgress(listOf(LedgerBudget(LedgerBudget.TOTAL_ID, null, 1_000)), emptyList(), categories)
+        assertEquals(1, progress.size)
+        assertEquals(0L, progress[0].spent)
+        assertEquals(0f, progress[0].ratio)
+        assertFalse(progress[0].over)
+    }
+
+    @Test
+    fun largeSumsDoNotOverflow() {
+        val txs = (0 until 1_000).map { tx(TxType.INCOME, Money.MAX_CENTS, at(2026, 10, 1)) }
+        assertEquals(Money.MAX_CENTS * 1_000, LedgerMath.summary(txs).income)
+        assertTrue(Money.format(Money.MAX_CENTS * 1_000).startsWith("¥"))
+    }
 }

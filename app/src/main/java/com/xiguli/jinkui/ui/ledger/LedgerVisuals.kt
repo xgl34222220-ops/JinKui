@@ -1,5 +1,14 @@
 package com.xiguli.jinkui.ui.ledger
 
+import com.xiguli.jinkui.data.ledger.Money
+import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.ui.semantics.progressBarRangeInfo
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -144,7 +153,7 @@ private fun HomeTabBar(selected: HomeTab, onSelect: (HomeTab) -> Unit) {
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxSize()
-                        .clickable { onSelect(tab) },
+                        .selectable(selected = active, role = Role.Tab, onClick = { onSelect(tab) }),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center,
                 ) {
@@ -283,21 +292,27 @@ fun monthLabel(month: YearMonth): String = "${month.year}年${month.monthValue}�
 
 // ── 通用小部件 ────────────────────────────────────────────────────
 
-/** 左右切换月份；不能翻到未来。 */
+/**
+ * 左右切换月份。默认不能翻到未来；[latest] 晚于本月时（例如导入了日期在将来的记录），
+ * 可以一直翻到 [latest]，不会有记录被藏起来看不到。
+ */
 @Composable
 fun MonthSwitcher(
     month: YearMonth,
     onChange: (YearMonth) -> Unit,
     modifier: Modifier = Modifier,
+    latest: YearMonth? = null,
 ) {
     val colors = Jk.colors
     val current = YearMonth.now()
+    val limit = if (latest != null && latest > current) latest else current
     Row(modifier, verticalAlignment = Alignment.CenterVertically) {
+        // 48dp 触控区，视觉上仍是 36dp 的圆
         Box(
             Modifier
-                .size(36.dp)
+                .size(48.dp)
                 .clip(CircleShape)
-                .clickable { onChange(month.minusMonths(1)) },
+                .clickable(role = Role.Button, onClickLabel = "上个月") { onChange(month.minusMonths(1)) },
             contentAlignment = Alignment.Center,
         ) {
             Icon(Icons.Outlined.ChevronLeft, contentDescription = "上个月", tint = colors.textSecondary)
@@ -309,20 +324,22 @@ fun MonthSwitcher(
             textAlign = TextAlign.Center,
             modifier = Modifier
                 .width(120.dp)
-                .clickable(enabled = month != current) { onChange(current) },
+                .heightIn(min = 48.dp)
+                .wrapContentHeight(Alignment.CenterVertically)
+                .clickable(enabled = month != current, role = Role.Button, onClickLabel = "回到本月") { onChange(current) },
         )
-        val canForward = month < current
+        val canForward = month < limit
         Box(
             Modifier
-                .size(36.dp)
+                .size(48.dp)
                 .clip(CircleShape)
-                .clickable(enabled = canForward) { onChange(month.plusMonths(1)) },
+                .clickable(enabled = canForward, role = Role.Button, onClickLabel = "下个月") { onChange(month.plusMonths(1)) },
             contentAlignment = Alignment.Center,
         ) {
             Icon(
                 Icons.Outlined.ChevronRight,
                 contentDescription = "下个月",
-                tint = if (canForward) colors.textSecondary else colors.border,
+                tint = if (canForward) colors.textSecondary else colors.textTertiary.copy(alpha = 0.4f),
             )
         }
     }
@@ -356,7 +373,8 @@ fun BudgetBar(ratio: Float, over: Boolean, modifier: Modifier = Modifier) {
             .fillMaxWidth()
             .height(6.dp)
             .clip(CircleShape)
-            .background(colors.surfaceAlt),
+            .background(colors.surfaceAlt)
+            .semantics { progressBarRangeInfo = ProgressBarRangeInfo(ratio.coerceIn(0f, 1f), 0f..1f) },
     ) {
         Box(
             Modifier
@@ -374,10 +392,11 @@ fun Donut(
     values: List<Long>,
     modifier: Modifier = Modifier,
     thickness: Dp = 22.dp,
+    description: String? = null,
 ) {
     val track = Jk.colors.surfaceAlt
     val bg = Jk.colors.surface
-    Canvas(modifier) {
+    Canvas(if (description != null) modifier.semantics { contentDescription = description } else modifier) {
         val stroke = thickness.toPx()
         val diameter = size.minDimension - stroke
         val topLeft = Offset((size.width - diameter) / 2f, (size.height - diameter) / 2f)
@@ -408,6 +427,9 @@ fun TrendBars(
     modifier: Modifier = Modifier,
 ) {
     val colors = Jk.colors
+    val chartDescription = labels.indices.joinToString("；") { i ->
+        "${labels[i]} 支出 ${Money.format(expense.getOrElse(i) { 0L })}，收入 ${Money.format(income.getOrElse(i) { 0L })}"
+    }
     val expenseColor = colors.accent
     val incomeColor = colors.success
     val gridColor = colors.border
@@ -415,7 +437,8 @@ fun TrendBars(
         Canvas(
             Modifier
                 .fillMaxWidth()
-                .height(140.dp),
+                .height(140.dp)
+                .semantics { contentDescription = chartDescription },
         ) {
             val max = (expense + income).maxOrNull()?.coerceAtLeast(1L)?.toFloat() ?: 1f
             val n = labels.size.coerceAtLeast(1)

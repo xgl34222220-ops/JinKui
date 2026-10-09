@@ -29,6 +29,8 @@ data class CategoryShare(
     val count: Int,
 )
 
+data class DailyAllowance(val daysLeft: Int, val perDay: Long)
+
 data class MonthPoint(val month: YearMonth, val summary: Summary)
 
 data class BudgetProgress(
@@ -214,6 +216,33 @@ object LedgerMath {
                 }
                 BudgetProgress(budget, spent)
             }
+    }
+
+    /** 一次遍历算出每个账户被多少笔流水引用（转入、转出都算；同一笔转进转出同一账户只算一次）。 */
+    fun usageCounts(transactions: List<LedgerTransaction>): Map<String, Int> {
+        val result = HashMap<String, Int>()
+        for (tx in transactions) {
+            result.merge(tx.accountId, 1, Int::plus)
+            val to = tx.toAccountId
+            if (to != null && to != tx.accountId) result.merge(to, 1, Int::plus)
+        }
+        return result
+    }
+
+    /** 流水里最晚的月份；没有流水时为 null。用来允许月份切换翻到“将来”的记录。 */
+    fun latestMonth(transactions: List<LedgerTransaction>, zone: ZoneId): YearMonth? =
+        transactions.maxOfOrNull { it.occurredAt }?.let { monthOf(it, zone) }
+
+    /**
+     * 本月剩余每天可用的预算：剩余额度 ÷ 含今天在内的剩余天数（向下取整到分）。
+     * 只对“今天所在的月份”有意义，其余月份、已超支或没有剩余时返回 null。
+     */
+    fun dailyAllowance(progress: BudgetProgress, month: YearMonth, today: LocalDate): DailyAllowance? {
+        if (YearMonth.from(today) != month) return null
+        val remaining = progress.remaining
+        if (remaining <= 0L) return null
+        val daysLeft = month.lengthOfMonth() - today.dayOfMonth + 1
+        return DailyAllowance(daysLeft, remaining / daysLeft)
     }
 
     /** 某个账户被多少笔流水引用（转入、转出都算）。为 0 才允许删除。 */
