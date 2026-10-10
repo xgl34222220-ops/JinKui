@@ -36,7 +36,11 @@ class ScreenHarness(private val compose: ComposeTestRule) {
     /** 需要 LocalContainer 的页面（首次设置、密码生成器等）用这个：锁定状态、空数据，不碰 Keystore。 */
     fun container(): AppContainer = container ?: AppContainer(RuntimeEnvironment.getApplication()).also { container = it }
 
-    fun show(dark: Boolean = false, withContainer: Boolean = false, content: @Composable () -> Unit): ComponentActivity {
+    /**
+     * [pausedClock]：带自动聚焦输入框的对话框（光标一直闪）用暂停的测试时钟渲染，否则 waitForIdle 永远等不到空闲。
+     */
+    fun show(dark: Boolean = false, withContainer: Boolean = false, pausedClock: Boolean = false, content: @Composable () -> Unit): ComponentActivity {
+        compose.mainClock.autoAdvance = !pausedClock
         val controller = Robolectric.buildActivity(ComponentActivity::class.java).setup()
         controllers += controller
         val activity = controller.get()
@@ -78,6 +82,7 @@ class ScreenHarness(private val compose: ComposeTestRule) {
     }
 
     fun close() {
+        compose.mainClock.autoAdvance = true
         controllers.forEach { runCatching { it.pause().stop().destroy() } }
         controllers.clear()
         container?.scope?.cancel()

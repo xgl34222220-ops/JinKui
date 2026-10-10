@@ -103,7 +103,7 @@ sealed interface ImportStage {
     /** 通用表格：确认各列对应什么。 */
     data class Mapping(val table: TextTable, val mapping: ColumnMapping, val fileName: String) : ImportStage
     data class Preview(val preview: ImportPreview) : ImportStage
-    data object Saving : ImportStage
+    data class Saving(val preview: ImportPreview) : ImportStage
     data class Done(val result: ImportResult) : ImportStage
 }
 
@@ -199,7 +199,7 @@ class BillImportViewModel(private val container: AppContainer) : ViewModel() {
         val current = stage as? ImportStage.Preview ?: return
         val preview = current.preview
         if (preview.selected.isEmpty()) return
-        stage = ImportStage.Saving
+        stage = ImportStage.Saving(preview)
         viewModelScope.launch {
             try {
                 val txs = BillImport.transactions(preview, zone, System.currentTimeMillis())
@@ -269,7 +269,7 @@ fun BillImportScreen(onBack: () -> Unit) {
                 onCommit = viewModel::commit,
             ),
         )
-        ImportStage.Saving -> BillImportIntro(reading = true, onBack = {}, onPick = {})
+        is ImportStage.Saving -> BillPreviewContent(stage.preview, data, saving = true, actions = BillPreviewActions())
         is ImportStage.Done -> BillImportDone(stage.result, onFinish = onBack, onAgain = { viewModel.restart() })
     }
 

@@ -64,7 +64,7 @@ class MoreScreensUiTest {
         compose.onNodeWithText("保险库已创建").assertExists()
         h.snapshot(activity, "quick-unlock-intro-light")
         h.close()
-        val pin = h.show(withContainer = true) { PinSetupDialog(onDismiss = {}, onSaved = {}) }
+        val pin = h.show(withContainer = true, pausedClock = true) { PinSetupDialog(onDismiss = {}, onSaved = {}) }
         h.snapshot(pin, "pin-setup-dialog-light", withDialog = true)
     }
 
@@ -113,7 +113,7 @@ class MoreScreensUiTest {
         }
         h.snapshot(activity, "recurring-edit-sheet-light", withDialog = true)
         h.close()
-        val budget = h.show { BudgetDialog("本月总预算", 500_000, onDismiss = {}, onSave = {}) }
+        val budget = h.show(pausedClock = true) { BudgetDialog("本月总预算", 500_000, onDismiss = {}, onSave = {}) }
         h.snapshot(budget, "budget-dialog-light", withDialog = true)
     }
 
