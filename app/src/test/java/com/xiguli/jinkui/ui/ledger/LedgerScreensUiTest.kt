@@ -352,11 +352,19 @@ class LedgerScreensUiTest {
 
     @Test
     fun assetsOverviewLightAndDark() {
-        val ui = buildAssetsUi(LedgerSamples.data)
+        // 样例里加两张信用卡，看信贷账户与“占全部负债”的比例条
+        val data = LedgerSamples.data.copy(
+            accounts = LedgerSamples.data.accounts +
+                com.xiguli.jinkui.data.ledger.LedgerAccount("acc-credit-1", "招行信用卡", com.xiguli.jinkui.data.ledger.AccountKind.CREDIT, openingBalance = -356_000, position = 10) +
+                com.xiguli.jinkui.data.ledger.LedgerAccount("acc-credit-2", "花呗", com.xiguli.jinkui.data.ledger.AccountKind.CREDIT, openingBalance = -88_000, position = 11),
+        )
+        val ui = buildAssetsUi(data)
         assertEquals(ui.assets - ui.liabilities, ui.net)
+        assertEquals(444_000L, ui.creditDebt)
         val light = show { LedgerAssetsContent(ui, {}, {}) }
         compose.onNodeWithText("净资产(元)").assertExists()
         compose.onNodeWithText("资金账户").assertExists()
+        compose.onNodeWithText("信贷账户").assertExists()
         snapshot(light, "assets-light")
         val dark = show(dark = true) { LedgerAssetsContent(ui, {}, {}) }
         snapshot(dark, "assets-dark")
