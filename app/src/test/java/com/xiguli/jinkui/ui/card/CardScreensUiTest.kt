@@ -28,6 +28,7 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.unit.dp
 import com.xiguli.jinkui.core.qr.OtpMigration
 import com.xiguli.jinkui.data.model.CardType
@@ -66,11 +67,26 @@ import org.robolectric.shadows.ShadowLooper
 @Config(sdk = [34], application = Application::class, qualifiers = "w392dp-h860dp-xxhdpi")
 @ConscryptMode(ConscryptMode.Mode.OFF)
 class CardScreensUiTest {
-    @get:Rule
+    /** 先于 Compose 规则包住测试：结束后把主线程消息跑空，见 [com.xiguli.jinkui.ui.MainLooperDrainRule]。 */
+    @get:Rule(order = 0)
+    val drain = com.xiguli.jinkui.ui.MainLooperDrainRule()
+
+    @get:Rule(order = 1)
     val compose = createEmptyComposeRule()
 
+    /** 每个测试结束时销毁本测试开过的页面，前一个测试的界面不会留在后台继续占着主线程。 */
+    private val controllers = mutableListOf<org.robolectric.android.controller.ActivityController<ComponentActivity>>()
+
+    @org.junit.After
+    fun closeActivities() {
+        controllers.forEach { runCatching { it.pause().stop().destroy() } }
+        controllers.clear()
+    }
+
     private fun show(dark: Boolean = false, content: @Composable () -> Unit): ComponentActivity {
-        val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup().get()
+        val controller = Robolectric.buildActivity(ComponentActivity::class.java).setup()
+        controllers += controller
+        val activity = controller.get()
         activity.setContent {
             JinKuiTheme(if (dark) ThemeMode.DARK else ThemeMode.LIGHT) {
                 Box(
@@ -105,12 +121,19 @@ class CardScreensUiTest {
         }.onFailure { println("截图 $name 失败：$it") }
     }
 
-    private fun listHome(query: String = "", copied: MutableList<String> = mutableListOf()): @Composable () -> Unit = {
-        val ui = buildHomeUi(CardSamples.all, query, null, SortOrder.USED, 2)
+    private fun listHome(
+        query: String = "",
+        copied: MutableList<String> = mutableListOf(),
+        filter: String? = null,
+        pinned: MutableList<String> = mutableListOf(),
+    ): @Composable () -> Unit = {
+        val ui = buildHomeUi(CardSamples.all, query, filter, SortOrder.USED, 2)
         ListHome(
-            ui = ui, query = query, filter = null, listState = LazyListState(), sortOrder = SortOrder.USED,
+            ui = ui, query = query, filter = filter, listState = LazyListState(), sortOrder = SortOrder.USED,
             onQuery = {}, onFilter = {}, onOpen = {}, onLongClick = {}, onCopy = { _, f -> copied += f.label },
-            onToggleView = {}, onLock = {}, onMore = {}, onCreate = {}, onHealth = {}, onSort = {},
+            onToggleView = {}, onLock = {}, onMore = {}, onHealth = {}, onSort = {},
+            onTogglePin = { pinned += it.id },
+            ticking = false, clock = { CardSamples.now },
         )
     }
 
@@ -118,7 +141,9 @@ class CardScreensUiTest {
     fun cardListShowsPinnedRowsMaskedNumbersAndCopies() {
         val copied = mutableListOf<String>()
         val activity = show(content = listHome(copied = copied))
-        compose.onAllNodesWithText("置顶").assertCountEquals(2) // 分组标题 + 筛选项
+        compose.onNodeWithText("置顶 · 1").assertExists() // 分组标题
+        compose.onNodeWithText("两步验证").assertExists() // 快速筛选
+        compose.onNodeWithText("搜索卡片、账号、标签或备注").assertExists()
         compose.onAllNodesWithText("工商银行信用卡").onFirst().assertExists()
         // 打码的卡号只露末四位
         compose.onNodeWithText("•••• 8841").assertExists()
@@ -128,6 +153,77 @@ class CardScreensUiTest {
         copy.performClick()
         assertEquals(listOf("卡号"), copied)
         snapshot(activity, "card-list-light")
+    }
+
+    @Test
+    fun cardListSwipeActionsAreAccessible() {
+        val pinned = mutableListOf<String>()
+        val copied = mutableListOf<String>()
+        show(content = listHome(copied = copied, pinned = pinned))
+        // 右滑 / 左滑的动作对读屏用户是同名的自定义操作
+        val row = compose.onAllNodesWithText("GitHub").onFirst()
+        row.assertExists()
+        runCustomAction("置顶")
+        assertEquals(1, pinned.size)
+        runCustomAction("复制账号")
+        assertEquals(listOf("账号"), copied)
+    }
+
+    /** 找到第一个带这个自定义操作（读屏菜单）的节点并执行它。 */
+    private fun runCustomAction(label: String) {
+        val matcher = androidx.compose.ui.test.SemanticsMatcher("有自定义操作「$label」") { node ->
+            node.config.getOrNull(SemanticsActions.CustomActions)?.any { it.label == label } == true
+        }
+        val node = compose.onAllNodes(matcher).onFirst().fetchSemanticsNode()
+        compose.runOnIdle {
+            node.config[SemanticsActions.CustomActions].first { it.label == label }.action()
+        }
+    }
+
+    @Test
+    fun cardListTotpFilterShowsLiveCodes() {
+        val copied = mutableListOf<String>()
+        val activity = show(content = listHome(filter = "o:", copied = copied))
+        compose.onNodeWithText("两步验证 · 1").assertExists()
+        // 固定时钟下 GitHub 的验证码（与详情页测试同一个密钥与时间）
+        compose.onNodeWithText("545 488").assertExists()
+        compose.onNodeWithContentDescription("验证码 5 4 5 4 8 8，还剩 18 秒，点按复制").performClick()
+        assertEquals(listOf("两步验证码"), copied)
+        snapshot(activity, "card-list-totp")
+    }
+
+    @Test
+    fun cardSearchResults() {
+        val activity = show(content = listHome(query = "银行"))
+        compose.onNodeWithText("找到 · 2").assertExists()
+        snapshot(activity, "card-search")
+    }
+
+    @Test
+    fun cardListAtLargeFontScaleDark() {
+        RuntimeEnvironment.setFontScale(1.3f)
+        try {
+            val activity = show(dark = true, content = listHome())
+            compose.onNodeWithText("全部 · ${CardSamples.all.size}").assertExists()
+            snapshot(activity, "card-list-font130-dark")
+        } finally {
+            RuntimeEnvironment.setFontScale(1f)
+        }
+    }
+
+    @Test
+    fun tappingCardRowOpensIt() {
+        var opened: String? = null
+        show {
+            val ui = buildHomeUi(CardSamples.all, "", null, SortOrder.USED, 2)
+            ListHome(
+                ui = ui, query = "", filter = null, listState = LazyListState(), sortOrder = SortOrder.USED,
+                onQuery = {}, onFilter = {}, onOpen = { opened = it.id }, onLongClick = {}, onCopy = { _, _ -> },
+                onToggleView = {}, onLock = {}, onMore = {}, onHealth = {}, onSort = {},
+            )
+        }
+        compose.onNodeWithText("家里 Wi-Fi").performClick()
+        assertEquals("c-wifi", opened)
     }
 
     @Test
@@ -198,7 +294,9 @@ class CardScreensUiTest {
         RuntimeEnvironment.setFontScale(1.3f)
         try {
             val activity = show(content = detail(CardSamples.idCard))
-            compose.onNodeWithText("公民身份号码").assertIsDisplayed()
+            // 顶部大号快捷复制按钮与字段行各有一个“公民身份号码”
+            compose.onAllNodesWithText("公民身份号码").assertCountEquals(2)
+            compose.onAllNodesWithText("公民身份号码").onFirst().assertIsDisplayed()
             // 行高随字号增长，不被固定高度截断
             compose.onNodeWithContentDescription("复制公民身份号码").assertHeightIsAtLeast(48.dp)
             snapshot(activity, "card-detail-font130")

@@ -69,6 +69,8 @@ android {
         unitTests.isIncludeAndroidResources = true
         unitTests.all {
             it.maxHeapSize = "2g"
+            // 测试样例数据按北京时间构造；界面里按系统时区显示时间，统一成同一时区，截图里的“12:00”不会变成 04:00
+            it.systemProperty("user.timezone", "Asia/Shanghai")
             // Robolectric 的原生图形（用于界面截图）只支持 x86_64 等平台；其他架构退回 LEGACY，断言照跑
             val arch = System.getProperty("os.arch").lowercase()
             it.systemProperty("robolectric.graphicsMode", if (arch == "amd64" || arch == "x86_64") "NATIVE" else "LEGACY")
