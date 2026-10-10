@@ -9,12 +9,13 @@ package com.xiguli.jinkui.data.db
  *  - 版本 4（0.9.0）：新增账本删除标记表，旧表不动。
  *  - 版本 5（1.2.0）：新增自动记账的“待确认”表，旧表不动。
  *  - 版本 6（1.3.0）：流水加一列导入批次 import_batch，新增导入批次表；已导入的流水按导入时间补上批次。
+ *  - 版本 7（1.4.0）：新增欠款表 ledger_debts（信用账户的分期、借贷），旧表不动。
  *
  * 新装用户执行 [create]：版本 1 的建表语句加上之后的全部迁移，保证新装与升级得到同一套结构。
  * 迁移只允许“加”，不得丢弃或改写用户已有的数据。
  */
 object VaultSchema {
-    const val VERSION = 6
+    const val VERSION = 7
 
     private val V1 = listOf(
         """CREATE TABLE cards(
@@ -158,7 +159,22 @@ object VaultSchema {
         "UPDATE ledger_transactions SET import_batch = 'batch-legacy-' || created_at WHERE id LIKE 'imp-%' AND import_batch IS NULL",
     )
 
-    private val MIGRATIONS: Map<Int, List<String>> = mapOf(2 to V2, 3 to V3, 4 to V4, 5 to V5, 6 to V6)
+    /**
+     * 6 → 7：欠款 / 账单（1.4）。分期与借贷的金额、日期、对方账户、备注全部在 data_enc 里（字段级加密），
+     * 明文列只有 ID、种类（installment / loan）与更新时间。信用账户的账单日、还款日、额度放在账户自己的加密载荷里，
+     * 流水归属哪一笔欠款放在流水的加密载荷里，都不需要改表。
+     * 1.3 导入的一木借出 / 借入（每人一个应收 / 应付账户）不需要迁移：读取时按账户合成“导入的借贷”。
+     */
+    private val V7 = listOf(
+        """CREATE TABLE ledger_debts(
+            id TEXT PRIMARY KEY NOT NULL,
+            kind TEXT NOT NULL,
+            updated_at INTEGER NOT NULL,
+            data_enc TEXT NOT NULL
+        )""",
+    )
+
+    private val MIGRATIONS: Map<Int, List<String>> = mapOf(2 to V2, 3 to V3, 4 to V4, 5 to V5, 6 to V6, 7 to V7)
 
     /** 新装：建出最新结构。 */
     fun create(): List<String> = V1 + upgrade(1, VERSION)

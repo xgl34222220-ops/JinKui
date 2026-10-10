@@ -37,13 +37,16 @@ class BackupContent(
  *  - schema 4（0.9.0 起）：ledger 里增加 tombstones（删除标记：删掉的周期生成流水与周期规则的 ID）。
  *    仍能导入 schema 1–3 的旧备份（没有删除标记，按空处理）；旧版金匮会拒绝 schema 4，
  *    而不是悄悄丢掉删除标记、把删掉的流水又加回来。
+ *  - schema 5（1.4.0 起）：ledger 里增加 installments（分期）与 loans（借贷），账户带 credit（账单日、还款日、额度），
+ *    流水带 debtId（属于哪一笔分期 / 借贷），删除标记多一种 debt。仍能导入 schema 1–4 的旧备份（没有这些，按空处理）；
+ *    1.3 及更早的金匮会拒绝 schema 5，而不是悄悄丢掉分期、借贷与账单设置。
  *
  * 这段 JSON 只在内存里以明文存在，
  * 落盘前一定经过 [com.xiguli.jinkui.core.crypto.BackupCodec] 加密。
  */
 object BackupJson {
     private const val APP = "jinkui"
-    const val SCHEMA = 4
+    const val SCHEMA = 5
     private const val MAX_CARDS = 20_000
 
     fun encode(cards: List<BackupCard>, exportedAt: Long, ledger: LedgerData = LedgerData.EMPTY): ByteArray {

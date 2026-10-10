@@ -195,6 +195,36 @@ class VaultSchemaMigrationTest {
     }
 
     @Test
+    fun upgradeFromV6ToV7AddsDebtsAndKeepsEverything() {
+        seedV1()
+        migrate(1, 6)
+        // 1.3 导入的一木借出：资金账户 → “借出 · 小李”应收账户的转账（字段级密文原样）
+        exec("INSERT INTO ledger_accounts VALUES('acc-bank',0,0,1,1,'ENC-BANK')")
+        exec("INSERT INTO ledger_accounts VALUES('acc-li',1,0,1,1,'ENC-LI')")
+        exec("INSERT INTO ledger_import_batches VALUES('batch-1',100,'ENC-BATCH')")
+        exec("INSERT INTO ledger_transactions VALUES('imp-loan','transfer',100,'acc-bank','acc-li',NULL,100,100,'ENC-LOAN','batch-1')")
+        exec("INSERT INTO ledger_transactions VALUES('t-1','expense',200,'acc-bank',NULL,NULL,1,1,'ENC-T1',NULL)")
+        exec("INSERT INTO ledger_tombstones VALUES('imp-old','tx',5)")
+        exec("INSERT INTO ledger_pending VALUES('p-1',10,'ENC-PENDING')")
+        migrate(6, 7)
+        assertEquals(7, count("PRAGMA user_version"))
+        assertEquals(2, count("SELECT COUNT(*) FROM cards"))
+        assertEquals(2, count("SELECT COUNT(*) FROM ledger_accounts"))
+        assertEquals(2, count("SELECT COUNT(*) FROM ledger_transactions"))
+        assertEquals(1, count("SELECT COUNT(*) FROM ledger_transactions WHERE id = 'imp-loan' AND data_enc = 'ENC-LOAN' AND import_batch = 'batch-1'"))
+        assertEquals(1, count("SELECT COUNT(*) FROM ledger_import_batches"))
+        assertEquals(1, count("SELECT COUNT(*) FROM ledger_tombstones"))
+        assertEquals(1, count("SELECT COUNT(*) FROM ledger_pending"))
+        // 新表为空且可写，同一 ID 覆盖
+        assertEquals(0, count("SELECT COUNT(*) FROM ledger_debts"))
+        exec("INSERT OR REPLACE INTO ledger_debts VALUES('ln-1','loan',1,'ENC-DEBT')")
+        exec("INSERT OR REPLACE INTO ledger_debts VALUES('ln-1','loan',2,'ENC-DEBT2')")
+        exec("INSERT OR REPLACE INTO ledger_debts VALUES('in-1','installment',3,'ENC-INST')")
+        assertEquals(1, count("SELECT COUNT(*) FROM ledger_debts WHERE id = 'ln-1' AND updated_at = 2"))
+        assertEquals(2, count("SELECT COUNT(*) FROM ledger_debts"))
+    }
+
+    @Test
     fun upgradedSchemaMatchesFreshInstall() {
         seedV1()
         migrate(1, VaultSchema.VERSION)

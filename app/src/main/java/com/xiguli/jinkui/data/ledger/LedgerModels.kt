@@ -64,6 +64,8 @@ data class LedgerAccount(
     val position: Int = 0,
     val createdAt: Long = 0L,
     val updatedAt: Long = 0L,
+    /** 1.4 起：信用账户的账单设置（额度、账单日、还款日）；只对 [AccountKind.CREDIT] 有意义。 */
+    val credit: CreditSettings? = null,
 )
 
 /** 收支分类，最多两级：[parentId] 为 null 的是一级分类。 */
@@ -99,6 +101,8 @@ data class LedgerTransaction(
     val updatedAt: Long = 0L,
     /** 1.3 起：账单导入的批次（[LedgerImportBatch.id]）；手动记的为 null。只存本机，不进备份。 */
     val importBatch: String? = null,
+    /** 1.4 起：这笔流水属于哪一笔分期（[LedgerInstallment.id]）或借贷（[LedgerLoan.id]）；在加密载荷里，随流水进备份。 */
+    val debtId: String? = null,
 )
 
 /**
@@ -148,9 +152,14 @@ data class LedgerData(
     val tombstones: List<LedgerTombstone> = emptyList(),
     /** 账单导入批次（1.3 起）。只存本机，不进备份。 */
     val importBatches: List<LedgerImportBatch> = emptyList(),
+    /** 信用账户上的分期（1.4 起，数据库版本 7、备份 schema 5）。 */
+    val installments: List<LedgerInstallment> = emptyList(),
+    /** 借贷（1.4 起）。 */
+    val loans: List<LedgerLoan> = emptyList(),
 ) {
     val isEmpty: Boolean
-        get() = accounts.isEmpty() && categories.isEmpty() && transactions.isEmpty() && budgets.isEmpty() && recurring.isEmpty()
+        get() = accounts.isEmpty() && categories.isEmpty() && transactions.isEmpty() && budgets.isEmpty() && recurring.isEmpty() &&
+            installments.isEmpty() && loans.isEmpty()
 
     companion object {
         val EMPTY = LedgerData()
@@ -162,13 +171,15 @@ data class LedgerData(
  *  - [KIND_TX]：周期记账生成的流水（ID 由规则 + 日期决定，删掉后同一 ID 可能被再次生成或从旧备份加回），
  *    以及（1.3 起）账单导入的流水（ID 由账单内容决定，删掉后导入旧备份不再加回；重新导入同一份账单时由用户决定）；
  *  - [KIND_RECURRING]：周期记账规则本身（旧备份里还留着它，加回来会接着生成）。
+ *  - [KIND_DEBT]（1.4 起）：删掉的分期与借贷（它们名下的流水同时按 [KIND_TX] 记标记）。
  * 只有 ID、种类与删除时间，不含金额、备注等内容。
  */
 data class LedgerTombstone(val id: String, val kind: String, val deletedAt: Long) {
     companion object {
         const val KIND_TX = "tx"
         const val KIND_RECURRING = "recurring"
-        val KINDS = setOf(KIND_TX, KIND_RECURRING)
+        const val KIND_DEBT = "debt"
+        val KINDS = setOf(KIND_TX, KIND_RECURRING, KIND_DEBT)
     }
 }
 

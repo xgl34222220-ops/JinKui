@@ -96,6 +96,9 @@ class LedgerRecurringRow(
     val dataEnc: String,
 )
 
+/** 一笔分期或借贷（版本 7 起）。[kind] 是 installment / loan，其余都在 data_enc 里。 */
+class LedgerDebtRow(val id: String, val kind: String, val updatedAt: Long, val dataEnc: String)
+
 /** 自动记账的一笔待确认（data_enc 是字段级密文）。 */
 class LedgerPendingRow(val id: String, val createdAt: Long, val dataEnc: String)
 
@@ -109,6 +112,7 @@ class LedgerBatch(
     val budgets: List<LedgerBudgetRow> = emptyList(),
     val recurring: List<LedgerRecurringRow> = emptyList(),
     val tombstones: List<LedgerTombstoneRow> = emptyList(),
+    val debts: List<LedgerDebtRow> = emptyList(),
 )
 
 /**
@@ -403,6 +407,41 @@ class VaultDatabase(private val context: Context) {
         batch.budgets.forEach { writeBudget(db, it) }
         batch.recurring.forEach { writeRecurring(db, it) }
         batch.tombstones.forEach { writeTombstone(db, it) }
+        batch.debts.forEach { writeDebt(db, it) }
+    }
+
+    // ── 欠款：分期与借贷（版本 7 起）────────────────────────────────
+
+    fun ledgerDebts(): List<LedgerDebtRow> =
+        read("SELECT id,kind,updated_at,data_enc FROM ledger_debts") {
+            LedgerDebtRow(it.getString(0), it.getString(1), it.getLong(2), it.getString(3))
+        }
+
+    /**
+     * 欠款的一次改动，一个事务：新建 / 更新账户（借贷的对方）、写入欠款记录与流水（还款、利息、手续费等）、
+     * 删除欠款记录与流水并记下删除标记。任何一步失败整体回滚。
+     */
+    fun writeDebtChange(
+        accounts: List<LedgerAccountRow> = emptyList(),
+        debts: List<LedgerDebtRow> = emptyList(),
+        transactions: List<LedgerTxRow> = emptyList(),
+        deleteDebts: Collection<String> = emptyList(),
+        deleteTransactions: Collection<String> = emptyList(),
+        tombstones: List<LedgerTombstoneRow> = emptyList(),
+    ) = transaction { db ->
+        accounts.forEach { writeAccount(db, it) }
+        deleteTransactions.forEach { db.execSQL("DELETE FROM ledger_transactions WHERE id = ?", arrayOf<Any?>(it)) }
+        deleteDebts.forEach { db.execSQL("DELETE FROM ledger_debts WHERE id = ?", arrayOf<Any?>(it)) }
+        debts.forEach { writeDebt(db, it) }
+        transactions.forEach { writeTransaction(db, it) }
+        tombstones.forEach { writeTombstone(db, it) }
+    }
+
+    private fun writeDebt(db: SupportSQLiteDatabase, row: LedgerDebtRow) {
+        db.execSQL(
+            "INSERT OR REPLACE INTO ledger_debts(id,kind,updated_at,data_enc) VALUES(?,?,?,?)",
+            arrayOf<Any?>(row.id, row.kind, row.updatedAt, row.dataEnc),
+        )
     }
 
     fun saveLedgerTransaction(row: LedgerTxRow) = transaction { db -> writeTransaction(db, row) }

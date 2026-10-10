@@ -287,7 +287,7 @@ class LedgerMergePlan(
  * 账本合并规则，与卡片一致：本机没有的记录直接加入；两边都有时保留更新时间较新的一份；
  * 不会删除本机已有的任何记录。同一份备份里重复的 ID 以更新时间最新的为准。
  *
- * 删除标记（0.9.0 起）：本机或备份任一边标记为已删除的周期生成流水 / 周期规则不会被加回来；
+ * 删除标记（0.9.0 起）：本机或备份任一边标记为已删除的周期生成流水 / 周期规则（1.4 起还有分期与借贷）不会被加回来；
  * 备份里的删除标记一并记到本机，但本机仍然存在的记录不受影响（导入从不删除本机记录），
  * 也不为它记标记。写入的标记在 [LedgerMergePlan.toWrite] 的 tombstones 里。
  */
@@ -316,6 +316,8 @@ object LedgerMerge {
         val localIds = HashSet<String>().apply {
             local.transactions.forEach { add(it.id) }
             local.recurring.forEach { add(it.id) }
+            local.installments.forEach { add(it.id) }
+            local.loans.forEach { add(it.id) }
         }
         val known = local.tombstones.mapTo(HashSet()) { it.id }
         val newTombstones = incoming.tombstones
@@ -328,6 +330,8 @@ object LedgerMerge {
             budgets = pick(local.budgets, incoming.budgets, { it.id }, { it.updatedAt }),
             recurring = pick(local.recurring, incoming.recurring, { it.id }, { it.updatedAt }, honorTombstones = true),
             tombstones = newTombstones,
+            installments = pick(local.installments, incoming.installments, { it.id }, { it.updatedAt }, honorTombstones = true),
+            loans = pick(local.loans, incoming.loans, { it.id }, { it.updatedAt }, honorTombstones = true),
         )
         return LedgerMergePlan(write, added, updated, skipped, suppressed)
     }

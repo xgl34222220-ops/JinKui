@@ -16,6 +16,13 @@ import com.xiguli.jinkui.data.ledger.PendingMath
 import com.xiguli.jinkui.data.db.LedgerTombstoneRow
 import com.xiguli.jinkui.data.db.LedgerTxRow
 import com.xiguli.jinkui.data.db.LedgerImportBatchRow
+import com.xiguli.jinkui.data.db.LedgerDebtRow
+import com.xiguli.jinkui.data.ledger.CreditSettings
+import com.xiguli.jinkui.data.ledger.DebtMath
+import com.xiguli.jinkui.data.ledger.LedgerInstallment
+import com.xiguli.jinkui.data.ledger.LedgerLoan
+import com.xiguli.jinkui.data.ledger.LoanDirection
+import java.time.LocalDate
 import com.xiguli.jinkui.data.importer.BillImport
 import com.xiguli.jinkui.data.ledger.LedgerImportBatch
 import com.xiguli.jinkui.data.db.VaultDatabase
@@ -32,6 +39,7 @@ import com.xiguli.jinkui.data.ledger.LedgerRecurring
 import com.xiguli.jinkui.data.ledger.LedgerTombstone
 import com.xiguli.jinkui.data.ledger.LedgerTransaction
 import com.xiguli.jinkui.data.ledger.RecurringMath
+import com.xiguli.jinkui.data.ledger.Money
 import java.time.ZoneId
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -96,7 +104,7 @@ class LedgerRepository(
         }
         val accounts = decodeAll(database.ledgerAccounts()) { row ->
             val p = LedgerJson.readAccountPayload(keys.field.decrypt(row.dataEnc, accountContext(row.id)))
-            LedgerAccount(row.id, p.name, p.kind, p.opening, p.cardId, row.archived, row.position, row.createdAt, row.updatedAt)
+            LedgerAccount(row.id, p.name, p.kind, p.opening, p.cardId, row.archived, row.position, row.createdAt, row.updatedAt, p.credit)
         }
         val categories = decodeAll(database.ledgerCategories()) { row ->
             val p = LedgerJson.readCategoryPayload(keys.field.decrypt(row.dataEnc, categoryContext(row.id)))
@@ -106,7 +114,7 @@ class LedgerRepository(
             val p = LedgerJson.readTransactionPayload(keys.field.decrypt(row.dataEnc, transactionContext(row.id)))
             LedgerTransaction(
                 row.id, TxType.of(row.type), p.amount, row.occurredAt, row.accountId, row.toAccountId,
-                row.categoryId, p.note, p.tags, row.createdAt, row.updatedAt, row.importBatch,
+                row.categoryId, p.note, p.tags, row.createdAt, row.updatedAt, row.importBatch, p.debtId,
             )
         }
         val batchCounts = transactions.groupingBy { it.importBatch }.eachCount()
@@ -128,10 +136,18 @@ class LedgerRepository(
         val tombstones = database.ledgerTombstones()
             .filter { it.kind in LedgerTombstone.KINDS }
             .map { LedgerTombstone(it.id, it.kind, it.deletedAt) }
+        // 分期与借贷（1.4 起）；不认识的种类（更新版本写入的）原样留在库里，这里不用
+        val debtRows = database.ledgerDebts()
+        val installments = decodeAll(debtRows.filter { it.kind == LedgerJson.DEBT_INSTALLMENT }) { row ->
+            LedgerJson.readInstallment(row.id, row.updatedAt, org.json.JSONObject(keys.field.decrypt(row.dataEnc, debtContext(row.id))))
+        }
+        val loans = decodeAll(debtRows.filter { it.kind == LedgerJson.DEBT_LOAN }) { row ->
+            LedgerJson.readLoan(row.id, row.updatedAt, org.json.JSONObject(keys.field.decrypt(row.dataEnc, debtContext(row.id))))
+        }
         val pendingEntries = decodeAll(database.ledgerPending()) { row ->
             PendingMath.read(row.id, row.createdAt, keys.field.decrypt(row.dataEnc, pendingContext(row.id)))
         }
-        publish { LedgerData(accounts, categories, transactions, budgets, recurring, unreadable, tombstones, importBatches) }
+        publish { LedgerData(accounts, categories, transactions, budgets, recurring, unreadable, tombstones, importBatches, installments, loans) }
         publishPending { pendingEntries }
         // 解锁后立刻补记到期的周期记账；失败不影响账本打开
         runCatching { runRecurring() }
@@ -422,7 +438,13 @@ class LedgerRepository(
         LedgerMath.validate(normalized, current.accounts)?.let { throw LedgerInputException(it) }
         val now = System.currentTimeMillis()
         val previous = current.transactions.firstOrNull { it.id == tx.id }
-        val saved = normalized.copy(createdAt = previous?.createdAt ?: now, updatedAt = now)
+        // 记账面板改一笔时不知道它属于哪笔欠款 / 哪次导入：沿用原来的归属
+        val saved = normalized.copy(
+            createdAt = previous?.createdAt ?: now,
+            updatedAt = now,
+            importBatch = normalized.importBatch ?: previous?.importBatch,
+            debtId = normalized.debtId ?: previous?.debtId,
+        )
         database.saveLedgerTransaction(saved.toRow(keys))
         publish { data -> data.copy(transactions = data.transactions.filterNot { it.id == saved.id } + saved) }
         saved
@@ -462,10 +484,13 @@ class LedgerRepository(
         if (kotlin.math.abs(account.openingBalance) > com.xiguli.jinkui.data.ledger.Money.MAX_CENTS) {
             throw LedgerInputException("期初余额超出范围")
         }
+        account.credit?.problem()?.let { throw LedgerInputException(it) }
         val saved = account.copy(
             name = name.take(40),
             // 只有银行卡 / 信用卡账户能关联卡片；改成别的种类时去掉关联，免得留下看不见的引用
             cardId = account.cardId.takeIf { account.kind == AccountKind.BANK || account.kind == AccountKind.CREDIT },
+            // 账单设置只对信用账户有意义
+            credit = account.credit.takeIf { account.kind == AccountKind.CREDIT },
             position = previous?.position ?: ((current.accounts.maxOfOrNull { it.position } ?: -1) + 1),
             createdAt = previous?.createdAt ?: now,
             updatedAt = now,
@@ -535,6 +560,340 @@ class LedgerRepository(
         }
     }
 
+    // ── 欠款 / 账单（1.4 起）──────────────────────────────────────
+    // 每次改动一个事务：欠款记录、它带来的流水与删除标记一起写入。所有金额最终都是普通流水，
+    // 余额、统计、导出照旧由流水算出；分期与借贷记录只存约定（期数、手续费、预计还款日、利息）。
+
+    /** 某一天对应的记账时间：今天用现在的时刻，其他日子用中午 12 点（避免时区边界把日期挪一天）。 */
+    private fun timeOn(date: LocalDate, zone: ZoneId, now: Long): Long =
+        if (date == LedgerMath.dateOf(now, zone)) now else date.atTime(12, 0).atZone(zone).toInstant().toEpochMilli()
+
+    private fun categoryOr(data: LedgerData, vararg ids: String): String? =
+        ids.firstOrNull { id -> data.categories.any { it.id == id } }
+
+    /** 保存信用账户的账单设置（[settings] 为 null 时清除）。 */
+    suspend fun saveCreditSettings(accountId: String, settings: CreditSettings?): LedgerAccount {
+        val account = state.value.accounts.firstOrNull { it.id == accountId } ?: throw LedgerInputException("找不到这个账户")
+        if (account.kind != AccountKind.CREDIT) throw LedgerInputException("只有信用账户可以设置账单日")
+        return saveAccount(account.copy(credit = settings))
+    }
+
+    /**
+     * 信用账户还款：从资金账户 [fromId] 转 [amount] 到信用账户，可以全额也可以部分还款。
+     * 还款就是一笔转账，账单的“已还”由它算出。
+     */
+    suspend fun repayCredit(
+        creditId: String,
+        fromId: String,
+        amount: Long,
+        date: LocalDate,
+        note: String = "",
+        zone: ZoneId = ZoneId.systemDefault(),
+    ): LedgerTransaction {
+        val data = state.value
+        val credit = data.accounts.firstOrNull { it.id == creditId && it.kind == AccountKind.CREDIT } ?: throw LedgerInputException("找不到这个信用账户")
+        val from = data.accounts.firstOrNull { it.id == fromId } ?: throw LedgerInputException("请选择还款账户")
+        if (from.kind == AccountKind.CREDIT) throw LedgerInputException("请用资金账户还款")
+        val now = System.currentTimeMillis()
+        return saveTransaction(
+            LedgerTransaction(
+                id = LedgerIds.newId(),
+                type = TxType.TRANSFER,
+                amount = amount,
+                occurredAt = timeOn(date, zone, now),
+                accountId = from.id,
+                toAccountId = credit.id,
+                note = note.ifBlank { "还款 · ${credit.name}" },
+            ),
+        )
+    }
+
+    /**
+     * 新建分期。[recordPurchase] 为 true 时把分期总额记成信用账户上的一笔消费（分期前没有记过这笔消费时）；
+     * 手续费合计大于 0 时记成一笔“分期手续费”支出。两笔都带着这笔分期的 ID，删分期时一并删掉。
+     */
+    suspend fun createInstallment(
+        plan: LedgerInstallment,
+        recordPurchase: Boolean,
+        purchaseCategoryId: String? = null,
+        zone: ZoneId = ZoneId.systemDefault(),
+    ): LedgerInstallment = withContext(Dispatchers.IO) {
+        recurringLock.withLock {
+            val keys = keys()
+            val data = state.value
+            val account = data.accounts.firstOrNull { it.id == plan.accountId && it.kind == AccountKind.CREDIT }
+                ?: throw LedgerInputException("请选择信用账户")
+            if (account.credit == null) throw LedgerInputException("请先设置这个账户的账单日与还款日")
+            val now = System.currentTimeMillis()
+            val saved = plan.copy(title = plan.title.trim().take(40), note = plan.note.trim().take(500), createdAt = now, updatedAt = now)
+            saved.problem()?.let { throw LedgerInputException(it) }
+            val at = timeOn(saved.startDate, zone, now)
+            val txs = buildList {
+                if (recordPurchase) {
+                    add(
+                        LedgerTransaction(
+                            LedgerIds.newId(), TxType.EXPENSE, saved.total, at, account.id,
+                            categoryId = purchaseCategoryId?.takeIf { id -> data.categories.any { it.id == id } },
+                            note = "分期消费 · ${saved.title}", createdAt = now, updatedAt = now, debtId = saved.id,
+                        ),
+                    )
+                }
+                if (saved.chargedFees > 0) {
+                    add(
+                        LedgerTransaction(
+                            LedgerIds.newId(), TxType.EXPENSE, saved.chargedFees, at, account.id,
+                            categoryId = feeCategory(data),
+                            note = "分期手续费 · ${saved.title}（${saved.periods} 期）", createdAt = now, updatedAt = now, debtId = saved.id,
+                        ),
+                    )
+                }
+            }
+            txs.forEach { tx -> LedgerMath.validate(tx, data.accounts)?.let { throw LedgerInputException(it) } }
+            database.writeDebtChange(debts = listOf(saved.toRow(keys)), transactions = txs.map { it.toRow(keys) })
+            publish { d -> d.copy(installments = d.installments.filterNot { it.id == saved.id } + saved, transactions = d.transactions + txs) }
+            saved
+        }
+    }
+
+    /** 手续费的分类：账本里有叫“手续费”的就用它（1.3 导入会建），否则“其他支出”。 */
+    private fun feeCategory(data: LedgerData): String? =
+        data.categories.firstOrNull { it.type == TxType.EXPENSE && !it.archived && it.name == "手续费" }?.id
+            ?: categoryOr(data, "cat-other-expense")
+
+    /**
+     * 提前结清分期：之后各期的本金并入 [date] 所在的那一期账单，之后各期的手续费不再收取——
+     * 手续费那一笔流水改成实际收取的金额（为 0 时删掉，并记删除标记）。
+     */
+    suspend fun payoffInstallment(id: String, date: LocalDate): LedgerInstallment = withContext(Dispatchers.IO) {
+        recurringLock.withLock {
+            val keys = keys()
+            val data = state.value
+            val plan = data.installments.firstOrNull { it.id == id } ?: throw LedgerInputException("找不到这笔分期")
+            if (plan.payoffDate != null) throw LedgerInputException("这笔分期已经提前结清")
+            val now = System.currentTimeMillis()
+            val saved = DebtMath.payoff(plan, date).copy(updatedAt = now)
+            val feeTx = data.transactions.firstOrNull { it.debtId == id && it.note.startsWith("分期手续费") }
+            val fees = saved.chargedFees
+            val changed = feeTx?.takeIf { fees > 0 && it.amount != fees }?.copy(amount = fees, updatedAt = now)
+            val removed = feeTx?.takeIf { fees == 0L }
+            val tombstones = listOfNotNull(removed?.let { LedgerTombstone(it.id, LedgerTombstone.KIND_TX, now) })
+            database.writeDebtChange(
+                debts = listOf(saved.toRow(keys)),
+                transactions = listOfNotNull(changed).map { it.toRow(keys) },
+                deleteTransactions = listOfNotNull(removed?.id),
+                tombstones = tombstones.map { it.toRow() },
+            )
+            publish { d ->
+                d.copy(
+                    installments = d.installments.map { if (it.id == id) saved else it },
+                    transactions = d.transactions.filterNot { it.id == removed?.id }.map { if (it.id == changed?.id) changed else it },
+                    tombstones = d.tombstones + tombstones,
+                )
+            }
+            saved
+        }
+    }
+
+    /**
+     * 删除一笔欠款（分期或借贷）：删掉记录和它名下的全部流水（分期的消费与手续费、借贷的借出 / 还款 / 利息），
+     * 都记下删除标记，导入旧备份时不会加回来。“导入的借贷”的记录只删记录（预计还款日等约定），导入的流水保留。
+     * 返回删掉的流水笔数。
+     */
+    suspend fun deleteDebt(id: String): Int = withContext(Dispatchers.IO) {
+        recurringLock.withLock {
+            keys()
+            val data = state.value
+            val legacy = data.loans.firstOrNull { it.id == id }?.legacy == true
+            val doomed = if (legacy) emptyList() else data.transactions.filter { it.debtId == id }
+            val now = System.currentTimeMillis()
+            val tombstones = listOf(LedgerTombstone(id, LedgerTombstone.KIND_DEBT, now)) +
+                doomed.map { LedgerTombstone(it.id, LedgerTombstone.KIND_TX, now) }
+            database.writeDebtChange(
+                deleteDebts = listOf(id),
+                deleteTransactions = doomed.map { it.id },
+                tombstones = tombstones.map { it.toRow() },
+            )
+            val gone = doomed.mapTo(HashSet()) { it.id }
+            publish { d ->
+                d.copy(
+                    installments = d.installments.filterNot { it.id == id },
+                    loans = d.loans.filterNot { it.id == id },
+                    transactions = d.transactions.filterNot { it.id in gone },
+                    tombstones = d.tombstones.filterNot { it.id == id || it.id in gone } + tombstones,
+                )
+            }
+            doomed.size
+        }
+    }
+
+    /**
+     * 新建一笔借贷：对方用已有的应收 / 应付账户（[personAccountId]），或者按 [person] 新建一个
+     * （“借出 · 小李”“借入 · 老王”，与导入同名的会复用）；同时记一笔对方账户与资金账户 [fundId] 之间的转账。
+     */
+    suspend fun createLoan(
+        direction: LoanDirection,
+        person: String,
+        personAccountId: String?,
+        amount: Long,
+        fundId: String,
+        date: LocalDate,
+        dueDate: LocalDate?,
+        interest: Long,
+        note: String,
+        zone: ZoneId = ZoneId.systemDefault(),
+    ): LedgerLoan = withContext(Dispatchers.IO) {
+        recurringLock.withLock {
+            val keys = keys()
+            val data = state.value
+            val now = System.currentTimeMillis()
+            val name = person.trim().take(20)
+            val prefix = if (direction == LoanDirection.LEND) "借出 · " else "借入 · "
+            val existing = personAccountId?.let { id -> data.accounts.firstOrNull { it.id == id && it.kind == direction.accountKind } }
+                ?: data.accounts.firstOrNull { it.kind == direction.accountKind && (it.name == prefix + name || DebtMath.personOf(it) == name) && name.isNotEmpty() }
+            if (existing == null && name.isEmpty()) throw LedgerInputException("请填写对方")
+            if (interest < 0 || interest > Money.MAX_CENTS) throw LedgerInputException("利息超出范围")
+            if (dueDate != null && dueDate < date) throw LedgerInputException("预计还款日不能早于借款日期")
+            val fund = data.accounts.firstOrNull { it.id == fundId } ?: throw LedgerInputException("请选择资金账户")
+            if (LoanDirection.of(fund.kind) != null) throw LedgerInputException("请选择资金账户")
+            val created = if (existing == null) {
+                LedgerAccount(
+                    LedgerIds.newId(), prefix + name, direction.accountKind,
+                    position = (data.accounts.maxOfOrNull { it.position } ?: -1) + 1, createdAt = now, updatedAt = now,
+                )
+            } else null
+            // 停用的对方账户重新有了借贷：恢复启用
+            val revived = existing?.takeIf { it.archived }?.copy(archived = false, updatedAt = now)
+            val account = created ?: revived ?: existing!!
+            val loan = LedgerLoan(
+                id = LedgerIds.newId(), accountId = account.id, direction = direction, date = date, dueDate = dueDate,
+                interest = interest, note = note.trim().take(500), createdAt = now, updatedAt = now,
+            )
+            val lend = direction == LoanDirection.LEND
+            val tx = LedgerTransaction(
+                id = LedgerIds.newId(), type = TxType.TRANSFER, amount = amount, occurredAt = timeOn(date, zone, now),
+                accountId = if (lend) fund.id else account.id, toAccountId = if (lend) account.id else fund.id,
+                note = loan.note.ifEmpty { (if (lend) "借出 · " else "借入 · ") + DebtMath.personOf(account) },
+                createdAt = now, updatedAt = now, debtId = loan.id,
+            )
+            val accounts = data.accounts.filterNot { it.id == account.id } + account
+            LedgerMath.validate(tx, accounts)?.let { throw LedgerInputException(it) }
+            database.writeDebtChange(
+                accounts = listOfNotNull(created ?: revived).map { it.toRow(keys) },
+                debts = listOf(loan.toRow(keys)),
+                transactions = listOf(tx.toRow(keys)),
+            )
+            publish { d ->
+                d.copy(
+                    accounts = if (created == null && revived == null) d.accounts else (d.accounts.filterNot { it.id == account.id } + account).sortedBy { it.position },
+                    loans = d.loans + loan,
+                    transactions = d.transactions + tx,
+                )
+            }
+            loan
+        }
+    }
+
+    /**
+     * 改借贷的约定（预计还款日、利息、备注）。“导入的借贷”第一次改时落库成一条记录（ID 不变）。
+     */
+    suspend fun saveLoan(loan: LedgerLoan): LedgerLoan = withContext(Dispatchers.IO) {
+        recurringLock.withLock {
+            val keys = keys()
+            if (loan.interest < 0 || loan.interest > Money.MAX_CENTS) throw LedgerInputException("利息超出范围")
+            if (state.value.accounts.none { it.id == loan.accountId }) throw LedgerInputException("找不到对方账户")
+            val now = System.currentTimeMillis()
+            val previous = state.value.loans.firstOrNull { it.id == loan.id }
+            val saved = loan.copy(note = loan.note.trim().take(500), createdAt = previous?.createdAt ?: now, updatedAt = now)
+            database.writeDebtChange(debts = listOf(saved.toRow(keys)))
+            publish { d -> d.copy(loans = d.loans.filterNot { it.id == saved.id } + saved, tombstones = d.tombstones.filterNot { it.id == saved.id }) }
+            saved
+        }
+    }
+
+    /**
+     * 收款（借出）/ 还款（借入）：本金部分是对方账户与资金账户之间的转账，可以只还一部分；
+     * 利息部分是资金账户上的一笔收入（借出）/ 支出（借入）。两笔都带着借贷 ID。
+     */
+    suspend fun loanPayment(
+        loanId: String,
+        accountId: String,
+        principal: Long,
+        interest: Long,
+        fundId: String,
+        date: LocalDate,
+        note: String = "",
+        zone: ZoneId = ZoneId.systemDefault(),
+    ): List<LedgerTransaction> = withContext(Dispatchers.IO) {
+        recurringLock.withLock {
+            val keys = keys()
+            val data = state.value
+            val account = data.accounts.firstOrNull { it.id == accountId } ?: throw LedgerInputException("找不到对方账户")
+            val direction = LoanDirection.of(account.kind) ?: throw LedgerInputException("找不到对方账户")
+            val fund = data.accounts.firstOrNull { it.id == fundId && LoanDirection.of(it.kind) == null } ?: throw LedgerInputException("请选择资金账户")
+            if (principal <= 0 && interest <= 0) throw LedgerInputException("金额要大于 0")
+            val now = System.currentTimeMillis()
+            val at = timeOn(date, zone, now)
+            val lend = direction == LoanDirection.LEND
+            val person = DebtMath.personOf(account)
+            // 合成的“导入的借贷”：流水不挂 ID，照样按账户归到它名下
+            val link = loanId.takeIf { id -> data.loans.any { it.id == id && !it.legacy } }
+            val txs = buildList {
+                if (principal > 0) {
+                    add(
+                        LedgerTransaction(
+                            LedgerIds.newId(), TxType.TRANSFER, principal, at,
+                            accountId = if (lend) account.id else fund.id, toAccountId = if (lend) fund.id else account.id,
+                            note = note.trim().ifEmpty { (if (lend) "收款 · " else "还款 · ") + person },
+                            createdAt = now, updatedAt = now, debtId = link,
+                        ),
+                    )
+                }
+                if (interest > 0) {
+                    add(
+                        LedgerTransaction(
+                            LedgerIds.newId(), if (lend) TxType.INCOME else TxType.EXPENSE, interest, at, fund.id,
+                            categoryId = if (lend) categoryOr(data, "cat-invest", "cat-other-income") else categoryOr(data, "cat-other-expense"),
+                            note = "利息 · $person", createdAt = now, updatedAt = now, debtId = loanId,
+                        ),
+                    )
+                }
+            }
+            txs.forEach { tx -> LedgerMath.validate(tx, data.accounts)?.let { throw LedgerInputException(it) } }
+            database.writeDebtChange(transactions = txs.map { it.toRow(keys) })
+            publish { d -> d.copy(transactions = d.transactions + txs) }
+            txs
+        }
+    }
+
+    /**
+     * 结清（剩余不再收 / 不再还）：把剩余本金记成对方账户上的一笔支出（借出：坏账 / 免除）或收入（借入：对方免还），
+     * 对方账户余额归零，这笔借贷变成已结清。
+     */
+    suspend fun forgiveLoan(loanId: String, accountId: String, remaining: Long, date: LocalDate, zone: ZoneId = ZoneId.systemDefault()): LedgerTransaction? =
+        withContext(Dispatchers.IO) {
+            recurringLock.withLock {
+                val keys = keys()
+                if (remaining <= 0) return@withLock null
+                val data = state.value
+                val account = data.accounts.firstOrNull { it.id == accountId } ?: throw LedgerInputException("找不到对方账户")
+                val lend = LoanDirection.of(account.kind) ?: throw LedgerInputException("找不到对方账户")
+                val now = System.currentTimeMillis()
+                val tx = LedgerTransaction(
+                    LedgerIds.newId(),
+                    if (lend == LoanDirection.LEND) TxType.EXPENSE else TxType.INCOME,
+                    remaining, timeOn(date, zone, now), account.id,
+                    categoryId = if (lend == LoanDirection.LEND) categoryOr(data, "cat-other-expense") else categoryOr(data, "cat-other-income"),
+                    note = (if (lend == LoanDirection.LEND) "免除 · " else "对方免还 · ") + DebtMath.personOf(account),
+                    createdAt = now, updatedAt = now,
+                    debtId = loanId.takeIf { id -> data.loans.any { it.id == id && !it.legacy } },
+                )
+                LedgerMath.validate(tx, data.accounts)?.let { throw LedgerInputException(it) }
+                database.writeDebtChange(transactions = listOf(tx.toRow(keys)))
+                publish { d -> d.copy(transactions = d.transactions + tx) }
+                tx
+            }
+        }
+
     // ── 备份 ──────────────────────────────────────────────────────
 
     fun snapshot(): LedgerData {
@@ -559,6 +918,7 @@ class LedgerRepository(
                         budgets = write.budgets.map { it.toRow(keys) },
                         recurring = write.recurring.map { it.toRow(keys) },
                         tombstones = write.tombstones.map { it.toRow() },
+                        debts = write.installments.map { it.toRow(keys) } + write.loans.map { it.toRow(keys) },
                     ),
                 )
             }
@@ -602,6 +962,14 @@ class LedgerRepository(
 
     private fun LedgerTombstone.toRow() = LedgerTombstoneRow(id, kind, deletedAt)
 
+    private fun LedgerInstallment.toRow(keys: SessionKeys) = LedgerDebtRow(
+        id, LedgerJson.DEBT_INSTALLMENT, updatedAt, keys.field.encrypt(LedgerJson.debtPayload(this), debtContext(id)),
+    )
+
+    private fun LedgerLoan.toRow(keys: SessionKeys) = LedgerDebtRow(
+        id, LedgerJson.DEBT_LOAN, updatedAt, keys.field.encrypt(LedgerJson.debtPayload(this), debtContext(id)),
+    )
+
     private fun LedgerRecurring.toRow(keys: SessionKeys) = LedgerRecurringRow(
         id, updatedAt,
         keys.field.encrypt(LedgerJson.recurringPayload(this), recurringContext(id)),
@@ -616,5 +984,6 @@ class LedgerRepository(
         fun recurringContext(id: String) = "ledger:recurring:$id"
         fun pendingContext(id: String) = "ledger:pending:$id"
         fun batchContext(id: String) = "ledger:batch:$id"
+        fun debtContext(id: String) = "ledger:debt:$id"
     }
 }
