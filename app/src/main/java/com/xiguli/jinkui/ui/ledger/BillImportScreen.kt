@@ -45,6 +45,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
@@ -61,6 +62,10 @@ import com.xiguli.jinkui.data.importer.CandidateFlag
 import com.xiguli.jinkui.data.importer.ColumnMapping
 import com.xiguli.jinkui.data.importer.ImportCandidate
 import com.xiguli.jinkui.data.importer.ImportPreview
+import com.xiguli.jinkui.data.importer.ImportClass
+import com.xiguli.jinkui.data.importer.ImportGroup
+import com.xiguli.jinkui.data.ledger.LedgerImportBatch
+import com.xiguli.jinkui.data.ledger.LedgerIds
 import com.xiguli.jinkui.data.importer.ImportResult
 import com.xiguli.jinkui.data.importer.ParsedBill
 import com.xiguli.jinkui.data.importer.TableReader
@@ -112,6 +117,7 @@ class BillImportViewModel(private val container: AppContainer) : ViewModel() {
         private set
     var error by mutableStateOf<String?>(null)
     private var parsedCsv: ParsedBill? = null
+    private var fileName: String = ""
     private val zone: ZoneId get() = ZoneId.systemDefault()
 
     fun open(context: Context, uri: Uri) {
@@ -140,7 +146,8 @@ class BillImportViewModel(private val container: AppContainer) : ViewModel() {
                     if (parsed.records.isEmpty()) throw BillFormatException("认出了${source.label}账单，但里面没有可以导入的收支记录")
                     // 记账 App 导出没有固定的账户来源：和通用表格一样，预览里可以换默认账户
                     parsedCsv = parsed.takeIf { source == BillSource.APP }
-                    ImportStage.Preview(withContext(Dispatchers.Default) { BillImport.preview(parsed, container.ledger.data.value, zone) })
+                    fileName = name
+                    ImportStage.Preview(withContext(Dispatchers.Default) { BillImport.preview(parsed, container.ledger.data.value, zone, fileName = name) })
                 } else {
                     if (table.rows.size < 2) throw BillFormatException("这个文件里没有可以导入的表格")
                     ImportStage.Mapping(table, BillParser.guessMapping(table), name)
@@ -169,7 +176,8 @@ class BillImportViewModel(private val container: AppContainer) : ViewModel() {
                 return
             }
             parsedCsv = parsed
-            stage = ImportStage.Preview(BillImport.preview(parsed, container.ledger.data.value, zone))
+            fileName = current.fileName
+            stage = ImportStage.Preview(BillImport.preview(parsed, container.ledger.data.value, zone, fileName = current.fileName))
         } catch (e: BillFormatException) {
             error = e.message
         }
@@ -184,6 +192,9 @@ class BillImportViewModel(private val container: AppContainer) : ViewModel() {
 
     fun setAll(checked: Boolean) = edit { p -> p.copy(candidates = p.candidates.map { it.copy(checked = checked) }) }
 
+    /** 整组打开 / 关闭（余额校准默认关闭，打开即“用作账户余额校准”）。 */
+    fun setGroup(klass: ImportClass, checked: Boolean) = edit { p -> p.withGroup(klass, checked) }
+
     fun setCategory(id: String, categoryId: String?) =
         edit { p -> p.copy(candidates = p.candidates.map { if (it.id == id) it.copy(categoryId = categoryId) else it }) }
 
@@ -191,7 +202,7 @@ class BillImportViewModel(private val container: AppContainer) : ViewModel() {
     fun setAccount(accountId: String) {
         val current = stage as? ImportStage.Preview ?: return
         val parsed = parsedCsv ?: return
-        val fresh = BillImport.preview(parsed, container.ledger.data.value, zone, preferredAccount = accountId)
+        val fresh = BillImport.preview(parsed, container.ledger.data.value, zone, preferredAccount = accountId, fileName = fileName)
         val old = current.preview.candidates.associateBy { it.id }
         stage = ImportStage.Preview(
             fresh.copy(candidates = fresh.candidates.map { c -> old[c.id]?.let { o -> c.copy(checked = o.checked, categoryId = o.categoryId) } ?: c }),
@@ -205,9 +216,17 @@ class BillImportViewModel(private val container: AppContainer) : ViewModel() {
         stage = ImportStage.Saving(preview)
         viewModelScope.launch {
             try {
-                val txs = BillImport.transactions(preview, zone, System.currentTimeMillis())
-                val saved = container.ledger.importTransactions(txs, preview.newAccount)
-                stage = ImportStage.Done(BillImport.result(preview, saved))
+                val now = System.currentTimeMillis()
+                val before = container.ledger.data.value
+                val batch = LedgerImportBatch(
+                    id = LedgerIds.newId(),
+                    createdAt = now,
+                    source = preview.source.label,
+                    fileName = preview.fileName.take(80),
+                )
+                val txs = BillImport.transactions(preview, zone, now, batch.id)
+                val saved = container.ledger.importTransactions(txs, preview.usedNewAccounts, batch, preview.usedNewCategories)
+                stage = ImportStage.Done(BillImport.result(preview, saved, before, batch.id.takeIf { saved.isNotEmpty() }))
             } catch (e: LedgerInputException) {
                 error = e.message
                 stage = current
@@ -215,6 +234,16 @@ class BillImportViewModel(private val container: AppContainer) : ViewModel() {
                 error = "导入失败：${e.message ?: "未知错误"}"
                 stage = current
             }
+        }
+    }
+
+    /** 结果页的“撤销本次导入”：整批删掉，回到开始。 */
+    fun undo(batchId: String) {
+        viewModelScope.launch {
+            runCatching { container.ledger.undoImport(batchId) }
+                .onSuccess { n -> container.messages.show("已撤销本次导入，删除了 $n 笔") }
+                .onFailure { container.messages.show("撤销失败：${it.message ?: "未知错误"}") }
+            restart()
         }
     }
 
@@ -232,7 +261,7 @@ class BillImportViewModel(private val container: AppContainer) : ViewModel() {
 }
 
 @Composable
-fun BillImportScreen(onBack: () -> Unit) {
+fun BillImportScreen(onBack: () -> Unit, onHistory: () -> Unit = {}) {
     val container = LocalContainer.current
     val context = LocalContext.current
     val viewModel = jkViewModel { BillImportViewModel(container) }
@@ -252,7 +281,7 @@ fun BillImportScreen(onBack: () -> Unit) {
     }
 
     when (val stage = viewModel.stage) {
-        ImportStage.Intro, ImportStage.Reading -> BillImportIntro(reading = stage == ImportStage.Reading, onBack = onBack, onPick = pick)
+        ImportStage.Intro, ImportStage.Reading -> BillImportIntro(reading = stage == ImportStage.Reading, onBack = onBack, onPick = pick, onHistory = onHistory)
         is ImportStage.Mapping -> BillMappingContent(
             stage = stage,
             onBack = { viewModel.restart() },
@@ -267,18 +296,24 @@ fun BillImportScreen(onBack: () -> Unit) {
                 onBack = { viewModel.restart() },
                 onToggle = viewModel::toggle,
                 onAll = viewModel::setAll,
+                onGroup = viewModel::setGroup,
                 onCategory = { pickCategoryFor = it },
                 onAccount = if (stage.preview.source == BillSource.CSV || stage.preview.source == BillSource.APP) ({ pickAccount = true }) else null,
                 onCommit = viewModel::commit,
             ),
         )
         is ImportStage.Saving -> BillPreviewContent(stage.preview, data, saving = true, actions = BillPreviewActions())
-        is ImportStage.Done -> BillImportDone(stage.result, onFinish = onBack, onAgain = { viewModel.restart() })
+        is ImportStage.Done -> BillImportDone(
+            stage.result,
+            onFinish = onBack,
+            onAgain = { viewModel.restart() },
+            onUndo = stage.result.batchId?.let { id -> { viewModel.undo(id) } },
+        )
     }
 
     pickCategoryFor?.let { candidate ->
         CategoryPickerSheet(
-            categories = data.categories,
+            categories = data.categories + (viewModel.stage as? ImportStage.Preview)?.preview?.newCategories.orEmpty(),
             title = "选择分类",
             type = candidate.record.type,
             onDismiss = { pickCategoryFor = null },
@@ -291,7 +326,7 @@ fun BillImportScreen(onBack: () -> Unit) {
     if (pickAccount) {
         JkSheet(onDismiss = { pickAccount = false }, title = "记到哪个账户") {
             Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
-                for (account in data.accounts.filter { !it.archived }) {
+                for (account in data.accounts.filter { !it.archived && it.kind.countsInAssets }) {
                     JkRow(
                         title = account.name,
                         subtitle = account.kind.label,
@@ -322,10 +357,23 @@ private fun LaunchedMessage(message: String, onShown: () -> Unit) {
 // ── 第一步：说明与选文件 ─────────────────────────────────────────
 
 @Composable
-fun BillImportIntro(reading: Boolean, onBack: () -> Unit, onPick: () -> Unit) {
+fun BillImportIntro(reading: Boolean, onBack: () -> Unit, onPick: () -> Unit, onHistory: (() -> Unit)? = null) {
     val colors = Jk.colors
     Column(Modifier.fillMaxSize().statusBarsPadding()) {
-        JkTopBar(title = "导入账单", onBack = onBack)
+        JkTopBar(title = "导入账单", onBack = onBack) {
+            if (onHistory != null) {
+                Text(
+                    "导入记录",
+                    style = JkType.small.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold),
+                    color = Jk.colors.accent,
+                    modifier = Modifier
+                        .heightIn(min = JkSize.touch)
+                        .clip(Radius.pill)
+                        .clickable(role = Role.Button, onClick = onHistory)
+                        .padding(horizontal = Space.x1_5, vertical = Space.x1_5),
+                )
+            }
+        }
         Column(
             Modifier
                 .weight(1f)
@@ -565,8 +613,10 @@ class BillPreviewActions(
     val onBack: () -> Unit = {},
     val onToggle: (String) -> Unit = {},
     val onAll: (Boolean) -> Unit = {},
+    /** 整组打开 / 关闭。 */
+    val onGroup: (ImportClass, Boolean) -> Unit = { _, _ -> },
     val onCategory: (ImportCandidate) -> Unit = {},
-    /** 只有通用表格可以换默认账户。 */
+    /** 通用表格与记账 App 导出可以换默认账户（认不出账户的行记到这里）。 */
     val onAccount: (() -> Unit)? = null,
     val onCommit: () -> Unit = {},
 )
@@ -577,10 +627,12 @@ private val RANGE_DAY = DateTimeFormatter.ofPattern("yyyy.MM.dd")
 @Composable
 fun BillPreviewContent(preview: ImportPreview, data: LedgerData, saving: Boolean, actions: BillPreviewActions) {
     val colors = Jk.colors
-    val categories = remember(data.categories) { data.categories.associateBy { it.id } }
-    val accounts: Map<String, LedgerAccount> = remember(data.accounts, preview.newAccount) {
-        (data.accounts + listOfNotNull(preview.newAccount)).associateBy { it.id }
+    val categories = remember(data.categories, preview.newCategories) { (data.categories + preview.newCategories).associateBy { it.id } }
+    val accounts: Map<String, LedgerAccount> = remember(data.accounts, preview.newAccounts) {
+        (data.accounts + preview.newAccounts).associateBy { it.id }
     }
+    val groups = preview.groups
+    val grouped = groups.size > 1 || groups.any { it.klass != ImportClass.NORMAL }
     val selected = preview.selected
     Column(Modifier.fillMaxSize().statusBarsPadding()) {
         JkTopBar(title = "导入预览", onBack = actions.onBack)
@@ -618,16 +670,34 @@ fun BillPreviewContent(preview: ImportPreview, data: LedgerData, saving: Boolean
                     )
                 }
             }
-            items(preview.candidates, key = { it.id }, contentType = { "row" }) { c ->
-                val shape = when {
-                    preview.candidates.size == 1 -> Radius.card
-                    c === preview.candidates.first() -> androidx.compose.foundation.shape.RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp)
-                    c === preview.candidates.last() -> androidx.compose.foundation.shape.RoundedCornerShape(bottomStart = 18.dp, bottomEnd = 18.dp)
-                    else -> androidx.compose.foundation.shape.RoundedCornerShape(0.dp)
+            if (grouped) {
+                item(key = "groups", contentType = "groups") {
+                    GroupsCard(groups, actions)
                 }
-                Column(Modifier.clip(shape).background(colors.surface)) {
-                    CandidateRow(c, categories, accounts, actions)
-                    if (c !== preview.candidates.last()) JkDivider(inset = 92.dp)
+            }
+            for (group in groups) {
+                val rows = preview.candidates.filter { it.klass == group.klass }
+                if (grouped) {
+                    item(key = "label-${group.klass.name}", contentType = "label") {
+                        Text(
+                            "${group.klass.label}　${group.count} 笔",
+                            style = JkType.overline,
+                            color = colors.textTertiary,
+                            modifier = Modifier.padding(start = Space.x05, top = Space.x2, bottom = Space.x1).semantics { heading() },
+                        )
+                    }
+                }
+                items(rows, key = { it.id }, contentType = { "row" }) { c ->
+                    val shape = when {
+                        rows.size == 1 -> Radius.card
+                        c === rows.first() -> androidx.compose.foundation.shape.RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp)
+                        c === rows.last() -> androidx.compose.foundation.shape.RoundedCornerShape(bottomStart = 18.dp, bottomEnd = 18.dp)
+                        else -> androidx.compose.foundation.shape.RoundedCornerShape(0.dp)
+                    }
+                    Column(Modifier.clip(shape).background(colors.surface)) {
+                        CandidateRow(c, categories, accounts, actions)
+                        if (c !== rows.last()) JkDivider(inset = 92.dp)
+                    }
                 }
             }
         }
@@ -677,7 +747,10 @@ private fun PreviewSummary(preview: ImportPreview, onAccount: (() -> Unit)?, acc
             SummaryFigure("将导入收入", preview.incomeTotal, colors.income, Modifier.weight(1f))
         }
         val notes = buildList {
-            if (preview.newAccount != null) add("将新建账户「${preview.newAccount.name}」")
+            val created = preview.usedNewAccounts.filter { it.kind.countsInAssets }
+            if (created.isNotEmpty()) add("将新建账户：${created.joinToString("、") { it.name }}（期初余额 0）")
+            val newCats = preview.usedNewCategories
+            if (newCats.isNotEmpty()) add("按原 App 的分类新建 ${newCats.size} 个分类（${newCats.filter { it.parentId == null }.take(4).joinToString("、") { it.name }}${if (newCats.count { it.parentId == null } > 4) "等" else ""}）")
             if (preview.alreadyImported > 0) add("以前导入过 ${preview.alreadyImported} 笔，已跳过")
             for ((reason, n) in preview.skipped) add("${reason.label} ${n} 笔，不导入")
             val similar = preview.candidates.count { it.flag == CandidateFlag.SIMILAR }
@@ -688,9 +761,64 @@ private fun PreviewSummary(preview: ImportPreview, onAccount: (() -> Unit)?, acc
             for (line in notes) Text("· $line", style = JkType.caption, color = colors.textSecondary)
         }
         if (onAccount != null) {
-            val first = preview.candidates.firstOrNull()?.accountId?.let { accounts[it]?.name } ?: "选择账户"
+            val name = preview.defaultAccountId?.let { accounts[it]?.name } ?: "选择账户"
             Spacer(Modifier.height(Space.x1_5))
-            JkButton("记到：$first", onAccount, style = ButtonStyle.Secondary, compact = true)
+            if (preview.source == BillSource.APP) {
+                Text(
+                    "备注里写着微信 / 零钱 / 收款的记到微信，写着支付宝 / 余额宝 / 花呗 / 收钱码的记到支付宝；其余的记到：",
+                    style = JkType.caption,
+                    color = colors.textSecondary,
+                )
+                Spacer(Modifier.height(Space.x05))
+            }
+            JkButton("记到：$name", onAccount, style = ButtonStyle.Secondary, compact = true)
+        }
+    }
+}
+
+/** 分组：每一类一行，开关整组导入 / 不导入，显示笔数与金额。 */
+@Composable
+private fun GroupsCard(groups: List<ImportGroup>, actions: BillPreviewActions) {
+    val colors = Jk.colors
+    Text(
+        "按类别导入",
+        style = JkType.overline,
+        color = colors.textTertiary,
+        modifier = Modifier.padding(start = Space.x05, top = Space.x2, bottom = Space.x1).semantics { heading() },
+    )
+    JkCard(Modifier.fillMaxWidth(), padding = PaddingValues(vertical = Space.x05)) {
+        groups.forEachIndexed { i, g ->
+            if (i > 0) JkDivider(inset = Space.x2)
+            val money = when {
+                g.klass == ImportClass.ADJUSTMENT -> "净额 " + (if (g.net >= 0) "+" else "-") + Money.format(kotlin.math.abs(g.net))
+                g.incomeTotal > 0 && g.expenseTotal > 0 -> "收 ${Money.format(g.incomeTotal)} · 支 ${Money.format(g.expenseTotal)}"
+                g.incomeTotal > 0 -> "收 ${Money.format(g.incomeTotal)}"
+                else -> "支 ${Money.format(g.expenseTotal)}"
+            }
+            val on = g.checkedCount > 0
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clickable(role = Role.Switch) { actions.onGroup(g.klass, !on) }
+                    .padding(horizontal = Space.x2, vertical = Space.x1_5),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        if (g.klass == ImportClass.ADJUSTMENT && on) "余额校准 · 用作账户余额校准" else g.klass.label,
+                        style = JkType.bodyStrong,
+                        color = colors.textPrimary,
+                    )
+                    Text(
+                        "${g.count} 笔" + (if (on && g.checkedCount < g.count) "（已选 ${g.checkedCount}）" else "") + " · $money",
+                        style = JkType.small.copy(fontFamily = JkType.date.fontFamily),
+                        color = colors.textSecondary,
+                    )
+                    Text(g.klass.hint, style = JkType.caption, color = colors.textTertiary)
+                }
+                Spacer(Modifier.width(Space.x1))
+                JkSwitch(checked = on, onCheckedChange = { actions.onGroup(g.klass, it) })
+            }
         }
     }
 }
@@ -713,7 +841,7 @@ private fun CandidateRow(
     val colors = Jk.colors
     val r = c.record
     val category = c.categoryId?.let(categories::get)
-    val label = categoryLabel(c.categoryId, categories)
+    val label = if (c.txType == TxType.TRANSFER) c.klass.label else categoryLabel(c.categoryId, categories)
     Row(
         Modifier
             .fillMaxWidth()
@@ -759,7 +887,8 @@ private fun CandidateRow(
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                r.time.format(ROW_TIME) + " · " + (accounts[c.accountId]?.name ?: "账户"),
+                r.time.format(ROW_TIME) + " · " + (accounts[c.accountId]?.name ?: "账户") +
+                    (c.toAccountId?.let { " → " + (accounts[it]?.name ?: "账户") } ?: ""),
                 style = JkType.date.copy(fontSize = JkType.caption.fontSize),
                 color = colors.textTertiary,
                 maxLines = 1,
@@ -767,9 +896,9 @@ private fun CandidateRow(
         }
         Spacer(Modifier.width(Space.x1))
         Text(
-            (if (r.type == TxType.INCOME) "+" else "-") + Money.format(r.amount, symbol = false),
+            (if (c.txType == TxType.TRANSFER) "" else if (r.type == TxType.INCOME) "+" else "-") + Money.format(r.amount, symbol = false),
             style = JkType.amount,
-            color = if (!c.checked) colors.textTertiary else if (r.type == TxType.INCOME) colors.income else colors.textPrimary,
+            color = if (!c.checked) colors.textTertiary else if (c.txType == TxType.INCOME) colors.income else if (c.txType == TxType.TRANSFER) colors.textSecondary else colors.textPrimary,
         )
     }
 }
@@ -777,7 +906,7 @@ private fun CandidateRow(
 // ── 完成 ──────────────────────────────────────────────────────────
 
 @Composable
-fun BillImportDone(result: ImportResult, onFinish: () -> Unit, onAgain: () -> Unit) {
+fun BillImportDone(result: ImportResult, onFinish: () -> Unit, onAgain: () -> Unit, onUndo: (() -> Unit)? = null) {
     val colors = Jk.colors
     Column(Modifier.fillMaxSize().statusBarsPadding()) {
         JkTopBar(title = "导入完成", onBack = onFinish)
@@ -805,6 +934,7 @@ fun BillImportDone(result: ImportResult, onFinish: () -> Unit, onAgain: () -> Un
                 val lines = buildList {
                     add("支出 ${result.expenseCount} 笔" to Money.format(result.expenseTotal))
                     add("收入 ${result.incomeCount} 笔" to Money.format(result.incomeTotal))
+                    if (result.transferCount > 0) add("转账 / 借贷 / 校准（不计收支）" to "${result.transferCount} 笔")
                     result.createdAccount?.let { add("新建账户" to it) }
                     if (result.unchecked > 0) add("没有勾选" to "${result.unchecked} 笔")
                     if (result.alreadyImported > 0) add("以前导入过" to "${result.alreadyImported} 笔")
@@ -818,11 +948,45 @@ fun BillImportDone(result: ImportResult, onFinish: () -> Unit, onAgain: () -> Un
                     }
                 }
             }
+            if (result.balanceChanges.isNotEmpty()) {
+                Spacer(Modifier.height(Space.x2))
+                Text(
+                    "账户余额变化",
+                    style = JkType.overline,
+                    color = colors.textTertiary,
+                    modifier = Modifier.fillMaxWidth().padding(start = Space.x05, bottom = Space.x1).semantics { heading() },
+                )
+                JkCard(Modifier.fillMaxWidth(), padding = PaddingValues(horizontal = Space.x2, vertical = Space.x1_5)) {
+                    result.balanceChanges.forEachIndexed { i, b ->
+                        if (i > 0) JkDivider()
+                        Row(Modifier.fillMaxWidth().heightIn(min = 44.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(b.name + if (b.created) "（新建）" else "", style = JkType.body, color = colors.textPrimary)
+                                Text(
+                                    Money.format(b.before) + " → " + Money.format(b.after),
+                                    style = JkType.caption.copy(fontFamily = JkType.date.fontFamily),
+                                    color = colors.textTertiary,
+                                )
+                            }
+                            Text(
+                                (if (b.delta >= 0) "+" else "-") + Money.format(kotlin.math.abs(b.delta)),
+                                style = JkType.amountSmall,
+                                color = if (b.delta < 0) colors.expense else colors.textPrimary,
+                            )
+                        }
+                    }
+                }
+            }
             Spacer(Modifier.height(Space.x1_5))
-            Text("导入的流水和手动记的一样，可以随时修改或删除。", style = JkType.caption, color = colors.textTertiary)
+            Text(
+                "余额不对？可以撤销本次导入，或以后在“我的 → 导入记录”里整批撤销。导入的流水也可以单独修改、删除。",
+                style = JkType.caption,
+                color = colors.textTertiary,
+            )
         }
         Column(Modifier.navigationBarsPadding().padding(Space.x2), verticalArrangement = Arrangement.spacedBy(Space.x1)) {
             JkButton("完成", onFinish, modifier = Modifier.fillMaxWidth())
+            if (onUndo != null) JkButton("撤销本次导入", onUndo, style = ButtonStyle.Danger, modifier = Modifier.fillMaxWidth())
             JkButton("再导入一份", onAgain, style = ButtonStyle.Ghost, modifier = Modifier.fillMaxWidth())
         }
     }

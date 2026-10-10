@@ -8,12 +8,13 @@ package com.xiguli.jinkui.data.db
  *  - 版本 3（0.7.0）：新增周期记账规则表，旧表不动。
  *  - 版本 4（0.9.0）：新增账本删除标记表，旧表不动。
  *  - 版本 5（1.2.0）：新增自动记账的“待确认”表，旧表不动。
+ *  - 版本 6（1.3.0）：流水加一列导入批次 import_batch，新增导入批次表；已导入的流水按导入时间补上批次。
  *
  * 新装用户执行 [create]：版本 1 的建表语句加上之后的全部迁移，保证新装与升级得到同一套结构。
  * 迁移只允许“加”，不得丢弃或改写用户已有的数据。
  */
 object VaultSchema {
-    const val VERSION = 5
+    const val VERSION = 6
 
     private val V1 = listOf(
         """CREATE TABLE cards(
@@ -135,7 +136,29 @@ object VaultSchema {
         )""",
     )
 
-    private val MIGRATIONS: Map<Int, List<String>> = mapOf(2 to V2, 3 to V3, 4 to V4, 5 to V5)
+    /**
+     * 5 → 6：账单导入批次（“导入记录”与“撤销导入”）。
+     *  - ledger_transactions 加一列 import_batch（明文，只是随机 ID；手动记的为 NULL）；
+     *  - ledger_import_batches：来源、文件名、笔数、自动新建的账户在 data_enc 里（字段级加密），明文只有 ID 与时间；
+     *  - 回填：1.2 / 1.3 测试版导入的流水 ID 一律是 "imp-" + 账单内容摘要，同一次导入的 created_at 相同，
+     *    所以按 created_at 分组补成“旧版导入”批次（ID = batch-legacy-<created_at>，data_enc 为空串表示没有详情），
+     *    升级前导入的账单同样可以整批撤销。只加不改：流水内容与其余列都不动。
+     */
+    private val V6 = listOf(
+        "ALTER TABLE ledger_transactions ADD COLUMN import_batch TEXT",
+        "CREATE INDEX ledger_tx_batch ON ledger_transactions(import_batch)",
+        """CREATE TABLE ledger_import_batches(
+            id TEXT PRIMARY KEY NOT NULL,
+            created_at INTEGER NOT NULL,
+            data_enc TEXT NOT NULL
+        )""",
+        """INSERT INTO ledger_import_batches(id, created_at, data_enc)
+            SELECT 'batch-legacy-' || created_at, created_at, '' FROM ledger_transactions
+            WHERE id LIKE 'imp-%' GROUP BY created_at""",
+        "UPDATE ledger_transactions SET import_batch = 'batch-legacy-' || created_at WHERE id LIKE 'imp-%' AND import_batch IS NULL",
+    )
+
+    private val MIGRATIONS: Map<Int, List<String>> = mapOf(2 to V2, 3 to V3, 4 to V4, 5 to V5, 6 to V6)
 
     /** 新装：建出最新结构。 */
     fun create(): List<String> = V1 + upgrade(1, VERSION)

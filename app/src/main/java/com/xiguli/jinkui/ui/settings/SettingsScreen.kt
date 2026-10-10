@@ -224,6 +224,7 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onFonts: () -> Unit = {},
     onBillImport: () -> Unit = {},
+    onImportHistory: () -> Unit = {},
     onAutoBookkeeping: () -> Unit = {},
 ) {
     val container = LocalContainer.current
@@ -313,6 +314,7 @@ fun SettingsScreen(
             onWipe = { dialog = SettingsDialog.Wipe },
             onFonts = onFonts,
             onBillImport = onBillImport,
+            onImportHistory = onImportHistory,
             onAutoBookkeeping = onAutoBookkeeping,
         ),
     )
@@ -425,6 +427,7 @@ class SettingsActions(
     val onWipe: () -> Unit = {},
     val onFonts: () -> Unit = {},
     val onBillImport: () -> Unit = {},
+    val onImportHistory: () -> Unit = {},
     val onAutoBookkeeping: () -> Unit = {},
 )
 
@@ -601,9 +604,16 @@ fun SettingsContent(
             JkCard(Modifier.fillMaxWidth(), padding = PaddingValues(vertical = Space.x05)) {
                 JkRow(
                     title = "导入账单",
-                    subtitle = "微信支付、支付宝账单或 CSV 表格，预览后导入",
+                    subtitle = "微信支付、支付宝、记账 App 账单或 CSV 表格，预览后导入",
                     icon = Icons.Outlined.ReceiptLong,
                     onClick = actions.onBillImport,
+                )
+                JkDivider(inset = Space.x6 + Space.x05)
+                JkRow(
+                    title = "导入记录",
+                    subtitle = "查看每次导入，整批撤销；或删除某段时间内的全部流水",
+                    icon = Icons.Outlined.History,
+                    onClick = actions.onImportHistory,
                 )
                 JkDivider(inset = Space.x6 + Space.x05)
                 JkRow(

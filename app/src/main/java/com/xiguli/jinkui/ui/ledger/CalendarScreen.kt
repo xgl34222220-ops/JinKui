@@ -103,7 +103,7 @@ fun CalendarScreen() {
             val time = if (date == today) System.currentTimeMillis() else date.atTime(LocalTime.now(zone).withSecond(0).withNano(0)).atZone(zone).toInstant().toEpochMilli()
             host.create(time = time)
         },
-        actions = host.actions(),
+        actions = host.actions(multiSelect = false),
         listState = listState,
     )
     EntryHost(host, data, viewModel)

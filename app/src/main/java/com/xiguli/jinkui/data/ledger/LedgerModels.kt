@@ -9,10 +9,30 @@ enum class AccountKind(val key: String, val label: String) {
     ALIPAY("alipay", "支付宝"),
     WECHAT("wechat", "微信"),
     CREDIT("credit", "信用卡"),
-    OTHER("other", "其他");
+    OTHER("other", "其他"),
+    /** 1.3 起：理财 / 余额宝等（资产）。旧版本读到时当作“其他”。 */
+    INVEST("invest", "理财"),
+    /** 1.3 起：借给别人的钱（应收，资产）。 */
+    RECEIVABLE("receivable", "借出（应收）"),
+    /** 1.3 起：向别人借的钱（应付，负债，余额为负）。 */
+    PAYABLE("payable", "借入（应付）"),
+    /**
+     * 1.3 起：“余额调整”内部账户。账单里的“账户余额补齐”按用户选择记成它与真实账户之间的转账：
+     * 只改真实账户的余额，不计收支；它自己不计入资产、负债与净资产，也不出现在记账面板里。
+     */
+    ADJUST("adjust", "余额调整");
+
+    /** 是否计入资产 / 负债 / 净资产。 */
+    val countsInAssets: Boolean get() = this != ADJUST
+
+    /** 是否负债类账户（信用卡、花呗、借入）。 */
+    val isLiability: Boolean get() = this == CREDIT || this == PAYABLE
 
     companion object {
         fun of(key: String?): AccountKind = entries.firstOrNull { it.key == key } ?: OTHER
+
+        /** 用户在“管理账户”里可以手动选择的种类（余额调整只由导入自动建）。 */
+        val userSelectable: List<AccountKind> get() = entries.filter { it != ADJUST }
     }
 }
 
@@ -77,7 +97,29 @@ data class LedgerTransaction(
     val tags: List<String> = emptyList(),
     val createdAt: Long = 0L,
     val updatedAt: Long = 0L,
+    /** 1.3 起：账单导入的批次（[LedgerImportBatch.id]）；手动记的为 null。只存本机，不进备份。 */
+    val importBatch: String? = null,
 )
+
+/**
+ * 一次账单导入（1.3 起，数据库版本 6）。用来在“导入记录”里列出、整批撤销。
+ * 来源、文件名、笔数与自动新建的账户在 data_enc 里（字段级加密）；1.3 之前导入的流水在升级时按导入时间
+ * 补成“旧版导入”批次，那些批次没有这些信息（[legacy] 为 true）。只存本机，不进备份。
+ */
+data class LedgerImportBatch(
+    val id: String,
+    val createdAt: Long,
+    val source: String = "",
+    val fileName: String = "",
+    val count: Int = 0,
+    /** 这次导入自动新建的账户；撤销时若已没有任何流水就一并删掉。 */
+    val createdAccounts: List<String> = emptyList(),
+    val legacy: Boolean = false,
+) {
+    companion object {
+        const val LEGACY_PREFIX = "batch-legacy-"
+    }
+}
 
 /** 每月预算。[categoryId] 为 null 表示总预算；按月循环生效。 */
 data class LedgerBudget(
@@ -104,6 +146,8 @@ data class LedgerData(
     val unreadable: Int = 0,
     /** 删除记录（0.9.0 起）：用户删掉的周期生成流水与周期规则，导入旧备份时不再加回来。 */
     val tombstones: List<LedgerTombstone> = emptyList(),
+    /** 账单导入批次（1.3 起）。只存本机，不进备份。 */
+    val importBatches: List<LedgerImportBatch> = emptyList(),
 ) {
     val isEmpty: Boolean
         get() = accounts.isEmpty() && categories.isEmpty() && transactions.isEmpty() && budgets.isEmpty() && recurring.isEmpty()
@@ -115,7 +159,8 @@ data class LedgerData(
 
 /**
  * 一条“已删除”标记。只记两类会被旧备份或周期记账“复活”的记录：
- *  - [KIND_TX]：周期记账生成的流水（ID 由规则 + 日期决定，删掉后同一 ID 可能被再次生成或从旧备份加回）；
+ *  - [KIND_TX]：周期记账生成的流水（ID 由规则 + 日期决定，删掉后同一 ID 可能被再次生成或从旧备份加回），
+ *    以及（1.3 起）账单导入的流水（ID 由账单内容决定，删掉后导入旧备份不再加回；重新导入同一份账单时由用户决定）；
  *  - [KIND_RECURRING]：周期记账规则本身（旧备份里还留着它，加回来会接着生成）。
  * 只有 ID、种类与删除时间，不含金额、备注等内容。
  */

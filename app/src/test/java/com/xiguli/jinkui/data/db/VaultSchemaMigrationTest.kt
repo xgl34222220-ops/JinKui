@@ -167,6 +167,34 @@ class VaultSchemaMigrationTest {
     }
 
     @Test
+    fun upgradeFromV5ToV6BackfillsImportBatchesAndKeepsEverything() {
+        seedV1()
+        migrate(1, 5)
+        // 1.2 / 1.3 测试版导入的两次账单（同一次导入 created_at 相同）、一笔手动记的、一笔周期生成的
+        exec("INSERT INTO ledger_transactions VALUES('imp-aaaa','expense',1,'acc','',NULL,100,100,'E1')")
+        exec("INSERT INTO ledger_transactions VALUES('imp-bbbb','income',2,'acc','',NULL,100,150,'E2')")
+        exec("INSERT INTO ledger_transactions VALUES('imp-cccc','expense',3,'acc','',NULL,200,200,'E3')")
+        exec("INSERT INTO ledger_transactions VALUES('t-manual','expense',4,'acc','',NULL,100,100,'E4')")
+        exec("INSERT INTO ledger_transactions VALUES('rec-x-2026-10-01','expense',5,'acc','',NULL,100,100,'E5')")
+        migrate(5, 6)
+        assertEquals(6, count("PRAGMA user_version"))
+        assertEquals(5, count("SELECT COUNT(*) FROM ledger_transactions"))
+        assertEquals(2, count("SELECT COUNT(*) FROM ledger_import_batches"))
+        assertEquals(2, count("SELECT COUNT(*) FROM ledger_import_batches WHERE data_enc = ''"))
+        assertEquals(2, count("SELECT COUNT(*) FROM ledger_transactions WHERE import_batch = 'batch-legacy-100'"))
+        assertEquals(1, count("SELECT COUNT(*) FROM ledger_transactions WHERE import_batch = 'batch-legacy-200'"))
+        assertEquals(2, count("SELECT COUNT(*) FROM ledger_transactions WHERE import_batch IS NULL"))
+        // 密文与其余列原样保留
+        assertEquals(1, count("SELECT COUNT(*) FROM ledger_transactions WHERE id = 'imp-bbbb' AND data_enc = 'E2' AND updated_at = 150"))
+        // 空库升级也不会建出空批次
+        val empty = DriverManager.getConnection("jdbc:sqlite::memory:")
+        empty.use { c ->
+            VaultSchema.create().forEach { sql -> c.createStatement().use { it.execute(sql) } }
+            c.createStatement().use { st -> st.executeQuery("SELECT COUNT(*) FROM ledger_import_batches").use { it.next(); assertEquals(0, it.getInt(1)) } }
+        }
+    }
+
+    @Test
     fun upgradedSchemaMatchesFreshInstall() {
         seedV1()
         migrate(1, VaultSchema.VERSION)

@@ -70,6 +70,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AccountBalance
 import androidx.compose.material.icons.outlined.AccountBalanceWallet
+import androidx.compose.material.icons.outlined.Tune
+import androidx.compose.material.icons.outlined.CallReceived
+import androidx.compose.material.icons.outlined.CallMade
+import androidx.compose.material.icons.outlined.Savings
 import androidx.compose.material.icons.outlined.Apartment
 import androidx.compose.material.icons.outlined.AutoStories
 import androidx.compose.material.icons.outlined.Bolt
@@ -202,6 +206,10 @@ fun accountIcon(kind: AccountKind): ImageVector = when (kind) {
     AccountKind.WECHAT -> Icons.Outlined.Forum
     AccountKind.CREDIT -> Icons.Outlined.CreditCard
     AccountKind.OTHER -> Icons.Outlined.AccountBalanceWallet
+    AccountKind.INVEST -> Icons.Outlined.Savings
+    AccountKind.RECEIVABLE -> Icons.Outlined.CallMade
+    AccountKind.PAYABLE -> Icons.Outlined.CallReceived
+    AccountKind.ADJUST -> Icons.Outlined.Tune
 }
 
 /** 图表色（1.3）：薄荷、青、珊瑚、沙四个主色在前，其余是同样柔和、互相分得清的颜色；深色模式整体提亮一档。 */

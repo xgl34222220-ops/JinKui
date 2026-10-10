@@ -82,25 +82,30 @@ class XlsImportTest {
         assertEquals(880_000L, salary.amount)
         assertEquals("支付宝", salary.method)
 
-        // 有支付宝 / 微信 / 花呗账户时各归各的；没有时落到默认账户
+        // 有支付宝 / 微信 / 花呗账户时各归各的；没有时落到默认账户（1.3：“账户余额补齐”是余额校准，默认不导入）
         val data = LedgerData(accounts = listOf(cash, alipay, wechat, huabei), categories = categories)
         val preview = BillImport.preview(parsed, data, zone)
         fun of(day: Int, hour: Int? = null) = preview.candidates.first { it.record.time.dayOfMonth == day && (hour == null || it.record.time.hour == hour) }
-        assertEquals("acc-wx", of(11).accountId)
+        assertEquals(ImportClass.ADJUSTMENT, of(11).klass)
+        assertEquals("acc-wx", of(11).accountId) // 支出方向的校准：微信 → 余额调整
+        assertEquals(false, of(11).checked)
         assertEquals("acc-hb", of(12, 8).accountId)
+        assertEquals(ImportClass.CREDIT, of(12, 8).klass)
         assertEquals("acc-cash", of(12, 12).accountId)
-        assertEquals("acc-ali", of(15).accountId)
-        assertNull(preview.newAccount)
+        assertEquals("acc-ali", of(15).toAccountId) // 收入方向的校准：余额调整 → 支付宝
+        assertEquals(ImportClass.ADJUSTMENT, of(15).klass)
+        assertTrue(preview.usedNewAccounts.isEmpty())
         val bare = BillImport.preview(parsed, LedgerData(accounts = listOf(cash), categories = categories), zone)
-        assertTrue(bare.candidates.all { it.accountId == "acc-cash" })
+        assertTrue(bare.candidates.filter { it.klass == ImportClass.NORMAL }.all { it.accountId == "acc-cash" })
 
-        // 类别 / 二级分类对应到金匮分类
-        assertEquals("cat-social", of(11).categoryId)
-        assertEquals("cat-transport-2", of(12, 8).categoryId)
-        assertEquals("cat-shopping-3", of(12, 12).categoryId)
-        assertEquals("cat-salary", of(15).categoryId)
-        assertEquals("cat-invest", of(16).categoryId)
-        assertEquals("cat-red-packet", of(17).categoryId)
+        // 1.3：分类与原 App 一比一（类别 / 二级分类），账本里没有的就新建
+        val cats = (categories + preview.newCategories).associateBy { it.id }
+        fun path(c: ImportCandidate) = c.categoryId?.let { id -> cats.getValue(id).let { cat -> listOfNotNull(cat.parentId?.let { cats.getValue(it).name }, cat.name).joinToString("/") } }
+        assertEquals("出行交通/打车", path(of(12, 8)))
+        assertEquals("购物消费/手机数码", path(of(12, 12)))
+        assertEquals("理财盈利", path(of(16)))
+        assertEquals("红包", path(of(17)))
+        assertEquals(TxType.INCOME, cats.getValue(of(16).categoryId!!).type)
 
         // 流水备注就是“备注”
         val txs = BillImport.transactions(preview, zone, 0L)
@@ -126,7 +131,10 @@ class XlsImportTest {
         val again = BillImport.preview(parsed, imported, zone)
         assertEquals(0, again.candidates.size)
         assertEquals(3, again.alreadyImported)
-        assertEquals("cat-food-2", first.candidates.first().categoryId)
+        val cats = (categories + first.newCategories).associateBy { it.id }
+        val lunch = cats.getValue(first.candidates.first().categoryId!!)
+        assertEquals("午餐", lunch.name)
+        assertEquals("食品餐饮", cats.getValue(lunch.parentId!!).name)
     }
 
     @Test

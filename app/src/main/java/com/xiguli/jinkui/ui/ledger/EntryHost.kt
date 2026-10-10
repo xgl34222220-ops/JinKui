@@ -42,6 +42,21 @@ class EntryHostState {
     var initialTime by mutableStateOf<Long?>(null)
     var confirmDelete by mutableStateOf<LedgerTransaction?>(null)
     var menuFor by mutableStateOf<LedgerTransaction?>(null)
+    /** 多选模式（长按一行进入）：选中的流水 ID；null 表示不在多选模式。 */
+    var selection by mutableStateOf<Set<String>?>(null)
+    /** 多选后点“删除”：等确认的那几笔。 */
+    var confirmBulk by mutableStateOf<List<LedgerTransaction>?>(null)
+
+    fun toggle(id: String) {
+        val current = selection ?: emptySet()
+        val next = if (id in current) current - id else current + id
+        selection = next
+    }
+
+    fun selectAll(ids: List<String>, on: Boolean) {
+        val current = selection ?: emptySet()
+        selection = if (on) current + ids else current - ids.toSet()
+    }
 
     fun create(category: String? = null, from: LedgerTransaction? = null, time: Long? = null) {
         presetCategory = category
@@ -59,7 +74,8 @@ class EntryHostState {
     }
 
     /** 首页 / 日历用的那组行操作。 */
-    fun actions(base: LedgerHomeActions = LedgerHomeActions()): LedgerHomeActions = LedgerHomeActions(
+    /** [multiSelect] 为 false（日历分区）时长按仍打开菜单，不进入多选。 */
+    fun actions(base: LedgerHomeActions = LedgerHomeActions(), multiSelect: Boolean = true): LedgerHomeActions = LedgerHomeActions(
         onMonth = base.onMonth,
         onQuery = base.onQuery,
         onPickAccount = base.onPickAccount,
@@ -77,6 +93,12 @@ class EntryHostState {
         onDelete = { confirmDelete = it },
         onRowMenu = { menuFor = it },
         onPending = base.onPending,
+        selection = selection.takeIf { multiSelect },
+        onSelectStart = { if (multiSelect) selection = setOf(it.id) else menuFor = it },
+        onSelectToggle = { toggle(it.id) },
+        onSelectMany = { ids, on -> selectAll(ids, on) },
+        onSelectDone = { selection = null },
+        onDeleteSelected = { txs -> if (txs.isNotEmpty()) confirmBulk = txs },
     )
 }
 
@@ -134,6 +156,23 @@ fun EntryHost(
                     state.confirmDelete = tx
                 })
             }
+        }
+    }
+
+    state.confirmBulk?.let { txs ->
+        val total = txs.filter { it.type != TxType.TRANSFER }.sumOf { it.amount }
+        JkDialog(
+            title = "删除选中的 ${txs.size} 笔？",
+            onDismiss = { state.confirmBulk = null },
+            confirmText = "删除 ${txs.size} 笔",
+            danger = true,
+            onConfirm = {
+                state.confirmBulk = null
+                state.selection = null
+                viewModel.deleteMany(txs.map { it.id })
+            },
+        ) {
+            Text("收支合计 ${Money.format(total)}。删除后账户余额会随之调整，删除后几秒内可以在底部点“撤销”恢复。", style = JkType.body)
         }
     }
 

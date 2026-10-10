@@ -36,6 +36,7 @@ import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.customActions
 import com.xiguli.jinkui.ui.components.JkButton
 import com.xiguli.jinkui.ui.components.SwipeAction
@@ -226,6 +227,19 @@ class LedgerViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    /** 多选删除：一次删掉，底部消息条可以“撤销”。 */
+    fun deleteMany(ids: List<String>) {
+        viewModelScope.launch {
+            runCatching { container.ledger.deleteTransactions(ids) }
+                .onSuccess { gone ->
+                    container.messages.show("已删除 ${gone.size} 笔", "撤销") {
+                        container.scope.launch { runCatching { container.ledger.restoreTransactions(gone) } }
+                    }
+                }
+                .onFailure { container.messages.show("删除失败：${it.message ?: "未知错误"}") }
+        }
+    }
+
     fun delete(tx: LedgerTransaction) {
         viewModelScope.launch {
             runCatching { container.ledger.deleteTransaction(tx.id) }
@@ -394,6 +408,14 @@ class LedgerHomeActions(
     val onRowMenu: (LedgerTransaction) -> Unit = {},
     /** “有 n 笔待确认”提示条。 */
     val onPending: () -> Unit = {},
+    /** 多选模式（1.3）：选中的流水 ID；null 表示不在多选模式。长按一行进入。 */
+    val selection: Set<String>? = null,
+    val onSelectStart: (LedgerTransaction) -> Unit = {},
+    val onSelectToggle: (LedgerTransaction) -> Unit = {},
+    /** 一次选上 / 取消一批（本日、本月全选）。 */
+    val onSelectMany: (List<String>, Boolean) -> Unit = { _, _ -> },
+    val onSelectDone: () -> Unit = {},
+    val onDeleteSelected: (List<LedgerTransaction>) -> Unit = {},
 )
 
 /**
@@ -421,7 +443,12 @@ fun LedgerHome(
             .statusBarsPadding(),
         contentPadding = PaddingValues(bottom = LocalTabBarInset.current + Space.x2),
     ) {
-        item(key = "header", contentType = "header") {
+        val selection = actions.selection
+        if (selection != null) {
+            item(key = "selection", contentType = "selection") {
+                SelectionBar(ui, selection, actions)
+            }
+        } else item(key = "header", contentType = "header") {
             PageHeader(
                 title = "账本",
                 glyph = MintGlyph.LEDGER,
@@ -523,14 +550,14 @@ fun LedgerHome(
         for (day in ui.days) {
             // 1.3：日期头不再吸顶（玻璃背景下吸顶条会挡住半透明的行），随列表滚动
             item(key = "d-${day.date}", contentType = "day") {
-                DayHeader(day)
+                DayHeader(day, selection = actions.selection, onSelectDay = { on -> actions.onSelectMany(day.rows.map { it.id }, on) })
             }
             dayRows(day, actions)
         }
         if (ui.days.isNotEmpty()) {
             item(key = "hint", contentType = "hint") {
                 Text(
-                    "右滑再记一笔，左滑删除，长按更多操作",
+                    "右滑再记一笔，左滑删除，长按多选（可整天、整月删除）",
                     style = JkType.caption,
                     color = colors.textTertiary,
                     textAlign = TextAlign.Center,
@@ -666,16 +693,54 @@ fun AddEntryButton(onClick: () -> Unit, modifier: Modifier = Modifier, text: Str
 
 /** 一天的流水：同一天的几笔放在一块白底分组里。 */
 internal fun androidx.compose.foundation.lazy.LazyListScope.dayRows(day: DayUi, actions: LedgerHomeActions) {
+    val selection = actions.selection
     itemsIndexed(day.rows, key = { _, row -> row.id }, contentType = { _, _ -> "tx" }) { index, row ->
         TransactionRow(
             row = row,
             shape = rowShape(index, day.rows.size),
             showDivider = index < day.rows.lastIndex,
-            onClick = { actions.onOpen(row.tx) },
-            onLongClick = { actions.onRowMenu(row.tx) },
+            onClick = { if (selection != null) actions.onSelectToggle(row.tx) else actions.onOpen(row.tx) },
+            // 1.3：长按进入多选（修改 = 点按，再记一笔 = 右滑，删除 = 左滑，读屏另有自定义操作）
+            onLongClick = { if (selection != null) actions.onSelectToggle(row.tx) else actions.onSelectStart(row.tx) },
             onRepeat = { actions.onRepeat(row.tx) },
             onDelete = { actions.onDelete(row.tx) },
+            selected = selection?.let { row.id in it },
         )
+    }
+}
+
+/** 多选模式的标题栏：已选几笔、本月全选、删除、完成。 */
+@Composable
+private fun SelectionBar(ui: LedgerUi, selection: Set<String>, actions: LedgerHomeActions) {
+    val colors = Jk.colors
+    val monthIds = remember(ui.days) { ui.days.flatMap { d -> d.rows.map { it.id } } }
+    val allMonth = monthIds.isNotEmpty() && selection.containsAll(monthIds)
+    androidx.activity.compose.BackHandler(onBack = actions.onSelectDone)
+    Column(Modifier.fillMaxWidth().padding(start = Space.x2, end = Space.x2, top = Space.x1_5, bottom = Space.x1)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "已选 ${selection.size} 笔",
+                style = JkType.title.copy(fontWeight = FontWeight.Bold),
+                color = colors.textPrimary,
+                modifier = Modifier.weight(1f).semantics { heading() },
+            )
+            JkChip("完成", selected = false, onClick = actions.onSelectDone)
+        }
+        Spacer(Modifier.height(Space.x1))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            JkChip(if (allMonth) "取消本月全选" else "本月全选（${monthIds.size}）", selected = allMonth, onClick = { actions.onSelectMany(monthIds, !allMonth) })
+            Spacer(Modifier.weight(1f))
+            JkButton(
+                text = "删除 ${selection.size} 笔",
+                onClick = {
+                    val chosen = ui.days.flatMap { d -> d.rows.filter { it.id in selection }.map { it.tx } }
+                    actions.onDeleteSelected(chosen)
+                },
+                style = ButtonStyle.Danger,
+                compact = true,
+                enabled = selection.isNotEmpty(),
+            )
+        }
     }
 }
 
@@ -797,15 +862,26 @@ private fun BudgetCell(ui: LedgerUi, onBudget: () -> Unit, modifier: Modifier = 
 
 /** 按天分组的头：吸顶，左边“今天 · 周六”，右边当日“收 / 支”（收薄荷、支红）。 */
 @Composable
-internal fun DayHeader(day: DayUi) {
+internal fun DayHeader(day: DayUi, selection: Set<String>? = null, onSelectDay: (Boolean) -> Unit = {}) {
     val colors = Jk.colors
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(start = Space.x2_5, end = Space.x2_5, top = Space.x2, bottom = Space.x1)
-            .semantics(mergeDescendants = true) { heading() },
+            .semantics(mergeDescendants = selection == null) { heading() },
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        if (selection != null) {
+            val all = day.rows.isNotEmpty() && day.rows.all { it.id in selection }
+            Box(
+                Modifier
+                    .size(JkSize.touch)
+                    .clip(CircleShape)
+                    .clickable(role = Role.Checkbox, onClickLabel = if (all) "取消本日全选" else "本日全选") { onSelectDay(!all) }
+                    .semantics { contentDescription = if (all) "本日已全选" else "本日全选" },
+                contentAlignment = Alignment.Center,
+            ) { com.xiguli.jinkui.ui.components.JkCheck(all) }
+        }
         Text(day.label, style = JkType.heading.copy(fontWeight = FontWeight.Bold, fontFamily = JkFonts.numeral), color = colors.textPrimary, maxLines = 1)
         Spacer(Modifier.width(Space.x1))
         Text(day.weekday, style = JkType.small, color = colors.textTertiary, maxLines = 1)
@@ -833,14 +909,16 @@ internal fun TransactionRow(
     onLongClick: () -> Unit,
     onRepeat: () -> Unit,
     onDelete: () -> Unit,
+    /** 多选模式下是否选中；null 表示不在多选模式（多选时不能滑动）。 */
+    selected: Boolean? = null,
 ) {
     val colors = Jk.colors
     val haptic = LocalHapticFeedback.current
     // 不用 clip：圆角只画在底色上（clip 会让触摸命中检测依赖圆角轮廓）
     Box(Modifier.padding(horizontal = Space.x2).transitionOrigin()) {
         SwipeActionsBox(
-            start = SwipeAction("再记一笔", Icons.Outlined.ContentCopy, colors.accentSoft, colors.accent, onRepeat),
-            end = SwipeAction("删除", Icons.Outlined.DeleteOutline, colors.danger, Color.White, onDelete),
+            start = if (selected == null) SwipeAction("再记一笔", Icons.Outlined.ContentCopy, colors.accentSoft, colors.accent, onRepeat) else null,
+            end = if (selected == null) SwipeAction("删除", Icons.Outlined.DeleteOutline, colors.danger, Color.White, onDelete) else null,
             shape = shape,
         ) {
             Column(Modifier.background(colors.surface, shape)) {
@@ -849,24 +927,30 @@ internal fun TransactionRow(
                         .fillMaxWidth()
                         .heightIn(min = 68.dp)
                         .combinedClickable(
-                            onClickLabel = "修改这笔",
+                            onClickLabel = if (selected == null) "修改这笔" else if (selected) "取消选择" else "选择",
                             onClick = onClick,
-                            onLongClickLabel = "更多操作",
+                            onLongClickLabel = if (selected == null) "多选" else null,
                             onLongClick = {
                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                 onLongClick()
                             },
                         )
                         .semantics {
-                            customActions = listOf(
-                                CustomAccessibilityAction("再记一笔") { onRepeat(); true },
-                                CustomAccessibilityAction("删除") { onDelete(); true },
-                            )
+                            if (selected == null) {
+                                customActions = listOf(
+                                    CustomAccessibilityAction("再记一笔") { onRepeat(); true },
+                                    CustomAccessibilityAction("删除") { onDelete(); true },
+                                )
+                            } else {
+                                stateDescription = if (selected) "已选中" else "未选中"
+                            }
                         }
                         .padding(horizontal = Space.x2, vertical = Space.x1_5),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Box(
+                    if (selected != null) {
+                        Box(Modifier.size(JkSize.chip), contentAlignment = Alignment.Center) { com.xiguli.jinkui.ui.components.JkCheck(selected) }
+                    } else Box(
                         Modifier
                             .size(JkSize.chip)
                             .then(

@@ -72,6 +72,8 @@ import com.xiguli.jinkui.ui.theme.Space
 import com.xiguli.jinkui.ui.theme.jkBackdrop
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.clickable
 
 val LocalContainer = staticCompositionLocalOf<AppContainer> { error("未提供 AppContainer") }
 
@@ -175,6 +177,7 @@ private fun MainNavigation() {
                                 onSettings = { navigator.push(Screen.Settings) },
                                 onHealth = { navigator.push(Screen.Health) },
                                 onImport = { navigator.push(Screen.BillImport) },
+                                onImportHistory = { navigator.push(Screen.ImportHistory) },
                                 onAuto = { navigator.push(Screen.AutoBookkeeping) },
                             ),
                         )
@@ -194,10 +197,15 @@ private fun MainNavigation() {
                     onBack = { navigator.pop() },
                     onFonts = { navigator.push(Screen.FontSettings) },
                     onBillImport = { navigator.push(Screen.BillImport) },
+                    onImportHistory = { navigator.push(Screen.ImportHistory) },
                     onAutoBookkeeping = { navigator.push(Screen.AutoBookkeeping) },
                 )
                 Screen.FontSettings -> FontSettingsScreen(onBack = { navigator.pop() })
-                Screen.BillImport -> BillImportScreen(onBack = { navigator.pop() })
+                Screen.BillImport -> BillImportScreen(onBack = { navigator.pop() }, onHistory = { navigator.push(Screen.ImportHistory) })
+                Screen.ImportHistory -> com.xiguli.jinkui.ui.ledger.ImportHistoryScreen(
+                    onBack = { navigator.pop() },
+                    onImport = { navigator.push(Screen.BillImport) },
+                )
                 Screen.AutoBookkeeping -> AutoBookkeepingScreen(
                     onBack = { navigator.pop() },
                     onInbox = { navigator.push(Screen.PendingInbox) },
@@ -299,12 +307,13 @@ private fun ScreenEnter(origin: androidx.compose.ui.geometry.Rect? = null, conte
 @Composable
 private fun BoxScope.MessageHost(bus: MessageBus) {
     var visible by remember { mutableStateOf(false) }
-    var text by remember { mutableStateOf("") }
+    var current by remember { mutableStateOf<com.xiguli.jinkui.BusMessage?>(null) }
     LaunchedEffect(bus) {
         bus.messages.collectLatest { message ->
-            text = message
+            current = message
             visible = true
-            delay(2600)
+            // 带“撤销”等操作的提示多停留一会儿
+            delay(if (message.action != null) 5200 else 2600)
             visible = false
         }
     }
@@ -317,16 +326,42 @@ private fun BoxScope.MessageHost(bus: MessageBus) {
             .navigationBarsPadding()
             .padding(horizontal = Space.x3, vertical = Space.x3),
     ) {
-        Text(
-            text = text,
-            style = JkType.small,
-            color = Jk.colors.bg,
+        val message = current
+        androidx.compose.foundation.layout.Row(
             modifier = Modifier
                 // 消息条在悬浮底栏之上
                 .padding(bottom = 84.dp)
                 .clip(Radius.control)
                 .background(Jk.colors.textPrimary)
-                .padding(horizontal = Space.x2, vertical = Space.x1_5),
-        )
+                .padding(start = Space.x2, end = if (message?.action != null) Space.x05 else Space.x2),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = message?.text.orEmpty(),
+                style = JkType.small,
+                color = Jk.colors.bg,
+                modifier = Modifier.padding(vertical = Space.x1_5).weight(1f, fill = false),
+            )
+            val action = message?.action
+            if (action != null) {
+                Text(
+                    text = message.actionLabel.orEmpty(),
+                    style = JkType.small.copy(
+                        fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                        textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline,
+                    ),
+                    color = Jk.colors.bg,
+                    modifier = Modifier
+                        .padding(start = Space.x1)
+                        .heightIn(min = 48.dp)
+                        .clip(Radius.pill)
+                        .clickable(role = androidx.compose.ui.semantics.Role.Button) {
+                            visible = false
+                            action()
+                        }
+                        .padding(horizontal = Space.x1_5, vertical = Space.x1_5),
+                )
+            }
+        }
     }
 }

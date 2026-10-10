@@ -80,7 +80,8 @@ internal fun buildAccountsUi(data: LedgerData): AccountsUi {
     return AccountsUi(
         accounts = data.accounts.sortedWith(compareBy<LedgerAccount> { it.archived }.thenBy { it.position }),
         balances = balances,
-        netWorth = LedgerMath.netWorth(balances),
+        // “余额调整”内部账户（导入的余额校准）不计入净资产
+        netWorth = LedgerMath.netWorth(balances.filterKeys { id -> data.accounts.firstOrNull { it.id == id }?.kind?.countsInAssets != false }),
         usage = LedgerMath.usageCounts(data.transactions),
     )
 }
@@ -172,10 +173,10 @@ private fun AccountEditSheet(
                 .verticalScroll(rememberScrollState()),
         ) {
             LazyRow(horizontalArrangement = Arrangement.spacedBy(Space.x1)) {
-                items(AccountKind.entries, key = { it.name }, contentType = { "ledgeraccountsscreen-option" }) { k ->
+                items(AccountKind.userSelectable, key = { it.name }, contentType = { "ledgeraccountsscreen-option" }) { k ->
                     JkChip(k.label, kind == k, {
                         kind = k
-                        if (name.isBlank() || AccountKind.entries.any { it.label == name }) name = k.label
+                        if (name.isBlank() || AccountKind.userSelectable.any { it.label == name }) name = k.label
                     })
                 }
             }

@@ -44,13 +44,21 @@ class JinKuiApp : Application() {
     }
 }
 
+/** 底部消息条里的一条：可以带一个操作（例如“撤销”）。 */
+class BusMessage(val text: String, val actionLabel: String? = null, val action: (() -> Unit)? = null)
+
 /** 界面底部的一行轻提示。 */
 class MessageBus {
-    private val flow = MutableSharedFlow<String>(extraBufferCapacity = 8)
-    val messages: SharedFlow<String> = flow.asSharedFlow()
+    private val flow = MutableSharedFlow<BusMessage>(extraBufferCapacity = 8)
+    val messages: SharedFlow<BusMessage> = flow.asSharedFlow()
 
     fun show(message: String) {
-        flow.tryEmit(message)
+        flow.tryEmit(BusMessage(message))
+    }
+
+    /** 带操作按钮的提示（显示得久一些，点按钮执行 [action]）。 */
+    fun show(message: String, actionLabel: String, action: () -> Unit) {
+        flow.tryEmit(BusMessage(message, actionLabel, action))
     }
 }
 

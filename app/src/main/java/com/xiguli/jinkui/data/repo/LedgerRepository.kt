@@ -15,6 +15,9 @@ import com.xiguli.jinkui.data.ledger.PendingEntry
 import com.xiguli.jinkui.data.ledger.PendingMath
 import com.xiguli.jinkui.data.db.LedgerTombstoneRow
 import com.xiguli.jinkui.data.db.LedgerTxRow
+import com.xiguli.jinkui.data.db.LedgerImportBatchRow
+import com.xiguli.jinkui.data.importer.BillImport
+import com.xiguli.jinkui.data.ledger.LedgerImportBatch
 import com.xiguli.jinkui.data.db.VaultDatabase
 import com.xiguli.jinkui.data.ledger.AccountKind
 import com.xiguli.jinkui.data.ledger.LedgerAccount
@@ -103,8 +106,17 @@ class LedgerRepository(
             val p = LedgerJson.readTransactionPayload(keys.field.decrypt(row.dataEnc, transactionContext(row.id)))
             LedgerTransaction(
                 row.id, TxType.of(row.type), p.amount, row.occurredAt, row.accountId, row.toAccountId,
-                row.categoryId, p.note, p.tags, row.createdAt, row.updatedAt,
+                row.categoryId, p.note, p.tags, row.createdAt, row.updatedAt, row.importBatch,
             )
+        }
+        val batchCounts = transactions.groupingBy { it.importBatch }.eachCount()
+        val importBatches = decodeAll(database.ledgerImportBatches()) { row ->
+            if (row.dataEnc.isEmpty()) {
+                // 升级时由 1.3 之前的导入补出来的批次：没有来源等详情
+                LedgerImportBatch(row.id, row.createdAt, count = batchCounts[row.id] ?: 0, legacy = true)
+            } else {
+                LedgerJson.readImportBatchPayload(row.id, row.createdAt, keys.field.decrypt(row.dataEnc, batchContext(row.id)))
+            }
         }
         val budgets = decodeAll(database.ledgerBudgets()) { row ->
             LedgerBudget(row.id, row.categoryId, LedgerJson.readBudgetAmount(keys.field.decrypt(row.dataEnc, budgetContext(row.id))), row.updatedAt)
@@ -119,7 +131,7 @@ class LedgerRepository(
         val pendingEntries = decodeAll(database.ledgerPending()) { row ->
             PendingMath.read(row.id, row.createdAt, keys.field.decrypt(row.dataEnc, pendingContext(row.id)))
         }
-        publish { LedgerData(accounts, categories, transactions, budgets, recurring, unreadable, tombstones) }
+        publish { LedgerData(accounts, categories, transactions, budgets, recurring, unreadable, tombstones, importBatches) }
         publishPending { pendingEntries }
         // 解锁后立刻补记到期的周期记账；失败不影响账本打开
         runCatching { runRecurring() }
@@ -218,31 +230,124 @@ class LedgerRepository(
     // ── 账单导入 ──────────────────────────────────────────────────
 
     /**
-     * 写入导入的流水（以及需要新建的账户），一个事务。已经存在的 ID 跳过，不覆盖。
-     * 返回真正写入的流水。
+     * 写入导入的流水、需要新建的账户与这次的导入记录（[batch]），一个事务。已经存在的 ID 跳过，不覆盖。
+     * 每笔流水都带上批次 ID，之后可以在“导入记录”里整批撤销。返回真正写入的流水。
      */
-    suspend fun importTransactions(transactions: List<LedgerTransaction>, newAccount: LedgerAccount?): List<LedgerTransaction> =
+    suspend fun importTransactions(
+        transactions: List<LedgerTransaction>,
+        newAccounts: List<LedgerAccount>,
+        batch: LedgerImportBatch? = null,
+        newCategories: List<LedgerCategory> = emptyList(),
+    ): List<LedgerTransaction> =
         withContext(Dispatchers.IO) {
             recurringLock.withLock {
                 val keys = keys()
                 val current = state.value
                 val existing = current.transactions.mapTo(HashSet()) { it.id }
-                val account = newAccount?.takeIf { a -> current.accounts.none { it.id == a.id } && transactions.any { it.accountId == a.id } }
-                    ?.let { it.copy(position = (current.accounts.maxOfOrNull { a -> a.position } ?: -1) + 1, updatedAt = System.currentTimeMillis()) }
-                val accounts = current.accounts + listOfNotNull(account)
-                val fresh = transactions.filter { it.id !in existing }.map { it.copy(note = it.note.trim().take(500)) }
+                val now = System.currentTimeMillis()
+                var position = (current.accounts.maxOfOrNull { a -> a.position } ?: -1) + 1
+                val created = newAccounts
+                    .filter { a -> current.accounts.none { it.id == a.id } && transactions.any { it.accountId == a.id || it.toAccountId == a.id } }
+                    .map { it.copy(position = position++, updatedAt = now) }
+                val accounts = current.accounts + created
+                val fresh = transactions.filter { it.id !in existing }
+                    .map { it.copy(note = it.note.trim().take(500), importBatch = batch?.id ?: it.importBatch) }
                 fresh.forEach { tx -> LedgerMath.validate(tx, accounts)?.let { throw LedgerInputException(it) } }
                 if (fresh.isEmpty()) return@withLock emptyList()
-                database.importLedger(account?.toRow(keys), fresh.map { it.toRow(keys) })
+                val savedBatch = batch?.copy(count = fresh.size, createdAccounts = created.map { it.id })
+                // 分类从不删除：已经存在的同 ID 分类不覆盖（用户可能改过名字或图标）
+                val categories = newCategories.filter { c -> current.categories.none { it.id == c.id } }
+                database.importLedger(created.map { it.toRow(keys) }, categories.map { it.toRow(keys) }, fresh.map { it.toRow(keys) }, savedBatch?.toRow(keys))
+                val freshIds = fresh.mapTo(HashSet()) { it.id }
                 publish { data ->
                     data.copy(
-                        accounts = if (account == null) data.accounts else (data.accounts + account).sortedBy { it.position },
+                        accounts = if (created.isEmpty()) data.accounts else (data.accounts + created).sortedBy { it.position },
+                        categories = if (categories.isEmpty()) data.categories else (data.categories + categories).sortedBy { it.position },
                         transactions = data.transactions + fresh,
+                        tombstones = data.tombstones.filterNot { it.id in freshIds },
+                        importBatches = if (savedBatch == null) data.importBatches else listOf(savedBatch) + data.importBatches,
                     )
                 }
                 fresh
             }
         }
+
+    /** 兼容 1.2 的调用：没有导入记录、最多新建一个账户。 */
+    suspend fun importTransactions(transactions: List<LedgerTransaction>, newAccount: LedgerAccount?): List<LedgerTransaction> =
+        importTransactions(transactions, listOfNotNull(newAccount), null)
+
+    /**
+     * 撤销一次导入：删掉这一批的全部流水（记下删除标记，导入旧备份不会加回来；重新导入同一份账单仍可以选回），
+     * 删掉这条导入记录，以及这次自动新建、已经没有任何流水的账户。返回删掉的笔数。
+     */
+    suspend fun undoImport(batchId: String): Int = withContext(Dispatchers.IO) {
+        recurringLock.withLock {
+            keys()
+            val current = state.value
+            val batch = current.importBatches.firstOrNull { it.id == batchId }
+            val doomed = current.transactions.filter { it.importBatch == batchId }
+            val now = System.currentTimeMillis()
+            val tombstones = doomed.map { LedgerTombstone(it.id, LedgerTombstone.KIND_TX, now) }
+            val accountIds = batch?.createdAccounts.orEmpty()
+            database.deleteLedgerTransactions(doomed.map { it.id }, tombstones.map { it.toRow() }, batchId, accountIds)
+            val ids = doomed.mapTo(HashSet()) { it.id }
+            publish { data ->
+                val left = data.transactions.filterNot { it.id in ids }
+                data.copy(
+                    transactions = left,
+                    accounts = data.accounts.filterNot { a -> a.id in accountIds && left.none { it.accountId == a.id || it.toAccountId == a.id } },
+                    tombstones = data.tombstones.filterNot { it.id in ids } + tombstones,
+                    importBatches = data.importBatches.filterNot { it.id == batchId },
+                )
+            }
+            doomed.size
+        }
+    }
+
+    /**
+     * 一次删除多笔流水（多选删除、按时间段删除），一个事务。周期生成与账单导入的流水记下删除标记。
+     * 返回删掉的流水（原样），用于“撤销”。
+     */
+    suspend fun deleteTransactions(ids: Collection<String>): List<LedgerTransaction> = withContext(Dispatchers.IO) {
+        recurringLock.withLock {
+            keys()
+            val wanted = ids.toHashSet()
+            val doomed = state.value.transactions.filter { it.id in wanted }
+            if (doomed.isEmpty()) return@withLock emptyList()
+            val now = System.currentTimeMillis()
+            val tombstones = doomed.filter { needsTombstone(it.id) }.map { LedgerTombstone(it.id, LedgerTombstone.KIND_TX, now) }
+            database.deleteLedgerTransactions(doomed.map { it.id }, tombstones.map { it.toRow() })
+            val gone = doomed.mapTo(HashSet()) { it.id }
+            publish { data ->
+                data.copy(
+                    transactions = data.transactions.filterNot { it.id in gone },
+                    tombstones = data.tombstones.filterNot { it.id in gone } + tombstones,
+                )
+            }
+            doomed
+        }
+    }
+
+    /** 删除 [from, until) 这段时间里的全部流水（导入出错时的兜底清理）。返回删掉的流水。 */
+    suspend fun deleteRange(from: Long, until: Long): List<LedgerTransaction> =
+        deleteTransactions(state.value.transactions.filter { it.occurredAt in from until until }.map { it.id })
+
+    /** 撤销删除：把 [deleted] 原样写回（账户已经不在的跳过），并去掉删除标记。 */
+    suspend fun restoreTransactions(deleted: List<LedgerTransaction>) = withContext(Dispatchers.IO) {
+        recurringLock.withLock {
+            val keys = keys()
+            val current = state.value
+            val accountIds = current.accounts.mapTo(HashSet()) { it.id }
+            val existing = current.transactions.mapTo(HashSet()) { it.id }
+            val back = deleted.filter { it.id !in existing && it.accountId in accountIds && (it.toAccountId == null || it.toAccountId in accountIds) }
+            if (back.isEmpty()) return@withLock
+            database.restoreLedgerTransactions(back.map { it.toRow(keys) })
+            val ids = back.mapTo(HashSet()) { it.id }
+            publish { data -> data.copy(transactions = data.transactions + back, tombstones = data.tombstones.filterNot { it.id in ids }) }
+        }
+    }
+
+    private fun needsTombstone(id: String): Boolean = RecurringMath.isGeneratedId(id) || BillImport.isImportedId(id)
 
     // ── 自动记账 ──────────────────────────────────────────────────
 
@@ -328,7 +433,8 @@ class LedgerRepository(
      * 之后补记不会再生成这一天，导入旧备份也不会把它加回来。
      */
     suspend fun deleteTransaction(id: String) = withContext(Dispatchers.IO) {
-        val tombstone = if (RecurringMath.isGeneratedId(id)) {
+        // 1.3 起账单导入的流水也记删除标记：否则导入一份旧备份，删掉的导入流水又会回来
+        val tombstone = if (needsTombstone(id)) {
             LedgerTombstone(id, LedgerTombstone.KIND_TX, System.currentTimeMillis())
         } else {
             null
@@ -440,7 +546,9 @@ class LedgerRepository(
     suspend fun restore(incoming: LedgerData): LedgerImportSummary = withContext(Dispatchers.IO) {
         val keys = keys()
         val plan = LedgerMerge.plan(state.value, incoming)
-        val write = plan.toWrite
+        // 导入批次只存本机、不进备份：备份里较新的同一笔覆盖本机时，保留本机记下的批次
+        val localBatch = state.value.transactions.filter { it.importBatch != null }.associate { it.id to it.importBatch }
+        val write = plan.toWrite.let { w -> w.copy(transactions = w.transactions.map { t -> t.copy(importBatch = localBatch[t.id] ?: t.importBatch) }) }
         try {
             if (!write.isEmpty) {
                 database.writeLedger(
@@ -475,6 +583,7 @@ class LedgerRepository(
     private fun LedgerTransaction.toRow(keys: SessionKeys) = LedgerTxRow(
         id, type.key, occurredAt, accountId, toAccountId, categoryId, createdAt, updatedAt,
         keys.field.encrypt(LedgerJson.transactionPayload(this), transactionContext(id)),
+        importBatch,
     )
 
     private fun LedgerBudget.toRow(keys: SessionKeys) = LedgerBudgetRow(
@@ -485,6 +594,10 @@ class LedgerRepository(
     private fun PendingEntry.toRow(keys: SessionKeys) = LedgerPendingRow(
         id, createdAt,
         keys.field.encrypt(PendingMath.payload(this), pendingContext(id)),
+    )
+
+    private fun LedgerImportBatch.toRow(keys: SessionKeys) = LedgerImportBatchRow(
+        id, createdAt, keys.field.encrypt(LedgerJson.importBatchPayload(this), batchContext(id)),
     )
 
     private fun LedgerTombstone.toRow() = LedgerTombstoneRow(id, kind, deletedAt)
@@ -502,5 +615,6 @@ class LedgerRepository(
         fun budgetContext(id: String) = "ledger:budget:$id"
         fun recurringContext(id: String) = "ledger:recurring:$id"
         fun pendingContext(id: String) = "ledger:pending:$id"
+        fun batchContext(id: String) = "ledger:batch:$id"
     }
 }

@@ -30,6 +30,8 @@ sealed interface Screen {
     data object FontSettings : Screen
     /** 导入微信 / 支付宝 / CSV 账单（1.2 起）。 */
     data object BillImport : Screen
+    /** 导入记录：每次导入、整批撤销、按时间段删除（1.3 起）。 */
+    data object ImportHistory : Screen
     /** 自动记账设置（1.2 起）。 */
     data object AutoBookkeeping : Screen
     /** 自动记账的“待确认”（1.2 起）。 */

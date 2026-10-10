@@ -83,6 +83,12 @@ data class AssetsUi(
     val creditDebt: Long,
     val credit: List<AssetRow>,
     val others: List<AssetRow>,
+    /** 借出款（应收）合计。 */
+    val receivable: Long = 0L,
+    /** 借入款（应付）合计（正数）。 */
+    val payable: Long = 0L,
+    /** 借贷：每个对方一个应收 / 应付账户。 */
+    val loans: List<AssetRow> = emptyList(),
 )
 
 fun buildAssetsUi(data: LedgerData): AssetsUi {
@@ -90,19 +96,24 @@ fun buildAssetsUi(data: LedgerData): AssetsUi {
     val rows = data.accounts
         .sortedBy { it.position }
         .map { AssetRow(it, balances[it.id] ?: it.openingBalance) }
-        // 停用且余额为 0 的账户不再列出
-        .filter { !it.account.archived || it.balance != 0L }
+        // 停用且余额为 0 的账户不再列出；“余额调整”内部账户（导入的余额校准）不计入资产
+        .filter { (!it.account.archived || it.balance != 0L) && it.account.kind.countsInAssets }
     val sumOf = { kinds: Set<AccountKind> -> rows.filter { it.account.kind in kinds }.sumOf { it.balance } }
+    // 与一木记账同样的三组：资金账户 / 信用账户（信用卡、花呗）/ 借贷（应收、应付，按对方分开）
     val credit = rows.filter { it.account.kind == AccountKind.CREDIT }
+    val loans = rows.filter { it.account.kind == AccountKind.RECEIVABLE || it.account.kind == AccountKind.PAYABLE }
     return AssetsUi(
         net = rows.sumOf { it.balance },
         assets = rows.filter { it.balance > 0 }.sumOf { it.balance },
         liabilities = rows.filter { it.balance < 0 }.sumOf { -it.balance },
         savings = sumOf(setOf(AccountKind.CASH, AccountKind.BANK)),
-        wallets = sumOf(setOf(AccountKind.ALIPAY, AccountKind.WECHAT, AccountKind.OTHER)),
+        wallets = sumOf(setOf(AccountKind.ALIPAY, AccountKind.WECHAT, AccountKind.OTHER, AccountKind.INVEST)),
         creditDebt = credit.filter { it.balance < 0 }.sumOf { -it.balance },
         credit = credit,
-        others = rows.filter { it.account.kind != AccountKind.CREDIT },
+        others = rows.filter { it !in credit && it !in loans },
+        receivable = sumOf(setOf(AccountKind.RECEIVABLE)),
+        payable = -sumOf(setOf(AccountKind.PAYABLE)),
+        loans = loans,
     )
 }
 
@@ -174,11 +185,42 @@ fun LedgerAssetsContent(ui: AssetsUi, onBack: () -> Unit, onAccounts: () -> Unit
                 Tile("支付账户", show(ui.wallets), colors.textPrimary, Modifier.weight(1f))
                 Tile("信用欠款", show(ui.creditDebt), if (ui.creditDebt > 0) colors.expense else colors.textPrimary, Modifier.weight(1f))
             }
+            if (ui.loans.isNotEmpty()) {
+                Spacer(Modifier.height(Space.x2))
+                JkCard(Modifier.fillMaxWidth(), padding = androidx.compose.foundation.layout.PaddingValues(vertical = Space.x1)) {
+                    Row(Modifier.padding(horizontal = Space.x2, vertical = Space.x1), verticalAlignment = Alignment.CenterVertically) {
+                        Text("借贷", style = JkType.section, color = colors.textPrimary, modifier = Modifier.weight(1f).semantics { heading() })
+                        Text("应收 ${show(ui.receivable)} · 应付 ${show(ui.payable)}", style = JkType.small, color = colors.textSecondary)
+                    }
+                    ui.loans.forEachIndexed { i, row ->
+                        val receivable = row.account.kind == AccountKind.RECEIVABLE
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 56.dp)
+                                .clickable(onClick = onAccounts)
+                                .padding(horizontal = Space.x2, vertical = Space.x1),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Box(Modifier.size(JkSize.chip).clip(CircleShape).background(colors.surfaceAlt), contentAlignment = Alignment.Center) {
+                                Icon(accountIcon(row.account.kind), contentDescription = null, tint = colors.accent, modifier = Modifier.size(20.dp))
+                            }
+                            Spacer(Modifier.width(Space.x1_5))
+                            Column(Modifier.weight(1f)) {
+                                Text(row.account.name, style = JkType.bodyStrong.copy(fontWeight = FontWeight.Bold), color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(if (receivable) "应收（借出）" else "应付（借入）", style = JkType.caption, color = colors.textTertiary)
+                            }
+                            Text(show(kotlin.math.abs(row.balance)), style = JkType.amount, color = if (receivable) colors.textPrimary else colors.expense)
+                        }
+                        if (i < ui.loans.lastIndex) JkDivider(inset = Space.x2 + JkSize.chip + Space.x1_5)
+                    }
+                }
+            }
             if (ui.credit.isNotEmpty()) {
                 Spacer(Modifier.height(Space.x2))
                 JkCard(Modifier.fillMaxWidth(), padding = androidx.compose.foundation.layout.PaddingValues(Space.x2)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("信贷账户", style = JkType.section, color = colors.textPrimary, modifier = Modifier.weight(1f).semantics { heading() })
+                        Text("信用账户", style = JkType.section, color = colors.textPrimary, modifier = Modifier.weight(1f).semantics { heading() })
                         Text(show(ui.creditDebt), style = JkType.amount.copy(fontWeight = FontWeight.Bold), color = colors.textPrimary)
                     }
                     for (row in ui.credit) {
@@ -222,7 +264,7 @@ fun LedgerAssetsContent(ui: AssetsUi, onBack: () -> Unit, onAccounts: () -> Unit
                 }
             }
             Text(
-                "余额由“期初余额 + 收支 ± 转账”算出；信用卡欠款记为负数，占比条是这张卡在全部负债里的份额。",
+                "净资产 = 资产 − 负债。余额由“期初余额 + 收支 ± 转账”算出；信用卡、花呗的欠款与借入（应付）记为负数，借出（应收）计入资产；占比条是它在全部负债里的份额。",
                 style = JkType.caption,
                 color = colors.textTertiary,
                 modifier = Modifier.padding(horizontal = Space.x05, vertical = Space.x2),

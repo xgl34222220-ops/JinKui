@@ -93,6 +93,7 @@ class MeActions(
     val onHealth: () -> Unit = {},
     val onGenerator: () -> Unit = {},
     val onImport: () -> Unit = {},
+    val onImportHistory: () -> Unit = {},
     val onAuto: () -> Unit = {},
 )
 
@@ -185,7 +186,9 @@ fun MeContent(ui: MeUi, actions: MeActions) {
         }
         Spacer(Modifier.height(Space.x2))
         RowGroup("记账助手") {
-            MeRow(MintGlyph.ADD_NOTE, "导入账单", "微信支付、支付宝账单或 CSV 表格", actions.onImport)
+            MeRow(MintGlyph.ADD_NOTE, "导入账单", "微信支付、支付宝、记账 App 账单或 CSV 表格", actions.onImport)
+            JkDivider(inset = 56.dp)
+            MeRow(MintGlyph.RECURRING, "导入记录", "每次导入的时间、来源与笔数，可整批撤销", actions.onImportHistory)
             JkDivider(inset = 56.dp)
             MeRow(MintGlyph.RECURRING, "自动记账", "收付款通知生成待确认，确认后才记账", actions.onAuto)
         }

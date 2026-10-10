@@ -60,6 +60,26 @@ object LedgerJson {
         return TransactionPayload(json.getLong("amount"), json.optString("note", ""), json.optStringList("tags"))
     }
 
+    /** 导入批次（1.3 起）：来源、文件名、笔数、自动新建的账户。 */
+    fun importBatchPayload(batch: LedgerImportBatch): String = JSONObject()
+        .put("source", batch.source)
+        .put("file", batch.fileName)
+        .put("count", batch.count)
+        .put("accounts", JSONArray(batch.createdAccounts))
+        .toString()
+
+    fun readImportBatchPayload(id: String, createdAt: Long, text: String): LedgerImportBatch {
+        val json = JSONObject(text)
+        return LedgerImportBatch(
+            id = id,
+            createdAt = createdAt,
+            source = json.optString("source", ""),
+            fileName = json.optString("file", ""),
+            count = json.optInt("count", 0),
+            createdAccounts = json.optStringList("accounts"),
+        )
+    }
+
     fun budgetPayload(budget: LedgerBudget): String = JSONObject().put("amount", budget.amount).toString()
 
     fun readBudgetAmount(text: String): Long = JSONObject(text).getLong("amount")

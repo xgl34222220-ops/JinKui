@@ -76,7 +76,12 @@ class LedgerTxRow(
     val createdAt: Long,
     val updatedAt: Long,
     val dataEnc: String,
+    /** 导入批次（版本 6 起），手动记的为 null。 */
+    val importBatch: String? = null,
 )
+
+/** 一次账单导入（版本 6 起）。data_enc 为空串表示升级时补出来的“旧版导入”批次。 */
+class LedgerImportBatchRow(val id: String, val createdAt: Long, val dataEnc: String)
 
 class LedgerBudgetRow(
     val id: String,
@@ -309,14 +314,52 @@ class VaultDatabase(private val context: Context) {
         }
 
     fun ledgerTransactions(): List<LedgerTxRow> =
-        read("SELECT id,type,occurred_at,account_id,to_account_id,category_id,created_at,updated_at,data_enc FROM ledger_transactions ORDER BY occurred_at DESC") {
+        read("SELECT id,type,occurred_at,account_id,to_account_id,category_id,created_at,updated_at,data_enc,import_batch FROM ledger_transactions ORDER BY occurred_at DESC") {
             LedgerTxRow(
                 it.getString(0), it.getString(1), it.getLong(2), it.getString(3),
                 if (it.isNull(4)) null else it.getString(4),
                 if (it.isNull(5)) null else it.getString(5),
                 it.getLong(6), it.getLong(7), it.getString(8),
+                if (it.isNull(9)) null else it.getString(9),
             )
         }
+
+    // ── 账单导入批次（版本 6 起）──────────────────────────────────
+
+    fun ledgerImportBatches(): List<LedgerImportBatchRow> =
+        read("SELECT id,created_at,data_enc FROM ledger_import_batches ORDER BY created_at DESC") {
+            LedgerImportBatchRow(it.getString(0), it.getLong(1), it.getString(2))
+        }
+
+    /**
+     * 一个事务里删除一批流水并记下删除标记（批量删除、撤销导入、按时间段删除共用）；
+     * [batchId] 不为空时同时删掉这条导入记录，[accountIds] 里已经没有任何流水引用的账户也一并删除。
+     */
+    fun deleteLedgerTransactions(
+        ids: Collection<String>,
+        tombstones: List<LedgerTombstoneRow>,
+        batchId: String? = null,
+        accountIds: Collection<String> = emptyList(),
+    ) = transaction { db ->
+        ids.forEach { db.execSQL("DELETE FROM ledger_transactions WHERE id = ?", arrayOf<Any?>(it)) }
+        tombstones.forEach { writeTombstone(db, it) }
+        batchId?.let { db.execSQL("DELETE FROM ledger_import_batches WHERE id = ?", arrayOf<Any?>(it)) }
+        for (id in accountIds) {
+            val used = db.query(
+                "SELECT COUNT(*) FROM ledger_transactions WHERE account_id = ? OR to_account_id = ?",
+                arrayOf<Any?>(id, id),
+            ).use { c -> c.moveToFirst(); c.getInt(0) }
+            if (used == 0) db.execSQL("DELETE FROM ledger_accounts WHERE id = ?", arrayOf<Any?>(id))
+        }
+    }
+
+    /** 撤销删除：把删掉的流水原样写回，并去掉它们的删除标记。 */
+    fun restoreLedgerTransactions(rows: List<LedgerTxRow>) = transaction { db ->
+        rows.forEach {
+            writeTransaction(db, it)
+            db.execSQL("DELETE FROM ledger_tombstones WHERE id = ?", arrayOf<Any?>(it.id))
+        }
+    }
 
     fun ledgerBudgets(): List<LedgerBudgetRow> =
         read("SELECT id,category_id,updated_at,data_enc FROM ledger_budgets") {
@@ -368,9 +411,33 @@ class VaultDatabase(private val context: Context) {
      * 账单导入：一个事务里写入（可选的）新账户与全部流水。流水用 INSERT OR IGNORE，
      * 同一个导入 ID 已经存在时保留本机那一笔（用户可能改过分类）。
      */
-    fun importLedger(account: LedgerAccountRow?, transactions: List<LedgerTxRow>) = transaction { db ->
-        account?.let { writeAccount(db, it) }
-        transactions.forEach { writeTransaction(db, it, ignoreExisting = true) }
+    fun importLedger(account: LedgerAccountRow?, transactions: List<LedgerTxRow>) = importLedger(listOfNotNull(account), transactions, null)
+
+    fun importLedger(accounts: List<LedgerAccountRow>, transactions: List<LedgerTxRow>, batch: LedgerImportBatchRow?) =
+        importLedger(accounts, emptyList(), transactions, batch)
+
+    /**
+     * 账单导入（1.3）：一个事务里写入自动新建的账户、按原 App 新建的分类、全部流水与这次的导入记录。
+     * 重新导入以前删掉 / 撤销过的同一笔时，去掉它的删除标记（这是用户明确的选择）。
+     */
+    fun importLedger(
+        accounts: List<LedgerAccountRow>,
+        categories: List<LedgerCategoryRow>,
+        transactions: List<LedgerTxRow>,
+        batch: LedgerImportBatchRow?,
+    ) = transaction { db ->
+        accounts.forEach { writeAccount(db, it) }
+        categories.forEach { writeCategory(db, it) }
+        transactions.forEach {
+            writeTransaction(db, it, ignoreExisting = true)
+            db.execSQL("DELETE FROM ledger_tombstones WHERE id = ?", arrayOf<Any?>(it.id))
+        }
+        batch?.let {
+            db.execSQL(
+                "INSERT OR REPLACE INTO ledger_import_batches(id,created_at,data_enc) VALUES(?,?,?)",
+                arrayOf<Any?>(it.id, it.createdAt, it.dataEnc),
+            )
+        }
     }
 
     // ── 自动记账：待确认 ──────────────────────────────────────────
@@ -458,10 +525,10 @@ class VaultDatabase(private val context: Context) {
 
     private fun writeTransaction(db: SupportSQLiteDatabase, row: LedgerTxRow, ignoreExisting: Boolean = false) {
         db.execSQL(
-            (if (ignoreExisting) "INSERT OR IGNORE" else "INSERT OR REPLACE") + " INTO ledger_transactions(id,type,occurred_at,account_id,to_account_id,category_id,created_at,updated_at,data_enc) VALUES(?,?,?,?,?,?,?,?,?)",
+            (if (ignoreExisting) "INSERT OR IGNORE" else "INSERT OR REPLACE") + " INTO ledger_transactions(id,type,occurred_at,account_id,to_account_id,category_id,created_at,updated_at,data_enc,import_batch) VALUES(?,?,?,?,?,?,?,?,?,?)",
             arrayOf<Any?>(
                 row.id, row.type, row.occurredAt, row.accountId, row.toAccountId, row.categoryId,
-                row.createdAt, row.updatedAt, row.dataEnc,
+                row.createdAt, row.updatedAt, row.dataEnc, row.importBatch,
             ),
         )
     }
