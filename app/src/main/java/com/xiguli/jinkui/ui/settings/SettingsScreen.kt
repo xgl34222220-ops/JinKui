@@ -29,6 +29,7 @@ import androidx.compose.material.icons.outlined.FileDownload
 import androidx.compose.material.icons.outlined.FileUpload
 import androidx.compose.material.icons.outlined.Fingerprint
 import androidx.compose.material.icons.outlined.History
+import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Password
 import androidx.compose.material.icons.outlined.Timer
@@ -54,6 +55,7 @@ import com.xiguli.jinkui.core.crypto.WrongSecretException
 import com.xiguli.jinkui.core.security.BiometricHelper
 import com.xiguli.jinkui.core.security.VaultManager
 import com.xiguli.jinkui.core.security.findFragmentActivity
+import com.xiguli.jinkui.data.repo.AppSettings
 import com.xiguli.jinkui.data.repo.SettingsRepository
 import com.xiguli.jinkui.data.repo.ThemeMode
 import com.xiguli.jinkui.ui.LocalContainer
@@ -77,6 +79,20 @@ import com.xiguli.jinkui.ui.theme.JkType
 import com.xiguli.jinkui.ui.theme.Radius
 import com.xiguli.jinkui.ui.theme.Space
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.QrCode2
+import androidx.compose.material3.Icon
+import androidx.compose.runtime.rememberCoroutineScope
+import com.xiguli.jinkui.core.qr.OtpMigration
+import com.xiguli.jinkui.core.qr.OtpQr
+import com.xiguli.jinkui.core.qr.OtpQrResult
+import com.xiguli.jinkui.data.repo.QrImageReader
+import com.xiguli.jinkui.ui.card.OtpBatchSheet
+import com.xiguli.jinkui.ui.theme.JkSize
 
 class SettingsViewModel(private val container: AppContainer) : ViewModel() {
     private val vault = container.vault
@@ -88,6 +104,8 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
         private set
     var biometricEnabled by mutableStateOf(vault.biometricEnabled)
         private set
+    /** 导出 / 导入完成后的结果卡片（标题 + 几行明细）；null 时不显示。 */
+    var result by mutableStateOf<OperationResult?>(null)
 
     fun refreshUnlockMethods() {
         pinEnabled = vault.pinEnabled
@@ -117,10 +135,17 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
 
     fun export(target: Uri, password: String, onDone: () -> Unit) = launchBusy {
         try {
-            val count = container.backup.export(target, password)
+            val exported = container.backup.export(target, password)
             container.settings.update { it.copy(lastBackupAt = System.currentTimeMillis()) }
-            container.messages.show("已导出 $count 张卡片的加密备份")
             onDone()
+            result = OperationResult(
+                title = "备份已导出",
+                lines = listOf(
+                    "卡片" to "${exported.cards} 张",
+                    "账目" to "${exported.transactions} 笔",
+                ),
+                note = "请把备份文件存到安全的地方。恢复时需要现在的主密码。",
+            )
         } catch (e: WrongSecretException) {
             dialogError = "主密码不正确"
         }
@@ -129,8 +154,18 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
     fun import(source: Uri, password: String, onDone: () -> Unit) = launchBusy {
         try {
             val summary = container.backup.import(source, password)
-            container.messages.show("导入完成：新增 ${summary.added}，更新 ${summary.updated}，跳过 ${summary.skipped}")
             onDone()
+            result = OperationResult(
+                title = "导入完成",
+                lines = buildList {
+                    add("新增卡片" to "${summary.added} 张")
+                    add("更新卡片" to "${summary.updated} 张")
+                    add("跳过（本机较新或相同）" to "${summary.skipped} 张")
+                    add("账本新增 / 更新" to "${summary.ledgerAdded} / ${summary.ledgerUpdated} 条")
+                    if (summary.ledgerSuppressed > 0) add("已删除、未加回" to "${summary.ledgerSuppressed} 条")
+                },
+                note = "导入只合并，不会删除本机已有的卡片或账目。",
+            )
         } catch (e: WrongSecretException) {
             dialogError = e.message
         } catch (e: BackupFormatException) {
@@ -163,6 +198,9 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
     }
 }
 
+/** 一次操作的结果：标题、若干“名称—数值”行与一句说明。 */
+class OperationResult(val title: String, val lines: List<Pair<String, String>>, val note: String? = null)
+
 private sealed interface SettingsDialog {
     data object AutoLock : SettingsDialog
     data object Clipboard : SettingsDialog
@@ -172,6 +210,8 @@ private sealed interface SettingsDialog {
     data class Export(val target: Uri) : SettingsDialog
     data class Import(val source: Uri) : SettingsDialog
     data object Wipe : SettingsDialog
+    data object RemovePin : SettingsDialog
+    data class OtpBatch(val batch: com.xiguli.jinkui.core.qr.MigrationBatch) : SettingsDialog
 }
 
 @Composable
@@ -197,193 +237,75 @@ fun SettingsScreen(onBack: () -> Unit) {
     val importPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         if (uri != null) dialog = SettingsDialog.Import(uri)
     }
+    // 身份验证器的导出二维码：从相册 / 文件选一张截图，离线识别（不需要相机或存储权限）
+    val scope = rememberCoroutineScope()
+    var scanningOtp by remember { mutableStateOf(false) }
+    val otpPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scanningOtp = true
+        scope.launch {
+            val read = runCatching { QrImageReader.read(context, uri) }
+            scanningOtp = false
+            read.exceptionOrNull()?.let {
+                container.messages.show(it.message ?: "无法读取这张图片")
+                return@launch
+            }
+            when (val parsed = OtpQr.interpret(read.getOrNull())) {
+                is OtpQrResult.Batch -> dialog = SettingsDialog.OtpBatch(parsed.batch)
+                is OtpQrResult.Ok -> dialog = SettingsDialog.OtpBatch(OtpMigration.single(parsed.uri))
+                is OtpQrResult.Rejected -> container.messages.show(parsed.message)
+            }
+        }
+    }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .statusBarsPadding(),
-    ) {
-        JkTopBar(title = "设置", onBack = onBack)
-        Column(
-            modifier = Modifier
-                .weight(1f)
-                .verticalScroll(rememberScrollState())
-                .navigationBarsPadding()
-                .padding(horizontal = Space.x2_5)
-                .padding(top = Space.x05, bottom = Space.x5),
-        ) {
-            JkCard(Modifier.fillMaxWidth(), padding = PaddingValues(Space.x2_5)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    BrandMark(size = 48.dp)
-                    Spacer(Modifier.width(Space.x2))
-                    Column {
-                        Text("金匮", style = JkType.brand.copy(fontSize = JkType.title.fontSize), color = colors.textPrimary)
-                        Text("数据只保存在这台设备上", style = JkType.small, color = colors.textTertiary)
+    SettingsContent(
+        settings = settings,
+        biometricAvailable = biometricAvailable,
+        biometricEnabled = viewModel.biometricEnabled,
+        pinEnabled = viewModel.pinEnabled,
+        scanningOtp = scanningOtp,
+        version = versionName(context),
+        actions = SettingsActions(
+            onBack = onBack,
+            onUpdate = { change -> container.settings.update(change) },
+            onAutoLock = { dialog = SettingsDialog.AutoLock },
+            onBiometric = { enable ->
+                if (!enable) {
+                    viewModel.disableBiometric()
+                } else {
+                    val activity = context.findFragmentActivity()
+                    if (activity != null) {
+                        enrollBiometric(activity, container.vault) { _, message ->
+                            viewModel.refreshUnlockMethods()
+                            if (message != null) container.messages.show(message)
+                        }
                     }
                 }
-                Spacer(Modifier.height(Space.x2))
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(Space.x1),
-                    verticalArrangement = Arrangement.spacedBy(Space.x1),
-                ) {
-                    JkBadge("全程离线", Icons.Outlined.CloudOff)
-                    JkBadge("双层加密", Icons.Outlined.Shield)
-                    JkBadge("${SettingsRepository.autoLockLabel(settings.autoLockSeconds)}自动锁定", Icons.Outlined.Timer)
-                    if (settings.wipeOnFailure) JkBadge("输错自毁已开启", Icons.Outlined.WarningAmber)
+            },
+            onPin = { dialog = if (viewModel.pinEnabled) SettingsDialog.PinManage else SettingsDialog.PinSetup },
+            onChangePassword = { dialog = SettingsDialog.ChangePassword },
+            onClipboard = { dialog = SettingsDialog.Clipboard },
+            onExport = {
+                container.lock.holdForExternalActivity()
+                exportPicker.launch(container.backup.suggestedFileName())
+            },
+            onImport = {
+                container.lock.holdForExternalActivity()
+                importPicker.launch(arrayOf("*/*"))
+            },
+            onImportOtp = {
+                if (!scanningOtp) {
+                    container.lock.holdForExternalActivity()
+                    otpPicker.launch("image/*")
                 }
-            }
+            },
+            onLockNow = { container.vault.lock() },
+            onWipe = { dialog = SettingsDialog.Wipe },
+        ),
+    )
 
-            JkSectionLabel("解锁与锁定")
-            JkCard(Modifier.fillMaxWidth(), padding = PaddingValues(vertical = Space.x05)) {
-                JkRow(
-                    title = "自动锁定",
-                    subtitle = "切到后台或长时间无操作后锁定",
-                    icon = Icons.Outlined.Timer,
-                    value = SettingsRepository.autoLockLabel(settings.autoLockSeconds),
-                    onClick = { dialog = SettingsDialog.AutoLock },
-                )
-                JkDivider(inset = Space.x6 + Space.x05)
-                JkRow(
-                    title = "生物识别解锁",
-                    subtitle = if (biometricAvailable) "用指纹或面容打开金匮" else "设备未录入指纹或面容",
-                    icon = Icons.Outlined.Fingerprint,
-                    trailing = {
-                        JkSwitch(
-                            checked = viewModel.biometricEnabled,
-                            enabled = biometricAvailable || viewModel.biometricEnabled,
-                            onCheckedChange = { enable ->
-                                if (!enable) {
-                                    viewModel.disableBiometric()
-                                } else {
-                                    val activity = context.findFragmentActivity()
-                                    if (activity != null) {
-                                        enrollBiometric(activity, container.vault) { _, message ->
-                                            viewModel.refreshUnlockMethods()
-                                            if (message != null) container.messages.show(message)
-                                        }
-                                    }
-                                }
-                            },
-                        )
-                    },
-                )
-                JkDivider(inset = Space.x6 + Space.x05)
-                JkRow(
-                    title = "PIN 解锁",
-                    subtitle = "生物识别不可用时的备用方式",
-                    icon = Icons.Outlined.Dialpad,
-                    value = if (viewModel.pinEnabled) "已设置" else "未设置",
-                    onClick = {
-                        dialog = if (viewModel.pinEnabled) SettingsDialog.PinManage else SettingsDialog.PinSetup
-                    },
-                )
-                JkDivider(inset = Space.x6 + Space.x05)
-                JkRow(
-                    title = "修改主密码",
-                    icon = Icons.Outlined.Password,
-                    onClick = { dialog = SettingsDialog.ChangePassword },
-                )
-            }
-
-            JkSectionLabel("数据保护")
-            JkCard(Modifier.fillMaxWidth(), padding = PaddingValues(vertical = Space.x05)) {
-                JkRow(
-                    title = "输错自毁",
-                    subtitle = "连续输错主密码或 PIN 达 ${VaultManager.MAX_ATTEMPTS} 次，将永久清空本机全部数据，无法恢复。默认开启；开启时请务必保留一份加密备份。",
-                    icon = Icons.Outlined.WarningAmber,
-                    trailing = {
-                        JkSwitch(
-                            checked = settings.wipeOnFailure,
-                            onCheckedChange = { on -> container.settings.update { it.copy(wipeOnFailure = on) } },
-                        )
-                    },
-                )
-                JkDivider(inset = Space.x6 + Space.x05)
-                JkRow(
-                    title = "剪贴板自动清空",
-                    subtitle = "复制的内容到时间后从剪贴板移除",
-                    icon = Icons.Outlined.ContentPaste,
-                    value = SettingsRepository.clipboardLabel(settings.clipboardSeconds),
-                    onClick = { dialog = SettingsDialog.Clipboard },
-                )
-                JkDivider(inset = Space.x6 + Space.x05)
-                JkRow(
-                    title = "记录历史密码",
-                    subtitle = "敏感字段被修改时保留旧值",
-                    icon = Icons.Outlined.History,
-                    trailing = {
-                        JkSwitch(
-                            checked = settings.keepHistory,
-                            onCheckedChange = { on -> container.settings.update { it.copy(keepHistory = on) } },
-                        )
-                    },
-                )
-            }
-
-            JkSectionLabel("外观")
-            JkSegmented(
-                options = ThemeMode.entries.map { it to it.label },
-                selected = settings.theme,
-                onSelect = { mode -> container.settings.update { it.copy(theme = mode) } },
-            )
-
-            JkSectionLabel("加密备份")
-            JkCard(Modifier.fillMaxWidth(), padding = PaddingValues(vertical = Space.x05)) {
-                JkRow(
-                    title = "导出加密备份",
-                    subtitle = if (settings.lastBackupAt > 0L) {
-                        "上次备份：${formatTime(settings.lastBackupAt)}"
-                    } else {
-                        "还没有备份过。生成的 .jkbak 文件需要主密码才能解开"
-                    },
-                    icon = Icons.Outlined.FileUpload,
-                    onClick = {
-                        container.lock.holdForExternalActivity()
-                        exportPicker.launch(container.backup.suggestedFileName())
-                    },
-                )
-                JkDivider(inset = Space.x6 + Space.x05)
-                JkRow(
-                    title = "导入加密备份",
-                    subtitle = "校验完整性后合并到本机，不会删除已有卡片",
-                    icon = Icons.Outlined.FileDownload,
-                    onClick = {
-                        container.lock.holdForExternalActivity()
-                        importPicker.launch(arrayOf("*/*"))
-                    },
-                )
-            }
-            Text(
-                "金匮不提供明文导出。备份文件用主密码加密（AES-256-GCM），被改动过的文件无法导入。",
-                style = JkType.caption,
-                color = colors.textTertiary,
-                modifier = Modifier.padding(start = Space.x05, top = Space.x1),
-            )
-
-            JkSectionLabel("其他")
-            JkCard(Modifier.fillMaxWidth(), padding = PaddingValues(vertical = Space.x05)) {
-                JkRow(
-                    title = "立即锁定",
-                    icon = Icons.Outlined.Lock,
-                    onClick = { container.vault.lock() },
-                    trailing = {},
-                )
-                JkDivider(inset = Space.x6 + Space.x05)
-                JkRow(
-                    title = "清空全部数据",
-                    subtitle = "删除本机所有卡片、附件与密钥",
-                    icon = Icons.Outlined.DeleteForever,
-                    danger = true,
-                    onClick = { dialog = SettingsDialog.Wipe },
-                )
-            }
-            Text(
-                "金匮 ${versionName(context)}　全程离线：未申请任何联网权限",
-                style = JkType.caption,
-                color = colors.textTertiary,
-                modifier = Modifier.padding(start = Space.x05, top = Space.x2),
-            )
-        }
+    viewModel.result?.let { done ->
+        ResultDialog(done, onDismiss = { viewModel.result = null })
     }
 
     when (val current = dialog) {
@@ -423,13 +345,23 @@ fun SettingsScreen(onBack: () -> Unit) {
                 title = "移除 PIN",
                 icon = Icons.Outlined.DeleteForever,
                 danger = true,
-                onClick = {
-                    viewModel.removePin()
-                    close()
-                },
+                onClick = { dialog = SettingsDialog.RemovePin },
                 modifier = Modifier.clip(Radius.control),
             )
         }
+        SettingsDialog.RemovePin -> JkDialog(
+            title = "移除 PIN？",
+            onDismiss = close,
+            confirmText = "移除",
+            danger = true,
+            onConfirm = {
+                viewModel.removePin()
+                close()
+            },
+        ) {
+            Text("移除后只能用主密码或生物识别解锁。之后可以随时重新设置。", style = JkType.body, color = colors.textSecondary)
+        }
+        is SettingsDialog.OtpBatch -> OtpBatchSheet(current.batch, onDismiss = close)
         SettingsDialog.ChangePassword -> ChangePasswordDialog(viewModel, close)
         is SettingsDialog.Export -> PasswordDialog(
             title = "导出加密备份",
@@ -453,13 +385,267 @@ fun SettingsScreen(onBack: () -> Unit) {
         )
         SettingsDialog.Wipe -> PasswordDialog(
             title = "清空全部数据？",
-            message = "本机所有卡片、附件照片与密钥将被永久删除，无法恢复。输入主密码确认。",
+            message = "本机所有卡片、附件照片、账本记录与密钥将被永久删除，无法恢复。输入主密码确认。",
             confirmText = "永久清空",
             danger = true,
             viewModel = viewModel,
             onDismiss = close,
             onConfirm = { password -> viewModel.wipe(password) },
         )
+    }
+}
+
+/** 设置页的所有操作；默认空实现，方便截图测试只传关心的回调。 */
+class SettingsActions(
+    val onBack: () -> Unit = {},
+    /** 直接改一项非敏感偏好（主题、开关等）。 */
+    val onUpdate: ((AppSettings) -> AppSettings) -> Unit = {},
+    val onAutoLock: () -> Unit = {},
+    val onBiometric: (Boolean) -> Unit = {},
+    val onPin: () -> Unit = {},
+    val onChangePassword: () -> Unit = {},
+    val onClipboard: () -> Unit = {},
+    val onExport: () -> Unit = {},
+    val onImport: () -> Unit = {},
+    val onImportOtp: () -> Unit = {},
+    val onLockNow: () -> Unit = {},
+    val onWipe: () -> Unit = {},
+)
+
+/**
+ * 设置页内容（无状态）：只读传入的设置与解锁方式状态，所有操作经 [actions] 交给外层。
+ * 不碰数据库、密钥与文件选择器，界面测试可以直接渲染。
+ */
+@Composable
+fun SettingsContent(
+    settings: AppSettings,
+    biometricAvailable: Boolean,
+    biometricEnabled: Boolean,
+    pinEnabled: Boolean,
+    scanningOtp: Boolean,
+    version: String,
+    actions: SettingsActions,
+) {
+    val colors = Jk.colors
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .statusBarsPadding(),
+    ) {
+        JkTopBar(title = "设置", onBack = actions.onBack)
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .verticalScroll(rememberScrollState())
+                .navigationBarsPadding()
+                .padding(horizontal = Space.x2_5)
+                .padding(top = Space.x05, bottom = Space.x5),
+        ) {
+            JkCard(Modifier.fillMaxWidth(), padding = PaddingValues(Space.x2_5)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    BrandMark(size = 48.dp)
+                    Spacer(Modifier.width(Space.x2))
+                    Column {
+                        Text("金匮", style = JkType.brand.copy(fontSize = JkType.title.fontSize), color = colors.textPrimary)
+                        Text("数据只保存在这台设备上", style = JkType.small, color = colors.textTertiary)
+                    }
+                }
+                Spacer(Modifier.height(Space.x2))
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(Space.x1),
+                    verticalArrangement = Arrangement.spacedBy(Space.x1),
+                ) {
+                    JkBadge("全程离线", Icons.Outlined.CloudOff)
+                    JkBadge("双层加密", Icons.Outlined.Shield)
+                    JkBadge("${SettingsRepository.autoLockLabel(settings.autoLockSeconds)}自动锁定", Icons.Outlined.Timer)
+                    if (settings.wipeOnFailure) JkBadge("输错自毁已开启", Icons.Outlined.WarningAmber)
+                }
+            }
+
+            JkSectionLabel("解锁与锁定")
+            JkCard(Modifier.fillMaxWidth(), padding = PaddingValues(vertical = Space.x05)) {
+                JkRow(
+                    title = "自动锁定",
+                    subtitle = "切到后台或长时间无操作后锁定",
+                    icon = Icons.Outlined.Timer,
+                    value = SettingsRepository.autoLockLabel(settings.autoLockSeconds),
+                    onClick = actions.onAutoLock,
+                )
+                JkDivider(inset = Space.x6 + Space.x05)
+                JkRow(
+                    title = "生物识别解锁",
+                    subtitle = if (biometricAvailable) "用指纹或面容打开金匮" else "设备未录入指纹或面容",
+                    icon = Icons.Outlined.Fingerprint,
+                    trailing = {
+                        JkSwitch(
+                            checked = biometricEnabled,
+                            enabled = biometricAvailable || biometricEnabled,
+                            onCheckedChange = actions.onBiometric,
+                        )
+                    },
+                )
+                JkDivider(inset = Space.x6 + Space.x05)
+                JkRow(
+                    title = "PIN 解锁",
+                    subtitle = "生物识别不可用时的备用方式",
+                    icon = Icons.Outlined.Dialpad,
+                    value = if (pinEnabled) "已设置" else "未设置",
+                    onClick = actions.onPin,
+                )
+                JkDivider(inset = Space.x6 + Space.x05)
+                JkRow(
+                    title = "修改主密码",
+                    icon = Icons.Outlined.Password,
+                    onClick = actions.onChangePassword,
+                )
+            }
+
+            JkSectionLabel("数据保护")
+            JkCard(Modifier.fillMaxWidth(), padding = PaddingValues(vertical = Space.x05)) {
+                JkRow(
+                    title = "输错自毁",
+                    subtitle = "连续输错主密码或 PIN 达 ${VaultManager.MAX_ATTEMPTS} 次，将永久清空本机全部数据，无法恢复。默认开启；开启时请务必保留一份加密备份。",
+                    icon = Icons.Outlined.WarningAmber,
+                    trailing = {
+                        JkSwitch(
+                            checked = settings.wipeOnFailure,
+                            onCheckedChange = { on -> actions.onUpdate { it.copy(wipeOnFailure = on) } },
+                        )
+                    },
+                )
+                JkDivider(inset = Space.x6 + Space.x05)
+                JkRow(
+                    title = "剪贴板自动清空",
+                    subtitle = "复制的内容到时间后从剪贴板移除",
+                    icon = Icons.Outlined.ContentPaste,
+                    value = SettingsRepository.clipboardLabel(settings.clipboardSeconds),
+                    onClick = actions.onClipboard,
+                )
+                JkDivider(inset = Space.x6 + Space.x05)
+                JkRow(
+                    title = "记录历史密码",
+                    subtitle = "敏感字段被修改时保留旧值",
+                    icon = Icons.Outlined.History,
+                    trailing = {
+                        JkSwitch(
+                            checked = settings.keepHistory,
+                            onCheckedChange = { on -> actions.onUpdate { it.copy(keepHistory = on) } },
+                        )
+                    },
+                )
+            }
+
+            JkSectionLabel("外观")
+            JkSegmented(
+                options = ThemeMode.entries.map { it to it.label },
+                selected = settings.theme,
+                onSelect = { mode -> actions.onUpdate { it.copy(theme = mode) } },
+            )
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                Spacer(Modifier.height(Space.x1))
+                JkCard(Modifier.fillMaxWidth(), padding = PaddingValues(vertical = Space.x05)) {
+                    JkRow(
+                        title = "跟随壁纸取色",
+                        subtitle = "品牌色改用系统的 Material You 配色；关闭时为金匮薄荷绿",
+                        icon = Icons.Outlined.Palette,
+                        trailing = {
+                            JkSwitch(
+                                checked = settings.dynamicColor,
+                                onCheckedChange = { on -> actions.onUpdate { it.copy(dynamicColor = on) } },
+                            )
+                        },
+                    )
+                }
+            }
+
+            JkSectionLabel("加密备份")
+            JkCard(Modifier.fillMaxWidth(), padding = PaddingValues(vertical = Space.x05)) {
+                JkRow(
+                    title = "导出加密备份",
+                    subtitle = if (settings.lastBackupAt > 0L) {
+                        "上次备份：${formatTime(settings.lastBackupAt)}"
+                    } else {
+                        "还没有备份过。生成的 .jkbak 文件需要主密码才能解开"
+                    },
+                    icon = Icons.Outlined.FileUpload,
+                    onClick = actions.onExport,
+                )
+                JkDivider(inset = Space.x6 + Space.x05)
+                JkRow(
+                    title = "导入加密备份",
+                    subtitle = "校验完整性后合并到本机，不会删除已有卡片",
+                    icon = Icons.Outlined.FileDownload,
+                    onClick = actions.onImport,
+                )
+            }
+            Text(
+                "金匮不提供明文导出。备份文件用主密码加密（AES-256-GCM），被改动过的文件无法导入。",
+                style = JkType.caption,
+                color = colors.textTertiary,
+                modifier = Modifier.padding(start = Space.x05, top = Space.x1),
+            )
+
+            JkSectionLabel("两步验证码")
+            JkCard(Modifier.fillMaxWidth(), padding = PaddingValues(vertical = Space.x05)) {
+                JkRow(
+                    title = if (scanningOtp) "正在识别二维码…" else "从身份验证器导入",
+                    subtitle = "选一张 Google 身份验证器“导出账号”的二维码截图，预览后选择要添加的账号",
+                    icon = Icons.Outlined.QrCode2,
+                    onClick = actions.onImportOtp,
+                )
+            }
+
+            JkSectionLabel("其他")
+            JkCard(Modifier.fillMaxWidth(), padding = PaddingValues(vertical = Space.x05)) {
+                JkRow(
+                    title = "立即锁定",
+                    icon = Icons.Outlined.Lock,
+                    onClick = actions.onLockNow,
+                    trailing = {},
+                )
+                JkDivider(inset = Space.x6 + Space.x05)
+                JkRow(
+                    title = "清空全部数据",
+                    subtitle = "删除本机所有卡片、附件、账本与密钥",
+                    icon = Icons.Outlined.DeleteForever,
+                    danger = true,
+                    onClick = actions.onWipe,
+                )
+            }
+            Text(
+                "金匮 $version　全程离线：未申请任何联网权限",
+                style = JkType.caption,
+                color = colors.textTertiary,
+                modifier = Modifier.padding(start = Space.x05, top = Space.x2),
+            )
+        }
+    }
+
+}
+
+/** 导出 / 导入的结果：一个对勾、标题与逐行明细，数字用等宽字形对齐。 */
+@Composable
+private fun ResultDialog(result: OperationResult, onDismiss: () -> Unit) {
+    val colors = Jk.colors
+    JkDialog(title = result.title, onDismiss = onDismiss, confirmText = "好", onConfirm = onDismiss, dismissText = null) {
+        Box(
+            modifier = Modifier
+                .size(JkSize.chip)
+                .clip(CircleShape)
+                .background(colors.incomeSoft),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.Outlined.Check, contentDescription = null, tint = colors.income, modifier = Modifier.size(JkSize.icon))
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(Space.x05)) {
+            for ((label, value) in result.lines) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(label, style = JkType.small, color = colors.textSecondary, modifier = Modifier.weight(1f))
+                    Text(value, style = JkType.amountSmall, color = colors.textPrimary)
+                }
+            }
+        }
+        if (result.note != null) Text(result.note, style = JkType.caption, color = colors.textTertiary)
     }
 }
 
@@ -522,6 +708,7 @@ private fun PasswordDialog(
             placeholder = "主密码",
             secret = true,
             imeAction = ImeAction.Done,
+            onImeAction = { if (password.isNotEmpty() && !viewModel.busy) onConfirm(password) },
             error = viewModel.dialogError,
         )
         if (viewModel.busy) {

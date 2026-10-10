@@ -1,7 +1,21 @@
 package com.xiguli.jinkui.ui.components
 
+import com.xiguli.jinkui.ui.theme.segmentSelected
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.slideInVertically
+import androidx.compose.material3.minimumInteractiveComponentSize
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.heading
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -131,18 +145,22 @@ fun JkIconButton(
     tint: Color = Jk.colors.textSecondary,
     enabled: Boolean = true,
 ) {
+    // 48dp 触控区（无障碍最小值）；图标仍是 22dp
     Box(
         modifier = modifier
-            .size(44.dp)
+            .size(com.xiguli.jinkui.ui.theme.JkSize.touch)
             .clip(CircleShape)
-            .clickable(enabled = enabled, onClick = onClick),
+            .clickable(enabled = enabled, role = androidx.compose.ui.semantics.Role.Button, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(icon, contentDescription = description, tint = tint, modifier = Modifier.size(22.dp))
+        Icon(icon, contentDescription = description, tint = if (enabled) tint else tint.copy(alpha = 0.4f), modifier = Modifier.size(22.dp))
     }
 }
 
-/** 白底、1dp 极淡描边、24dp 圆角的容器；不使用投影。 */
+/**
+ * 分组容器：白底（深色为抬高一档的炭灰）、20dp 圆角，不画描边也不用投影——
+ * 和页面底色本身就分得开，少一圈线，页面更安静。
+ */
 @Composable
 fun JkCard(
     modifier: Modifier = Modifier,
@@ -153,7 +171,6 @@ fun JkCard(
         modifier = modifier
             .clip(Radius.card)
             .background(Jk.colors.surface)
-            .border(1.dp, Jk.colors.border, Radius.card)
             .padding(padding),
         content = content,
     )
@@ -172,11 +189,14 @@ fun JkDivider(modifier: Modifier = Modifier, inset: Dp = 0.dp) {
 
 @Composable
 fun JkSectionLabel(text: String, modifier: Modifier = Modifier) {
+    // 与详情页、编辑页同一种眉题；读屏当作小节标题
     Text(
         text = text,
-        style = JkType.small,
+        style = JkType.overline,
         color = Jk.colors.textTertiary,
-        modifier = modifier.padding(start = Space.x05, top = Space.x3, bottom = Space.x1),
+        modifier = modifier
+            .padding(start = Space.x05, top = Space.x3, bottom = Space.x1)
+            .semantics { heading() },
     )
 }
 
@@ -199,14 +219,14 @@ fun JkButton(
     val background = when (style) {
         ButtonStyle.Primary -> colors.primary
         ButtonStyle.Danger -> colors.dangerSoft
-        ButtonStyle.Secondary -> colors.surface
+        ButtonStyle.Secondary -> colors.accentSoft
         ButtonStyle.Ghost -> Color.Transparent
     }
     val foreground = when (style) {
         ButtonStyle.Primary -> colors.onPrimary
         ButtonStyle.Danger -> colors.danger
-        ButtonStyle.Secondary -> colors.textPrimary
-        ButtonStyle.Ghost -> colors.textSecondary
+        ButtonStyle.Secondary -> colors.accent
+        ButtonStyle.Ghost -> colors.accent
     }
     val active = enabled && !loading
     // 按压反馈：按下时轻微缩小，松手回弹。
@@ -220,11 +240,9 @@ fun JkButton(
                 scaleY = scale
             }
             .heightIn(min = if (compact) 36.dp else 48.dp)
-            .clip(Radius.control)
-            .background(if (active || style != ButtonStyle.Primary) background else colors.textTertiary)
-            .then(
-                if (style == ButtonStyle.Secondary) Modifier.border(1.dp, colors.border, Radius.control) else Modifier,
-            )
+            .clip(Radius.pill)
+            // 不可用的主按钮退成浅灰底 + 三级文字，不再是一大块深灰
+            .background(if (active || style != ButtonStyle.Primary) background else colors.surfaceAlt)
             .clickable(interactionSource = interaction, indication = LocalIndication.current, enabled = active, onClick = onClick)
             .padding(horizontal = if (compact) Space.x1_5 else Space.x2_5),
         horizontalArrangement = Arrangement.Center,
@@ -244,7 +262,7 @@ fun JkButton(
         Text(
             text = text,
             style = if (compact) JkType.small else JkType.bodyStrong,
-            color = if (active || style == ButtonStyle.Primary) foreground else colors.textTertiary,
+            color = if (active) foreground else colors.textTertiary,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
@@ -470,6 +488,10 @@ fun JkSwitch(checked: Boolean, onCheckedChange: (Boolean) -> Unit, enabled: Bool
     )
 }
 
+/**
+ * 小标签 / 筛选项。视觉上仍是 32dp 高，但布局与触控区补足到 48dp（minimumInteractiveComponentSize），
+ * 相邻两枚之间不会抢点；选中态用 semantics 告诉读屏。
+ */
 @Composable
 fun JkChip(
     text: String,
@@ -478,20 +500,24 @@ fun JkChip(
     modifier: Modifier = Modifier,
 ) {
     val colors = Jk.colors
+    // 未选中是浅灰底、无描边；选中换成品牌浅底 + 品牌色字，比整块墨黑更安静
+    val background by animateColorAsState(if (selected) colors.accentSoft else colors.surfaceAlt, tween(160), label = "chipBg")
+    val content by animateColorAsState(if (selected) colors.accent else colors.textSecondary, tween(160), label = "chipText")
     Box(
         modifier = modifier
+            .minimumInteractiveComponentSize()
             .height(32.dp)
             .clip(Radius.chip)
-            .background(if (selected) colors.primary else colors.surface)
-            .border(BorderStroke(1.dp, if (selected) colors.primary else colors.border), Radius.chip)
+            .background(background)
             .clickable(onClick = onClick)
+            .semantics { this.selected = selected }
             .padding(horizontal = Space.x1_5),
         contentAlignment = Alignment.Center,
     ) {
         Text(
             text = text,
-            style = JkType.small,
-            color = if (selected) colors.onPrimary else colors.textSecondary,
+            style = if (selected) JkType.small.copy(fontWeight = FontWeight.Medium) else JkType.small,
+            color = content,
             maxLines = 1,
         )
     }
@@ -509,7 +535,7 @@ fun <T> JkSegmented(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .clip(Radius.control)
+            .clip(Radius.pill)
             .background(colors.surfaceAlt)
             .padding(Space.x05),
         horizontalArrangement = Arrangement.spacedBy(Space.x05),
@@ -519,11 +545,10 @@ fun <T> JkSegmented(
             Box(
                 modifier = Modifier
                     .weight(1f)
-                    .height(36.dp)
-                    .clip(Radius.chip)
-                    .background(if (active) colors.surface else Color.Transparent)
-                    .then(if (active) Modifier.border(1.dp, colors.border, Radius.chip) else Modifier)
-                    .clickable { onSelect(value) },
+                    .heightIn(min = 36.dp)
+                    .clip(Radius.pill)
+                    .background(if (active) colors.segmentSelected else Color.Transparent)
+                    .selectable(selected = active, role = androidx.compose.ui.semantics.Role.Tab, onClick = { onSelect(value) }),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
@@ -605,12 +630,18 @@ fun JkSheet(
                 ),
             contentAlignment = Alignment.BottomCenter,
         ) {
+            // 只做进入动画（从底部滑上来）；关闭时立刻移除，面板里的明文不多停留一帧。
+            var shown by remember { mutableStateOf(false) }
+            LaunchedEffect(Unit) { shown = true }
+            AnimatedVisibility(
+                visible = shown,
+                enter = slideInVertically(spring(dampingRatio = 0.9f, stiffness = 520f)) { it / 2 } + fadeIn(tween(140)),
+            ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(Radius.sheet)
                     .background(Jk.colors.surface)
-                    .border(1.dp, Jk.colors.border, Radius.sheet)
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
@@ -641,20 +672,27 @@ fun JkSheet(
                 }
                 content()
             }
+            }
         }
     }
 }
 
 /** 页面中央的空状态 / 说明。 */
 @Composable
-fun JkEmpty(title: String, message: String, modifier: Modifier = Modifier, action: (@Composable () -> Unit)? = null) {
+fun JkEmpty(
+    title: String,
+    message: String,
+    modifier: Modifier = Modifier,
+    illustration: @Composable () -> Unit = { EmptyIllustration() },
+    action: (@Composable () -> Unit)? = null,
+) {
     Column(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = Space.x4, vertical = Space.x6),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        EmptyIllustration()
+        illustration()
         Spacer(Modifier.height(Space.x2_5))
         Text(title, style = JkType.heading, color = Jk.colors.textPrimary)
         Spacer(Modifier.height(Space.x1))
@@ -740,5 +778,40 @@ fun JkCheck(checked: Boolean, modifier: Modifier = Modifier) {
         contentAlignment = Alignment.Center,
     ) {
         if (checked) Icon(Icons.Outlined.Check, contentDescription = null, tint = colors.onPrimary, modifier = Modifier.size(15.dp))
+    }
+}
+
+/** 搜索 / 筛选无结果的插画：一张空白卡位，上面压着一只放大镜。只用描边与品牌色。 */
+@Composable
+fun SearchEmptyIllustration(modifier: Modifier = Modifier) {
+    val line = Jk.colors.border
+    val fill = Jk.colors.surface
+    val soft = Jk.colors.surfaceAlt
+    val accent = Jk.colors.accent
+    val muted = Jk.colors.textTertiary
+    Canvas(modifier.size(width = 132.dp, height = 96.dp)) {
+        val u = size.width / 132f // 按实际尺寸等比缩放
+        val stroke = Stroke(width = 1.4f * u)
+        val corner = CornerRadius(14f * u, 14f * u)
+        // 卡位：浅底 + 虚化的两行“文字”
+        val cardTop = 12f * u
+        val cardSize = Size(100f * u, 64f * u)
+        drawRoundRect(color = soft, topLeft = Offset(4f * u, cardTop), size = cardSize, cornerRadius = corner)
+        drawRoundRect(color = line, topLeft = Offset(4f * u, cardTop), size = cardSize, cornerRadius = corner, style = stroke)
+        drawLine(color = line, start = Offset(18f * u, cardTop + 40f * u), end = Offset(58f * u, cardTop + 40f * u), strokeWidth = 3f * u, cap = StrokeCap.Round)
+        drawLine(color = line, start = Offset(18f * u, cardTop + 50f * u), end = Offset(40f * u, cardTop + 50f * u), strokeWidth = 3f * u, cap = StrokeCap.Round)
+        // 放大镜：白底镜片、品牌色镜框与手柄，镜片里一道问号似的短弧
+        val center = Offset(92f * u, 50f * u)
+        val r = 20f * u
+        drawCircle(color = fill, radius = r, center = center)
+        drawCircle(color = accent, radius = r, center = center, style = Stroke(width = 3f * u))
+        drawLine(
+            color = accent,
+            start = Offset(center.x + r * 0.72f, center.y + r * 0.72f),
+            end = Offset(center.x + r * 1.45f, center.y + r * 1.45f),
+            strokeWidth = 5f * u,
+            cap = StrokeCap.Round,
+        )
+        drawLine(color = muted, start = Offset(center.x - 8f * u, center.y), end = Offset(center.x + 8f * u, center.y), strokeWidth = 2.4f * u, cap = StrokeCap.Round)
     }
 }

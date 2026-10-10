@@ -24,7 +24,16 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 
-class ImportSummary(val added: Int, val updated: Int, val skipped: Int)
+class ImportSummary(
+    val added: Int,
+    val updated: Int,
+    val skipped: Int,
+    /** 账本里新增 / 更新的记录数（账户、分类、流水、预算合计）。 */
+    val ledgerAdded: Int = 0,
+    val ledgerUpdated: Int = 0,
+    /** 因为删除标记而没有加回来的账本记录数（删掉的周期生成流水 / 周期规则）。 */
+    val ledgerSuppressed: Int = 0,
+)
 
 /**
  * 卡片仓库。解锁后把全部卡片解密到内存供搜索与展示，锁定时整体丢弃。

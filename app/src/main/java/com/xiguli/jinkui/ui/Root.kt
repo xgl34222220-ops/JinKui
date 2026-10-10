@@ -39,6 +39,18 @@ import com.xiguli.jinkui.ui.card.CardEditScreen
 import com.xiguli.jinkui.ui.components.LocalUserActivity
 import com.xiguli.jinkui.ui.health.HealthScreen
 import com.xiguli.jinkui.ui.home.HomeScreen
+import com.xiguli.jinkui.ui.nav.HomeTabs
+import com.xiguli.jinkui.ui.ledger.CalendarScreen
+import com.xiguli.jinkui.ui.ledger.LedgerAssetsScreen
+import com.xiguli.jinkui.ui.me.MeActions
+import com.xiguli.jinkui.ui.me.MeScreen
+import com.xiguli.jinkui.ui.ledger.LedgerAccountsScreen
+import com.xiguli.jinkui.ui.ledger.LedgerBudgetScreen
+import com.xiguli.jinkui.ui.ledger.LedgerCategoriesScreen
+import com.xiguli.jinkui.ui.ledger.LedgerRecurringScreen
+import com.xiguli.jinkui.ui.ledger.LedgerScreen
+import com.xiguli.jinkui.ui.ledger.LedgerStatsScreen
+import com.xiguli.jinkui.ui.nav.HomeTab
 import com.xiguli.jinkui.ui.organize.OrganizeScreen
 import com.xiguli.jinkui.ui.lock.LockScreen
 import com.xiguli.jinkui.ui.nav.Navigator
@@ -62,7 +74,7 @@ fun JinKuiRoot(container: AppContainer) {
     val state by container.vault.state.collectAsStateWithLifecycle()
     val touch: () -> Unit = remember(container) { { container.lock.touch() } }
 
-    JinKuiTheme(settings.theme) {
+    JinKuiTheme(settings.theme, dynamicColor = settings.dynamicColor) {
         CompositionLocalProvider(
             LocalContainer provides container,
             LocalUserActivity provides touch,
@@ -103,13 +115,44 @@ private fun MainNavigation() {
         key(entry.id) {
             ScreenEnter {
             when (val screen = entry.screen) {
-                Screen.Home -> HomeScreen(
-                    onOpen = { navigator.push(Screen.Detail(it)) },
-                    onCreate = { navigator.push(Screen.Edit(null, it)) },
-                    onSettings = { navigator.push(Screen.Settings) },
-                    onHealth = { navigator.push(Screen.Health) },
-                    onOrganize = { navigator.push(Screen.Organize) },
-                )
+                Screen.Home -> HomeTabs(
+                    selected = navigator.homeTab,
+                    onSelect = { navigator.homeTab = it },
+                ) { tab ->
+                    when (tab) {
+                        HomeTab.LEDGER -> LedgerScreen(
+                            onAccounts = { navigator.push(Screen.LedgerAccounts) },
+                            onStats = { navigator.homeTab = HomeTab.STATS },
+                            onBudget = { navigator.push(Screen.LedgerBudget) },
+                            onCategories = { navigator.push(Screen.LedgerCategories) },
+                            onRecurring = { navigator.push(Screen.LedgerRecurring) },
+                            onSettings = { navigator.push(Screen.Settings) },
+                            onAssets = { navigator.push(Screen.LedgerAssets) },
+                        )
+                        HomeTab.CALENDAR -> CalendarScreen()
+                        HomeTab.CARDS -> HomeScreen(
+                            onOpen = { navigator.push(Screen.Detail(it)) },
+                            onCreate = { navigator.push(Screen.Edit(null, it)) },
+                            onSettings = { navigator.push(Screen.Settings) },
+                            onHealth = { navigator.push(Screen.Health) },
+                            onOrganize = { navigator.push(Screen.Organize) },
+                        )
+                        HomeTab.STATS -> LedgerStatsScreen()
+                        HomeTab.ME -> MeScreen(
+                            MeActions(
+                                onRecurring = { navigator.push(Screen.LedgerRecurring) },
+                                onBudget = { navigator.push(Screen.LedgerBudget) },
+                                onAssets = { navigator.push(Screen.LedgerAssets) },
+                                onAccounts = { navigator.push(Screen.LedgerAccounts) },
+                                onCategories = { navigator.push(Screen.LedgerCategories) },
+                                onOrganize = { navigator.push(Screen.Organize) },
+                                onBackup = { navigator.push(Screen.Settings) },
+                                onSettings = { navigator.push(Screen.Settings) },
+                                onHealth = { navigator.push(Screen.Health) },
+                            ),
+                        )
+                    }
+                }
                 is Screen.Detail -> CardDetailScreen(
                     cardId = screen.cardId,
                     onBack = { navigator.pop() },
@@ -127,6 +170,14 @@ private fun MainNavigation() {
                     onSettings = { navigator.push(Screen.Settings) },
                 )
                 Screen.Organize -> OrganizeScreen(onBack = { navigator.pop() })
+                Screen.LedgerAccounts -> LedgerAccountsScreen(onBack = { navigator.pop() })
+                Screen.LedgerAssets -> LedgerAssetsScreen(
+                    onBack = { navigator.pop() },
+                    onAccounts = { navigator.push(Screen.LedgerAccounts) },
+                )
+                Screen.LedgerBudget -> LedgerBudgetScreen(onBack = { navigator.pop() })
+                Screen.LedgerCategories -> LedgerCategoriesScreen(onBack = { navigator.pop() })
+                Screen.LedgerRecurring -> LedgerRecurringScreen(onBack = { navigator.pop() })
             }
             }
         }
@@ -179,11 +230,12 @@ private fun BoxScope.MessageHost(bus: MessageBus) {
         Text(
             text = text,
             style = JkType.small,
-            color = Jk.colors.onPrimary,
+            color = Jk.colors.bg,
             modifier = Modifier
+                // 消息条在悬浮底栏之上
+                .padding(bottom = 84.dp)
                 .clip(Radius.control)
-                .background(Jk.colors.primary)
-                .border(1.dp, Jk.colors.border, Radius.control)
+                .background(Jk.colors.textPrimary)
                 .padding(horizontal = Space.x2, vertical = Space.x1_5),
         )
     }

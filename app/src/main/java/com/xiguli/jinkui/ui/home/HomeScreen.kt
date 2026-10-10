@@ -56,6 +56,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.mutableStateOf
@@ -78,6 +79,7 @@ import androidx.lifecycle.viewModelScope
 import com.xiguli.jinkui.AppContainer
 import com.xiguli.jinkui.data.model.Card
 import com.xiguli.jinkui.data.model.CardField
+import com.xiguli.jinkui.data.model.copyText
 import com.xiguli.jinkui.data.model.CardPalette
 import com.xiguli.jinkui.data.model.CardTemplates
 import com.xiguli.jinkui.data.model.CardType
@@ -98,6 +100,8 @@ import com.xiguli.jinkui.ui.components.JkRow
 import com.xiguli.jinkui.ui.components.JkSheet
 import com.xiguli.jinkui.ui.components.JkTextField
 import com.xiguli.jinkui.ui.components.icon
+import com.xiguli.jinkui.ui.components.pressClickable
+import com.xiguli.jinkui.ui.components.pressScale
 import com.xiguli.jinkui.ui.generator.GeneratorSheet
 import com.xiguli.jinkui.ui.nav.jkViewModel
 import com.xiguli.jinkui.ui.theme.Jk
@@ -177,7 +181,13 @@ class HomeViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun copy(card: Card, field: CardField) {
-        val seconds = container.clipboard.copy(field.label, field.value)
+        // 两步验证字段复制此刻的验证码，而不是密钥
+        val text = field.copyText()
+        if (text == null) {
+            container.messages.show("「${field.label}」的密钥无效，请到编辑页修正")
+            return
+        }
+        val seconds = container.clipboard.copy(field.label, text)
         container.messages.show("已复制「${field.label}」，$seconds 秒后清空剪贴板")
         viewModelScope.launch {
             runCatching { container.repository.markUsed(card.id) }
@@ -222,10 +232,11 @@ fun HomeScreen(
             onCopy = { card, field -> viewModel.copy(card, field) },
             onToggleView = { container.settings.update { it.copy(deckView = true) } },
             onLock = { container.vault.lock() },
-            onMore = { showMore = true },
             onCreate = { showTypes = true },
+            onMore = { showMore = true },
             onHealth = onHealth,
             onSort = { order -> container.settings.update { it.copy(sortOrder = order) } },
+            onTogglePin = viewModel::togglePin,
         )
     } else {
         Box(Modifier.fillMaxSize()) {
@@ -241,9 +252,9 @@ fun HomeScreen(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Column(Modifier.weight(1f)) {
-                        Text("金匮", style = JkType.brand, color = colors.textPrimary)
+                        Text("卡包", style = JkType.pageTitle, color = colors.textPrimary)
                         Text(
-                            text = if (ui.total == 0) "只存在这台手机里的安全卡包" else "${ui.total} 张卡片，加密保存在本机",
+                            text = if (ui.total == 0) "只存在这台手机里的安全卡包" else "${ui.total} 张卡片 · 只在本机加密保存",
                             style = JkType.caption,
                             color = colors.textTertiary,
                         )
@@ -255,7 +266,7 @@ fun HomeScreen(
                             onClick = { container.settings.update { it.copy(deckView = !it.deckView) } },
                         )
                     }
-                    JkIconButton(Icons.Outlined.Lock, "立即锁定", { container.vault.lock() })
+                    if (ui.total > 0) NewCardButton { showTypes = true }
                     JkIconButton(Icons.Outlined.MoreHoriz, "更多", { showMore = true })
                 }
 
@@ -280,7 +291,8 @@ fun HomeScreen(
                     LazyRow(
                         contentPadding = PaddingValues(horizontal = Space.x2_5),
                         horizontalArrangement = Arrangement.spacedBy(Space.x1),
-                        modifier = Modifier.padding(top = Space.x1_5),
+                        // JkChip 布局高 48dp（触控区），视觉仍是 32dp：上边距相应减 8dp，筛选条看上去位置不变
+                        modifier = Modifier.padding(top = Space.x05),
                     ) {
                         item { JkChip("全部", filter == null, { viewModel.setFilter(null) }) }
                         items(ui.filters, key = { it.first }) { (key, label) ->
@@ -354,24 +366,6 @@ fun HomeScreen(
                 }
             }
 
-            if (ui.total > 0) {
-                Row(
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .navigationBarsPadding()
-                        .padding(Space.x2_5)
-                        .height(52.dp)
-                        .clip(CircleShape)
-                        .background(colors.primary)
-                        .clickable { showTypes = true }
-                        .padding(start = Space.x2, end = Space.x2_5),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(Icons.Outlined.Add, contentDescription = null, tint = colors.onPrimary, modifier = Modifier.size(20.dp))
-                    Spacer(Modifier.width(Space.x1))
-                    Text("新建", style = JkType.bodyStrong, color = colors.onPrimary)
-                }
-            }
         }
     }
 
@@ -442,6 +436,16 @@ fun HomeScreen(
                     onSettings()
                 },
             )
+            JkRow(
+                title = "立即锁定",
+                subtitle = "清掉内存里的明文，回到解锁页",
+                icon = Icons.Outlined.Lock,
+                modifier = Modifier.clip(Radius.control),
+                onClick = {
+                    showMore = false
+                    container.vault.lock()
+                },
+            )
         }
     }
 }
@@ -505,7 +509,7 @@ private fun TypePickerSheet(onDismiss: () -> Unit, onPick: (CardType) -> Unit) {
                             modifier = Modifier
                                 .weight(1f)
                                 .clip(Radius.field)
-                                .clickable { onPick(type) },
+                                .clickable(onClickLabel = "新建${type.label}") { onPick(type) },
                         )
                     }
                     if (pair.size == 1) Spacer(Modifier.weight(1f))
