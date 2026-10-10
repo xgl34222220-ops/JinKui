@@ -123,7 +123,7 @@ fun HomeTabBar(selected: HomeTab, onSelect: (HomeTab) -> Unit, modifier: Modifie
             .padding(horizontal = TabBarSpec.sideMargin)
             .fillMaxWidth()
             .height(TabBarSpec.height)
-            .softShadow(colors.barShadow, if (colors.isDark) 0.05f else 0.016f)
+            .softShadow(colors.barShadow, if (colors.isDark) 0.05f else 0.012f)
             .clip(Radius.pill)
             .background(colors.bar)
             // 深色下阴影几乎看不见，用一圈极淡的亮边把栏和底色分开

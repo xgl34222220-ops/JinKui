@@ -156,12 +156,14 @@ fun MeContent(ui: MeUi, actions: MeActions) {
                     Spacer(Modifier.height(Space.x1))
                     val first = if (ui.days == null) "今天开始记第一笔" else "坚持记账的第 ${ui.days} 天"
                     Text(first, style = JkType.bodyStrong.copy(fontFamily = JkFonts.numeral, letterSpacing = 1.sp), color = colors.textSecondary, textAlign = TextAlign.Center)
-                    Text(
-                        "已记录 ${ui.records} 条账单\u2002卡包 ${ui.cards} 张",
-                        style = JkType.bodyStrong.copy(fontFamily = JkFonts.numeral, letterSpacing = 1.sp),
-                        color = colors.textSecondary,
-                        textAlign = TextAlign.Center,
-                    )
+                    for (line in listOf("已记录 ${ui.records} 条账单", "卡包 ${ui.cards} 张")) {
+                        Text(
+                            line,
+                            style = JkType.bodyStrong.copy(fontFamily = JkFonts.numeral, letterSpacing = 1.sp),
+                            color = colors.textSecondary,
+                            textAlign = TextAlign.Center,
+                        )
+                    }
                 }
             }
             AppGlyph(Modifier.align(Alignment.TopCenter), size = 76.dp)
