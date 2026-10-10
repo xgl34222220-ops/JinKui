@@ -148,7 +148,8 @@ fun MeContent(ui: MeUi, actions: MeActions) {
                 Column(
                     Modifier
                         .fillMaxWidth()
-                        .padding(top = 48.dp, bottom = Space.x4, start = Space.x2, end = Space.x2),
+                        // 左右让出叶丛的位置，下边让出远山与叶尖：文字只落在中间那块干净的浅薄荷上
+                        .padding(top = 48.dp, bottom = 52.dp, start = 56.dp, end = 56.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     Text("金匮", style = JkType.title.copy(fontWeight = FontWeight.Bold), color = colors.accent, modifier = Modifier.semantics { heading() })
@@ -156,7 +157,7 @@ fun MeContent(ui: MeUi, actions: MeActions) {
                     val first = if (ui.days == null) "今天开始记第一笔" else "坚持记账的第 ${ui.days} 天"
                     Text(first, style = JkType.bodyStrong.copy(fontFamily = JkFonts.numeral, letterSpacing = 1.sp), color = colors.textSecondary, textAlign = TextAlign.Center)
                     Text(
-                        "已记录 ${ui.records} 条账单 · 卡包 ${ui.cards} 张",
+                        "已记录 ${ui.records} 条账单\u2002卡包 ${ui.cards} 张",
                         style = JkType.bodyStrong.copy(fontFamily = JkFonts.numeral, letterSpacing = 1.sp),
                         color = colors.textSecondary,
                         textAlign = TextAlign.Center,

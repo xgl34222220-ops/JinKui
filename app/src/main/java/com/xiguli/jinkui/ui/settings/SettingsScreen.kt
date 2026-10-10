@@ -546,7 +546,7 @@ fun SettingsContent(
                 JkCard(Modifier.fillMaxWidth(), padding = PaddingValues(vertical = Space.x05)) {
                     JkRow(
                         title = "跟随壁纸取色",
-                        subtitle = "品牌色改用系统的 Material You 配色；关闭时为金匮靛青",
+                        subtitle = "品牌色改用系统的 Material You 配色；关闭时为金匮薄荷绿",
                         icon = Icons.Outlined.Palette,
                         trailing = {
                             JkSwitch(

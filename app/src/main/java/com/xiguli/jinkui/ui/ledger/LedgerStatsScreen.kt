@@ -397,7 +397,12 @@ private fun SummaryBanner(ui: StatsUi) {
             Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(label, style = JkType.bodyStrong.copy(fontWeight = FontWeight.Bold), color = colors.onPrimary)
                 Spacer(Modifier.height(4.dp))
-                RollingAmount(value, JkType.amount.copy(fontSize = 20.sp, fontWeight = FontWeight.Bold), colors.onPrimary, format = { bannerAmount(it) })
+                // “万”是中文，用系统字体会比数字大一号：拆出来单独用小字号排在数字后面
+                val wan = abs(value) >= 1_000_000L
+                Row(verticalAlignment = Alignment.Bottom) {
+                    RollingAmount(value, JkType.amount.copy(fontSize = 20.sp, fontWeight = FontWeight.Bold), colors.onPrimary, format = { bannerAmount(it).removeSuffix("万") })
+                    if (wan) Text("万", style = JkType.small.copy(fontWeight = FontWeight.Bold), color = colors.onPrimary, modifier = Modifier.padding(start = 1.dp, bottom = 3.dp))
+                }
             }
         }
     }

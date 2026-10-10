@@ -88,11 +88,11 @@ fun DrawScope.drawBotanical(colors: JkColors, layout: BotanicalLayout) {
             fern(colors, Offset(w * 0.60f, h * 0.98f), unit * 0.34f, -18f)
         }
         BotanicalLayout.BOTH -> {
-            cluster(colors, Offset(w * 0.06f, h * 1.04f), unit * 0.48f, mirror = true)
-            cluster(colors, Offset(w * 0.94f, h * 1.04f), unit * 0.55f, mirror = false)
-            flower(colors, Offset(w * 0.16f, h * 0.72f), unit * 0.05f, white = true)
-            flower(colors, Offset(w * 0.84f, h * 0.70f), unit * 0.05f, white = true)
-            flower(colors, Offset(w * 0.76f, h * 0.86f), unit * 0.04f, white = true)
+            cluster(colors, Offset(w * 0.05f, h * 1.04f), unit * 0.44f, mirror = true)
+            cluster(colors, Offset(w * 0.95f, h * 1.04f), unit * 0.50f, mirror = false)
+            flower(colors, Offset(w * 0.10f, h * 0.70f), unit * 0.05f, white = true)
+            flower(colors, Offset(w * 0.90f, h * 0.66f), unit * 0.05f, white = true)
+            flower(colors, Offset(w * 0.82f, h * 0.90f), unit * 0.04f, white = true)
             seeds(colors, Offset(w * 0.22f, h * 0.24f), unit * 0.07f)
         }
         BotanicalLayout.SPRIG -> {

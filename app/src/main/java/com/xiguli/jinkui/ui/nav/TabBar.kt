@@ -34,7 +34,10 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -95,8 +98,9 @@ fun HomeTabs(
                 .background(
                     Brush.verticalGradient(
                         0f to colors.bg.copy(alpha = 0f),
-                        0.45f to colors.bg.copy(alpha = 0.72f),
-                        1f to colors.bg.copy(alpha = 0.96f),
+                        0.3f to colors.bg.copy(alpha = 0.78f),
+                        0.6f to colors.bg.copy(alpha = 0.97f),
+                        1f to colors.bg,
                     ),
                 ),
         )
@@ -119,12 +123,7 @@ fun HomeTabBar(selected: HomeTab, onSelect: (HomeTab) -> Unit, modifier: Modifie
             .padding(horizontal = TabBarSpec.sideMargin)
             .fillMaxWidth()
             .height(TabBarSpec.height)
-            .shadow(
-                elevation = if (colors.isDark) 10.dp else 22.dp,
-                shape = Radius.pill,
-                ambientColor = colors.barShadow.copy(alpha = if (colors.isDark) 0.6f else 0.10f),
-                spotColor = colors.barShadow.copy(alpha = if (colors.isDark) 0.7f else 0.16f),
-            )
+            .softShadow(colors.barShadow, if (colors.isDark) 0.05f else 0.016f)
             .clip(Radius.pill)
             .background(colors.bar)
             // 深色下阴影几乎看不见，用一圈极淡的亮边把栏和底色分开
@@ -136,6 +135,25 @@ fun HomeTabBar(selected: HomeTab, onSelect: (HomeTab) -> Unit, modifier: Modifie
         for (tab in HomeTab.entries) {
             TabItem(tab, tab == selected, onSelect, Modifier.weight(1f))
         }
+    }
+}
+
+/**
+ * 柔和的宽阴影：在胶囊外面画十几圈逐渐外扩、几乎透明的圆角矩形，叠起来就是一圈向外渐淡的阴影，
+ * 稍微往下偏一点。不依赖系统的硬件阴影，所以截图、低版本系统和深色下都画得一样。
+ */
+private fun Modifier.softShadow(color: Color, alphaPerLayer: Float): Modifier = drawBehind {
+    val layers = 14
+    val step = 1.4.dp.toPx()
+    val dy = 4.dp.toPx()
+    for (i in layers downTo 1) {
+        val spread = i * step
+        drawRoundRect(
+            color = color.copy(alpha = alphaPerLayer),
+            topLeft = Offset(-spread, -spread * 0.6f + dy),
+            size = Size(size.width + spread * 2, size.height + spread * 1.6f),
+            cornerRadius = CornerRadius(size.height / 2 + spread),
+        )
     }
 }
 

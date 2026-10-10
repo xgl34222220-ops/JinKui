@@ -137,28 +137,20 @@ fun CalendarContent(
         contentPadding = PaddingValues(bottom = LocalTabBarInset.current + Space.x2),
     ) {
         item(key = "header") {
+          Column {
             Row(
                 Modifier
                     .fillMaxWidth()
                     .padding(start = Space.x2, end = Space.x05, top = Space.x1_5),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        monthLabel(ui.month),
-                        style = JkType.amountLarge.copy(fontSize = 26.sp),
-                        color = colors.textPrimary,
-                        maxLines = 1,
-                        modifier = Modifier.semantics { heading() },
-                    )
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        MonthTotal("收", ui.summary.income, colors.income)
-                        Spacer(Modifier.width(Space.x1_5))
-                        MonthTotal("支", ui.summary.expense, colors.expense)
-                        Spacer(Modifier.width(Space.x1_5))
-                        MonthTotal("余", ui.summary.balance, if (ui.summary.balance < 0) colors.danger else colors.textPrimary)
-                    }
-                }
+                Text(
+                    monthLabel(ui.month),
+                    style = JkType.amountLarge.copy(fontSize = 26.sp),
+                    color = colors.textPrimary,
+                    maxLines = 1,
+                    modifier = Modifier.weight(1f).semantics { heading() },
+                )
                 ChevronButton(true, "上个月") { onMonth(ui.month.minusMonths(1)) }
                 ChevronButton(false, "下个月") { onMonth(ui.month.plusMonths(1)) }
                 val viewingToday = today != null && selected == today
@@ -179,6 +171,15 @@ fun CalendarContent(
                 }
                 MintIconButton(MintGlyph.ADD_NOTE, "在这一天记一笔", onAdd, tint = colors.accent)
             }
+            // 当月收 / 支 / 余单独一行，不和右边的按钮抢宽度
+            Row(Modifier.padding(horizontal = Space.x2), verticalAlignment = Alignment.CenterVertically) {
+                MonthTotal("收", ui.summary.income, colors.income)
+                Spacer(Modifier.width(Space.x2))
+                MonthTotal("支", ui.summary.expense, colors.expense)
+                Spacer(Modifier.width(Space.x2))
+                MonthTotal("余", ui.summary.balance, if (ui.summary.balance < 0) colors.danger else colors.textPrimary)
+            }
+          }
         }
         item(key = "grid") {
             LunarMonthGrid(
