@@ -29,6 +29,7 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.unit.dp
 import com.xiguli.jinkui.core.qr.OtpMigration
@@ -148,7 +149,9 @@ class CardScreensUiTest {
         compose.onAllNodesWithText("工商银行信用卡").onFirst().assertExists()
         // 打码的卡号只露末四位
         compose.onNodeWithText("•••• 8841").assertExists()
-        // 复制按钮 48dp 触控区
+        // 复制按钮 48dp 触控区。列表顶上是钱包叠卡，第一行可能只露出一半（触控区被视口裁掉）甚至还没组合出来：
+        // 先让纵向卡片列表把这一行滚到顶上，再量
+        scrollCardList(androidx.compose.ui.test.hasContentDescription("复制卡号"))
         val copy = compose.onAllNodesWithContentDescription("复制卡号").onFirst()
         copy.assertTouchHeightIsEqualTo(48.dp).assertTouchWidthIsEqualTo(48.dp)
         copy.performClick()
@@ -168,6 +171,14 @@ class CardScreensUiTest {
         assertEquals(1, pinned.size)
         runCustomAction("复制账号")
         assertEquals(listOf("账号"), copied)
+    }
+
+    /** 纵向滚动的卡片列表（筛选与置顶、最近使用是横向的 LazyRow，不选它们）滚到目标节点。 */
+    private fun scrollCardList(target: androidx.compose.ui.test.SemanticsMatcher) {
+        val vertical = androidx.compose.ui.test.hasScrollToNodeAction() and
+            androidx.compose.ui.test.SemanticsMatcher.keyIsDefined(androidx.compose.ui.semantics.SemanticsProperties.VerticalScrollAxisRange)
+        compose.onNode(vertical).performScrollToNode(target)
+        compose.waitForIdle()
     }
 
     /** 找到第一个带这个自定义操作（读屏菜单）的节点并执行它。 */
@@ -223,6 +234,8 @@ class CardScreensUiTest {
                 onToggleView = {}, onLock = {}, onMore = {}, onHealth = {}, onSort = {},
             )
         }
+        // 1.3 列表顶上是钱包叠卡，这一行可能还没组合出来：先让卡片列表（纵向的 LazyColumn）滚到它
+        scrollCardList(androidx.compose.ui.test.hasText("家里 Wi-Fi"))
         compose.onNodeWithText("家里 Wi-Fi").performClick()
         assertEquals("c-wifi", opened)
     }

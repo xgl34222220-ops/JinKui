@@ -173,7 +173,15 @@ class ImportCleanupUiTest {
         compose.onAllNodesWithText("内部转账").onFirst().assertExists()
         compose.onAllNodesWithText("借贷往来").onFirst().assertExists()
         h.snapshot(activity, "import-groups-light")
-        compose.onAllNodesWithText("余额校准").onFirst().performClick()
+        // 点“余额校准”这一组的整行开关（角色是 Switch 的那一行），不是第一个同名文字；
+        // 分组卡在 LazyColumn 里可能在首屏以外，用语义点击不依赖它是否露在屏幕上
+        val adjustmentRow = androidx.compose.ui.test.hasText("余额校准") and
+            androidx.compose.ui.test.SemanticsMatcher.expectValue(
+                androidx.compose.ui.semantics.SemanticsProperties.Role,
+                androidx.compose.ui.semantics.Role.Switch,
+            )
+        compose.onNode(adjustmentRow).performSemanticsAction(SemanticsActions.OnClick)
+        compose.waitForIdle()
         assertEquals(ImportClass.ADJUSTMENT to true, group)
     }
 
@@ -188,7 +196,8 @@ class ImportCleanupUiTest {
         }
         compose.onNodeWithText("账户余额变化").assertExists()
         h.snapshot(activity, "import-done-balances-light")
-        compose.onNodeWithText("撤销本次导入").performScrollTo().performClick()
+        // “撤销本次导入”在底部固定按钮区里，不在滚动区内
+        compose.onNodeWithText("撤销本次导入").performClick()
         assertTrue(undone)
     }
 

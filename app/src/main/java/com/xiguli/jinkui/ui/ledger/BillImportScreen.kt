@@ -42,6 +42,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -910,12 +912,14 @@ fun BillImportDone(result: ImportResult, onFinish: () -> Unit, onAgain: () -> Un
     val colors = Jk.colors
     Column(Modifier.fillMaxSize().statusBarsPadding()) {
         JkTopBar(title = "导入完成", onBack = onFinish)
+        val scroll = rememberScrollState()
         Column(
             Modifier
                 .weight(1f)
-                .verticalScroll(rememberScrollState())
+                .bottomFade(scroll)
+                .verticalScroll(scroll)
                 .padding(horizontal = Space.x2)
-                .padding(top = Space.x2, bottom = Space.x2),
+                .padding(top = Space.x2, bottom = Space.x4),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Box(
@@ -935,7 +939,6 @@ fun BillImportDone(result: ImportResult, onFinish: () -> Unit, onAgain: () -> Un
                     add("支出 ${result.expenseCount} 笔" to Money.format(result.expenseTotal))
                     add("收入 ${result.incomeCount} 笔" to Money.format(result.incomeTotal))
                     if (result.transferCount > 0) add("转账 / 借贷 / 校准（不计收支）" to "${result.transferCount} 笔")
-                    result.createdAccount?.let { add("新建账户" to it) }
                     if (result.unchecked > 0) add("没有勾选" to "${result.unchecked} 笔")
                     if (result.alreadyImported > 0) add("以前导入过" to "${result.alreadyImported} 笔")
                     for ((reason, n) in result.skipped) add(reason.label to "$n 笔")
@@ -945,6 +948,15 @@ fun BillImportDone(result: ImportResult, onFinish: () -> Unit, onAgain: () -> Un
                     Row(Modifier.fillMaxWidth().heightIn(min = 44.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(name, style = JkType.body, color = colors.textSecondary, modifier = Modifier.weight(1f))
                         Text(value, style = JkType.amountSmall, color = colors.textPrimary)
+                    }
+                }
+                // 新建的账户可能有好几个名字：标签在上、名字占满整行换行，不再和标签挤在一行
+                result.createdAccount?.let { names ->
+                    if (lines.isNotEmpty()) JkDivider()
+                    Column(Modifier.fillMaxWidth().padding(vertical = Space.x1_5)) {
+                        Text("新建账户", style = JkType.body, color = colors.textSecondary)
+                        Spacer(Modifier.height(Space.x05))
+                        Text(names, style = JkType.bodyStrong, color = colors.textPrimary, modifier = Modifier.fillMaxWidth())
                     }
                 }
             }
@@ -991,3 +1003,26 @@ fun BillImportDone(result: ImportResult, onFinish: () -> Unit, onAgain: () -> Un
         }
     }
 }
+
+/**
+ * 可滚动区域的下沿：后面还有内容时，最后 28dp 渐隐，而不是被底部固定按钮生硬地切掉一半；
+ * 滚到底后渐隐消失，最后一行完整露出来。
+ */
+private fun Modifier.bottomFade(scroll: androidx.compose.foundation.ScrollState): Modifier = this
+    .graphicsLayer { compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.Offscreen }
+    .drawWithContent {
+        drawContent()
+        if (scroll.canScrollForward) {
+            val h = 28.dp.toPx()
+            drawRect(
+                brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                    listOf(androidx.compose.ui.graphics.Color.Black, androidx.compose.ui.graphics.Color.Transparent),
+                    startY = size.height - h,
+                    endY = size.height,
+                ),
+                topLeft = androidx.compose.ui.geometry.Offset(0f, size.height - h),
+                size = androidx.compose.ui.geometry.Size(size.width, h),
+                blendMode = androidx.compose.ui.graphics.BlendMode.DstIn,
+            )
+        }
+    }

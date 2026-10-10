@@ -303,8 +303,12 @@ class LedgerScreensUiTest {
     fun filterPillHas48dpTouchTarget() {
         var picked = false
         show { LedgerHome(homeUi(), TxFilter(), LazyListState(), LedgerHomeActions(onPickAccount = { picked = true })) }
-        compose.onNodeWithText("账户").assertTouchHeightIsEqualTo(48.dp)
-        compose.onNodeWithText("账户").performClick()
+        // 筛选行在 LazyColumn 里，头图下面；字体高一点（CI 的原生字体）时可能只露出一半，触控区被视口裁掉——先滚到它
+        val pill = compose.onNodeWithText("账户").performScrollTo()
+        compose.waitForIdle()
+        val touchHeight = with(compose.density) { pill.fetchSemanticsNode().boundsInRoot.height.toDp() }
+        assertTrue("筛选胶囊触控高度 $touchHeight < 48dp", touchHeight >= 48.dp)
+        pill.performClick()
         assertTrue(picked)
     }
 
@@ -312,7 +316,8 @@ class LedgerScreensUiTest {
     fun statsMonthLightAndDark() {
         val stats = buildStatsUi(LedgerSamples.data, StatsMode.MONTH, october, 2026, LedgerSamples.zone, LedgerSamples.today)
         val light = show { LedgerStatsContent(stats, {}, {}, {}) }
-        compose.onNodeWithText("月支出").assertExists()
+        // 汇总卡里“月支出”出现两次：上面的大号标题与下面三格里的第一格，是设计如此
+        compose.onAllNodesWithText("月支出").assertCountEquals(2)
         compose.onNodeWithText("收支热力").assertExists()
         compose.onNodeWithText("居住").assertExists()
         snapshot(light, "stats-month-light")
@@ -327,7 +332,7 @@ class LedgerScreensUiTest {
         assertEquals(12, stats.heat.size)
         assertEquals(stats.summary.expense, stats.bars.sumOf { it.summary.expense })
         val light = show { LedgerStatsContent(stats, {}, {}, {}) }
-        compose.onNodeWithText("年支出").assertExists()
+        compose.onAllNodesWithText("年支出").assertCountEquals(2)
         compose.onNodeWithText("今年").assertExists()
         compose.onNodeWithText("收支统计").assertExists()
         snapshot(light, "stats-year-light")
@@ -364,8 +369,11 @@ class LedgerScreensUiTest {
         assertEquals(444_000L, ui.creditDebt)
         val light = show { LedgerAssetsContent(ui, {}, {}) }
         compose.onNodeWithText("净资产(元)").assertExists()
+        compose.onAllNodesWithText("净资产", substring = true).onFirst().assertExists()
+        // 1.3 起按 资金 / 信用 / 借贷 分组
         compose.onNodeWithText("资金账户").assertExists()
-        compose.onNodeWithText("信贷账户").assertExists()
+        compose.onNodeWithText("信用账户").assertExists()
+        compose.onNodeWithText("信用欠款").assertExists()
         snapshot(light, "assets-light")
         val dark = show(dark = true) { LedgerAssetsContent(ui, {}, {}) }
         snapshot(dark, "assets-dark")
