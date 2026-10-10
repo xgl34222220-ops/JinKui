@@ -145,6 +145,28 @@ class VaultSchemaMigrationTest {
     }
 
     @Test
+    fun upgradeFromV4ToV5AddsPendingAndKeepsEverything() {
+        seedV1()
+        migrate(1, 4)
+        exec("INSERT INTO ledger_accounts VALUES('acc-cash',0,0,1,1,'ENC')")
+        exec("INSERT INTO ledger_transactions VALUES('t-1','expense',100,'acc-cash',NULL,NULL,1,1,'ENC')")
+        exec("INSERT INTO ledger_recurring VALUES('r-1',1,'ENC')")
+        exec("INSERT INTO ledger_tombstones VALUES('r20261002-r-1','tx',5)")
+        migrate(4, 5)
+        assertEquals(5, count("PRAGMA user_version"))
+        assertEquals(2, count("SELECT COUNT(*) FROM cards"))
+        assertEquals(2, count("SELECT COUNT(*) FROM fields"))
+        assertEquals(1, count("SELECT COUNT(*) FROM ledger_accounts"))
+        assertEquals(1, count("SELECT COUNT(*) FROM ledger_transactions"))
+        assertEquals(1, count("SELECT COUNT(*) FROM ledger_recurring"))
+        assertEquals(1, count("SELECT COUNT(*) FROM ledger_tombstones"))
+        assertEquals(0, count("SELECT COUNT(*) FROM ledger_pending"))
+        exec("INSERT INTO ledger_pending VALUES('p-1',10,'ENC-PENDING')")
+        exec("INSERT OR REPLACE INTO ledger_pending VALUES('p-1',11,'ENC-PENDING2')")
+        assertEquals(1, count("SELECT COUNT(*) FROM ledger_pending WHERE created_at = 11"))
+    }
+
+    @Test
     fun upgradedSchemaMatchesFreshInstall() {
         seedV1()
         migrate(1, VaultSchema.VERSION)

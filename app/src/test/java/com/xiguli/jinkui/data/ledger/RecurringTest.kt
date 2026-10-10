@@ -213,4 +213,25 @@ class RecurringTest {
         assertTrue(LedgerMerge.plan(LedgerData(recurring = listOf(local)), LedgerData(recurring = listOf(incomingOlder))).toWrite.recurring.isEmpty())
         assertEquals(listOf(incomingNewer), LedgerMerge.plan(LedgerData(recurring = listOf(local)), LedgerData(recurring = listOf(incomingNewer))).toWrite.recurring)
     }
+
+    @Test
+    fun upcomingDateNeverShowsAPastStartBeforeFirstGeneration() {
+        val today = LocalDate.of(2026, 10, 11)
+        // 新建的每月规则，开始日期在上个月：还没生成过，“下次”应是今天以后的那一次，而不是 9 月 1 日
+        val monthly = rule(RecurFrequency.MONTHLY, LocalDate.of(2026, 9, 1))
+        assertEquals(LocalDate.of(2026, 9, 1), RecurringMath.nextDate(monthly))
+        assertEquals(LocalDate.of(2026, 11, 1), RecurringMath.upcomingDate(monthly, today))
+        // 今天就是其中一次：显示今天
+        assertEquals(today, RecurringMath.upcomingDate(rule(RecurFrequency.MONTHLY, LocalDate.of(2026, 8, 11)), today))
+        // 开始日期在将来：就是开始日期
+        assertEquals(LocalDate.of(2026, 12, 1), RecurringMath.upcomingDate(rule(RecurFrequency.MONTHLY, LocalDate.of(2026, 12, 1)), today))
+        // 已经生成到 10 月：下次 11 月
+        assertEquals(LocalDate.of(2026, 11, 1), RecurringMath.upcomingDate(monthly.copy(nextIndex = 2), today))
+        // 每天的规则开始于很久以前
+        assertEquals(today, RecurringMath.upcomingDate(rule(RecurFrequency.DAILY, LocalDate.of(2020, 1, 1)), today))
+        // 结束日期已过：已结束
+        assertNull(RecurringMath.upcomingDate(rule(RecurFrequency.WEEKLY, LocalDate.of(2026, 9, 1), end = LocalDate.of(2026, 10, 1)), today))
+        // 月末规则：从 1 月 31 日开始，10 月落在 31 日
+        assertEquals(LocalDate.of(2026, 10, 31), RecurringMath.upcomingDate(rule(RecurFrequency.MONTHLY, LocalDate.of(2026, 1, 31)), today))
+    }
 }
