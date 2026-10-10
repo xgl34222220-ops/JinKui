@@ -60,6 +60,14 @@ import com.xiguli.jinkui.ui.components.ExpiryNote
 import com.xiguli.jinkui.ui.components.JkButton
 import com.xiguli.jinkui.ui.components.JkDivider
 import com.xiguli.jinkui.ui.theme.Jk
+import com.xiguli.jinkui.ui.components.BankBrand
+import com.xiguli.jinkui.ui.components.CopyGlyph
+import com.xiguli.jinkui.ui.components.SearchEmptyIllustration
+import com.xiguli.jinkui.ui.components.pressClickable
+import com.xiguli.jinkui.ui.components.pressScale
+import com.xiguli.jinkui.ui.components.rememberCopyFeedback
+import com.xiguli.jinkui.ui.components.rememberJkPress
+import androidx.compose.foundation.layout.heightIn
 import com.xiguli.jinkui.ui.theme.JkType
 import com.xiguli.jinkui.ui.theme.Radius
 import com.xiguli.jinkui.ui.theme.Space
@@ -218,8 +226,10 @@ private fun DeckCard(
     modifier: Modifier = Modifier,
 ) {
     val face = CardTemplates.face(card)
-    Box(modifier) {
+    val press = rememberJkPress(0.985f)
+    Box(modifier.pressScale(press)) {
         CardFace(
+            brand = BankBrand.of(card),
             title = card.title,
             type = card.type,
             colorIndex = card.color,
@@ -231,7 +241,7 @@ private fun DeckCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(Radius.card)
-                .combinedClickable(onClickLabel = clickLabel, onClick = onClick, onLongClick = onLongClick),
+                .pressClickable(press, onClickLabel = clickLabel, onClick = onClick, onLongClick = onLongClick, onLongClickLabel = "快速复制"),
         )
         Box(
             Modifier
@@ -285,6 +295,7 @@ private fun DeckInfo(card: Card, onOpen: () -> Unit, onCopy: (CardField) -> Unit
     val fade by animateFloatAsState(targetValue = if (shown) 1f else 0f, animationSpec = tween(durationMillis = 180), label = "deckInfo")
 
     val fields = CardTemplates.displayOrder(card).filter { it.value.isNotBlank() }.take(4)
+    val copyFeedback = rememberCopyFeedback()
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -330,7 +341,11 @@ private fun DeckInfo(card: Card, onOpen: () -> Unit, onCopy: (CardField) -> Unit
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable(onClickLabel = "复制${field.label}") { onCopy(field) }
+                    .clickable(onClickLabel = "复制${field.label}") {
+                        copyFeedback.fire(field.id)
+                        onCopy(field)
+                    }
+                    .heightIn(min = 56.dp)
                     .padding(vertical = Space.x1_5),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -343,20 +358,15 @@ private fun DeckInfo(card: Card, onOpen: () -> Unit, onCopy: (CardField) -> Unit
                             field.kind == FieldKind.NUMBER -> groupDigits(field.value)
                             else -> field.value
                         },
-                        style = if (field.sensitive || field.kind == FieldKind.NUMBER) JkType.mono else JkType.body,
+                        style = if (field.sensitive || field.kind == FieldKind.NUMBER) JkType.digits else JkType.body,
                         color = if (field.sensitive) colors.textSecondary else colors.textPrimary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-                Icon(
-                    Icons.Outlined.ContentCopy,
-                    contentDescription = null,
-                    tint = colors.textTertiary,
-                    modifier = Modifier
-                        .padding(start = Space.x1_5)
-                        .size(18.dp),
-                )
+                Box(Modifier.padding(start = Space.x1_5)) {
+                    CopyGlyph(copyFeedback.isCopied(field.id), size = 18.dp)
+                }
             }
         }
     }
@@ -397,6 +407,8 @@ private fun EmptyDeck(onClearFilters: () -> Unit, modifier: Modifier = Modifier)
                 ) {
                     if (depth == 0) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(Space.x2_5)) {
+                            SearchEmptyIllustration(Modifier.size(width = 99.dp, height = 72.dp))
+                            Spacer(Modifier.height(Space.x1))
                             Text("没有匹配的卡片", style = JkType.heading, color = colors.textPrimary)
                             Spacer(Modifier.height(Space.x05))
                             Text(

@@ -1,7 +1,10 @@
 package com.xiguli.jinkui.ui.nav
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelStore
@@ -17,6 +20,17 @@ sealed interface Screen {
     data object Settings : Screen
     data object Health : Screen
     data object Organize : Screen
+    data object LedgerAccounts : Screen
+    data object LedgerStats : Screen
+    data object LedgerBudget : Screen
+    data object LedgerCategories : Screen
+    data object LedgerRecurring : Screen
+}
+
+/** 首页底部的两个分区。 */
+enum class HomeTab(val label: String) {
+    CARDS("卡包"),
+    LEDGER("账本"),
 }
 
 /**
@@ -32,6 +46,15 @@ class Navigator {
     private val stack = mutableStateListOf(NavEntry(Screen.Home))
 
     val current: NavEntry get() = stack.last()
+
+    /** 首页当前停在哪个分区；进详情再返回时保持不变。 */
+    var homeTab by mutableStateOf(HomeTab.CARDS)
+
+    /**
+     * 底部栏中间的“＋”被点了、还没被对应分区处理的请求。分区处理后清空，
+     * 这样从详情页返回、页面重新进入组合时不会再弹一次。
+     */
+    var pendingAdd by mutableStateOf<HomeTab?>(null)
     val canPop: Boolean get() = stack.size > 1
 
     fun push(screen: Screen) {
