@@ -1,0 +1,25 @@
+# 金匮的 Baseline Profile（手写，规则语法见 developer.android.com/topic/performance/baselineprofiles）。
+# 由 AndroidX profileinstaller（Compose 已带入）在安装 / 首次启动后交给 ART 预编译，
+# 让冷启动、解锁、账本首页、卡包列表、统计与底栏切换少走解释执行。没有新增依赖或 benchmark 模块。
+#
+# 金匮自己的代码：启动、主题与玻璃材质、导航、各分区页面与列表行
+HSPLcom/xiguli/jinkui/JinKuiApp;->**(**)**
+HSPLcom/xiguli/jinkui/AppContainer;->**(**)**
+HSPLcom/xiguli/jinkui/MainActivity;->**(**)**
+HSPLcom/xiguli/jinkui/ui/**;->**(**)**
+SPLcom/xiguli/jinkui/ui/**
+HSPLcom/xiguli/jinkui/data/ledger/**;->**(**)**
+HSPLcom/xiguli/jinkui/data/repo/**;->**(**)**
+HSPLcom/xiguli/jinkui/data/model/**;->**(**)**
+HSPLcom/xiguli/jinkui/core/security/**;->**(**)**
+SPLcom/xiguli/jinkui/data/**
+#
+# Compose 运行时、布局、绘制、动画与 Lazy 列表的热路径
+HSPLandroidx/compose/runtime/**;->**(**)**
+HSPLandroidx/compose/ui/**;->**(**)**
+HSPLandroidx/compose/foundation/**;->**(**)**
+HSPLandroidx/compose/animation/**;->**(**)**
+HSPLandroidx/compose/material3/**;->**(**)**
+SPLandroidx/compose/**
+HSPLandroidx/activity/compose/**;->**(**)**
+HSPLandroidx/lifecycle/**;->**(**)**

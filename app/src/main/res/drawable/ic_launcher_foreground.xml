@@ -1,27 +1,68 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 金匮：一只带锁孔的匣子 -->
+<!--
+    金匮 1.3 图标前景（方案 B）：两张叠放的磨砂玻璃卡片——后面一张是账本页（几行账目），
+    前面一张是银行卡（芯片与卡号条），左上有高光，旁边两片小叶子。
+    全部图形在 66dp 安全区（21..87）内。金匮原创，手写矢量，没有引用任何第三方素材。
+-->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <path
-        android:pathData="M36,48h36a4,4 0 0 1 4,4v18a4,4 0 0 1 -4,4h-36a4,4 0 0 1 -4,-4v-18a4,4 0 0 1 4,-4z"
-        android:strokeColor="@color/icon_gold"
-        android:strokeWidth="3.5"
-        android:strokeLineJoin="round" />
-    <path
-        android:pathData="M36,48v-4a8,8 0 0 1 8,-8h20a8,8 0 0 1 8,8v4"
-        android:strokeColor="@color/icon_gold"
-        android:strokeWidth="3.5"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round" />
-    <path
-        android:pathData="M54,57a3.2,3.2 0 1 1 0,6.4a3.2,3.2 0 1 1 0,-6.4z"
-        android:fillColor="@color/icon_gold" />
-    <path
-        android:pathData="M54,62v5"
-        android:strokeColor="@color/icon_gold"
-        android:strokeWidth="3"
-        android:strokeLineCap="round" />
+
+    <!-- 后：账本页，向右倾斜 -->
+    <group android:pivotX="62" android:pivotY="57" android:rotation="9">
+        <!-- 柔和阴影 -->
+        <path android:pathData="M50,39h26a4,4 0 0 1 4,4v31a4,4 0 0 1 -4,4h-26a4,4 0 0 1 -4,-4v-31a4,4 0 0 1 4,-4z"
+            android:fillColor="#1A1E6B57" />
+        <path android:pathData="M49,37h26a4,4 0 0 1 4,4v31a4,4 0 0 1 -4,4h-26a4,4 0 0 1 -4,-4v-31a4,4 0 0 1 4,-4z"
+            android:strokeWidth="0.9"
+            android:strokeColor="#E6FFFFFF">
+            <aapt:attr name="android:fillColor">
+                <gradient android:type="linear" android:startX="45" android:startY="37" android:endX="79" android:endY="76">
+                    <item android:offset="0" android:color="#8CFFFFFF" />
+                    <item android:offset="1" android:color="#40FFFFFF" />
+                </gradient>
+            </aapt:attr>
+        </path>
+        <!-- 账目行 -->
+        <path android:pathData="M52,46h14M70,46h4M52,52h12M70,52h4M52,58h14M70,58h4M52,64h10M70,64h4M52,70h13M70,70h4"
+            android:strokeWidth="2"
+            android:strokeLineCap="round"
+            android:strokeColor="#D9FFFFFF" />
+    </group>
+
+    <!-- 前：银行卡，向左倾斜 -->
+    <group android:pivotX="48" android:pivotY="52" android:rotation="-9">
+        <path android:pathData="M30,40h37a4.5,4.5 0 0 1 4.5,4.5v19a4.5,4.5 0 0 1 -4.5,4.5h-37a4.5,4.5 0 0 1 -4.5,-4.5v-19a4.5,4.5 0 0 1 4.5,-4.5z"
+            android:fillColor="#261E6B57" />
+        <path android:pathData="M29,38h37a4.5,4.5 0 0 1 4.5,4.5v19a4.5,4.5 0 0 1 -4.5,4.5h-37a4.5,4.5 0 0 1 -4.5,-4.5v-19a4.5,4.5 0 0 1 4.5,-4.5z"
+            android:strokeWidth="1"
+            android:strokeColor="#F2FFFFFF">
+            <aapt:attr name="android:fillColor">
+                <gradient android:type="linear" android:startX="25" android:startY="38" android:endX="70" android:endY="66">
+                    <item android:offset="0" android:color="#D9FFFFFF" />
+                    <item android:offset="0.5" android:color="#A8FFFFFF" />
+                    <item android:offset="1" android:color="#8FFFFFFF" />
+                </gradient>
+            </aapt:attr>
+        </path>
+        <!-- 左上高光 -->
+        <path android:pathData="M29,38h20l-10,28h-10a4.5,4.5 0 0 1 -4.5,-4.5v-19a4.5,4.5 0 0 1 4.5,-4.5z"
+            android:fillColor="#26FFFFFF" />
+        <!-- 芯片 -->
+        <path android:pathData="M31,45h7a1.5,1.5 0 0 1 1.5,1.5v4a1.5,1.5 0 0 1 -1.5,1.5h-7a1.5,1.5 0 0 1 -1.5,-1.5v-4a1.5,1.5 0 0 1 1.5,-1.5z"
+            android:fillColor="#FF7FD9BF" />
+        <!-- 卡号条 -->
+        <path android:pathData="M31,57.5h31M31,62h18"
+            android:strokeWidth="2.2"
+            android:strokeLineCap="round"
+            android:strokeColor="#BF4FBFA6" />
+    </group>
+
+    <!-- 小叶子：右上一片、左下一片 -->
+    <path android:pathData="M79,27c-6,0.5 -9,5 -8,10.5c5.5,-0.5 8.5,-5 8,-10.5z" android:fillColor="#E6FFFFFF" />
+    <path android:pathData="M78.5,28.5l-6.5,7.5" android:strokeWidth="0.7" android:strokeLineCap="round" android:strokeColor="#9963D2BE" />
+    <path android:pathData="M30,73c4,0 6.5,3 6,7c-4,0 -6.5,-3 -6,-7z" android:fillColor="#D9FFFFFF" />
 </vector>

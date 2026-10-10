@@ -49,6 +49,38 @@ class KeystoreManager {
         }
     }
 
+    /**
+     * 自动记账的“收件箱”密钥：通知到达时金匮往往处于锁定状态，拿不到保险库密钥，
+     * 识别出的金额 / 商户 / 时间先用这把不需要用户认证的 Keystore 密钥加密暂存，解锁后再转进加密数据库并删除暂存。
+     * 不可导出；“清空全部数据”时删除。
+     */
+    fun intakeWrap(plain: ByteArray, aad: ByteArray): ByteArray {
+        try {
+            val cipher = Cipher.getInstance(TRANSFORMATION)
+            cipher.init(Cipher.ENCRYPT_MODE, intakeKey())
+            cipher.updateAAD(aad)
+            return cipher.iv + cipher.doFinal(plain)
+        } catch (e: GeneralSecurityException) {
+            throw KeystoreUnavailableException("无法使用设备密钥库", e)
+        }
+    }
+
+    fun intakeUnwrap(blob: ByteArray, aad: ByteArray): ByteArray {
+        if (blob.size <= IV_BYTES) throw KeystoreUnavailableException("数据不完整")
+        try {
+            val key = store.getKey(INTAKE_ALIAS, null) as? SecretKey ?: throw KeystoreUnavailableException("暂存密钥不存在")
+            val cipher = Cipher.getInstance(TRANSFORMATION)
+            cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(TAG_BITS, blob, 0, IV_BYTES))
+            cipher.updateAAD(aad)
+            return cipher.doFinal(blob, IV_BYTES, blob.size - IV_BYTES)
+        } catch (e: GeneralSecurityException) {
+            throw KeystoreUnavailableException("暂存数据无法解密", e)
+        }
+    }
+
+    private fun intakeKey(): SecretKey =
+        (store.getKey(INTAKE_ALIAS, null) as? SecretKey) ?: generate(INTAKE_ALIAS) {}
+
     /** 新建生物识别密钥并返回加密用 Cipher；需经 BiometricPrompt 认证后才能 doFinal。 */
     fun newBiometricEncryptCipher(): Cipher {
         deleteBiometricKey()
@@ -78,6 +110,7 @@ class KeystoreManager {
     fun deleteAll() {
         runCatching { store.deleteEntry(BIOMETRIC_ALIAS) }
         runCatching { store.deleteEntry(MASTER_ALIAS) }
+        runCatching { store.deleteEntry(INTAKE_ALIAS) }
     }
 
     private fun masterKey(create: Boolean): SecretKey {
@@ -120,6 +153,7 @@ class KeystoreManager {
         private const val TRANSFORMATION = "AES/GCM/NoPadding"
         private const val MASTER_ALIAS = "jinkui.master.v1"
         private const val BIOMETRIC_ALIAS = "jinkui.biometric.v1"
+        private const val INTAKE_ALIAS = "jinkui.intake.v1"
         const val IV_BYTES = 12
         const val TAG_BITS = 128
     }

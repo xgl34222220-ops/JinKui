@@ -67,6 +67,28 @@ class ListLayoutTest {
     }
 
     @Test
+    fun swipeCopiesThePlainFieldAndTotpIsFound() {
+        val login = Card(
+            id = "l",
+            type = CardType.LOGIN,
+            title = "邮箱",
+            fields = listOf(
+                CardField("1", "账号", "me@example.com", false),
+                CardField("2", "密码", "S3cret!", true, FieldKind.PASSWORD),
+                CardField("3", "两步验证码", "JBSWY3DPEHPK3PXP", true, FieldKind.TOTP),
+            ),
+        )
+        // 左滑复制账号，行尾按钮复制密码，两者不重复
+        assertEquals("账号", ListLayout.swipeCopyTarget(login)?.label)
+        assertEquals("密码", ListLayout.copyTarget(login)?.label)
+        assertEquals("3", ListLayout.totpField(login)?.id)
+        assertNull(ListLayout.totpField(login.copy(fields = login.fields.take(2))))
+        // 只有一个可复制字段时，左滑与按钮复制同一个
+        val wifi = login.copy(fields = listOf(CardField("p", "密码", "x", true, FieldKind.PASSWORD)))
+        assertEquals("密码", ListLayout.swipeCopyTarget(wifi)?.label)
+    }
+
+    @Test
     fun maskedTextIsRecognised() {
         assertTrue(ListLayout.isMasked("•••• 5972"))
         assertFalse(ListLayout.isMasked("me@example.com"))

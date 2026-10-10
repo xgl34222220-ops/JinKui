@@ -69,6 +69,24 @@ import com.xiguli.jinkui.ui.theme.Space
 import javax.crypto.Cipher
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import android.view.HapticFeedbackConstants
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.material.icons.outlined.ErrorOutline
+import androidx.compose.material.icons.outlined.Timer
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
+import com.xiguli.jinkui.ui.components.pressScale
+import com.xiguli.jinkui.ui.components.rememberJkPress
+import com.xiguli.jinkui.ui.theme.Radius
 
 class LockViewModel(private val container: AppContainer) : ViewModel() {
     private val vault = container.vault
@@ -187,127 +205,38 @@ fun LockScreen() {
         }
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .systemBarsPadding()
-            .imePadding()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = Space.x3),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Spacer(Modifier.height(Space.x6 + Space.x3))
-        BrandMark(size = 72.dp)
-        Spacer(Modifier.height(Space.x2_5))
-        Text("金匮", style = JkType.brand, color = colors.textPrimary)
-        Spacer(Modifier.height(Space.x05))
-        Text(
-            text = when {
-                waitSeconds > 0 -> "请等待 $waitSeconds 秒后再试"
-                viewModel.busy -> "正在解锁…"
-                usePin -> "输入 PIN 解锁"
-                else -> "输入主密码解锁"
-            },
-            style = JkType.small,
-            color = colors.textSecondary,
-        )
-
-        val error = viewModel.error
-        Spacer(Modifier.height(Space.x2))
-        Text(
-            text = error ?: " ",
-            style = JkType.small,
-            color = colors.danger,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.widthIn(max = 320.dp),
-        )
-        Spacer(Modifier.height(Space.x2))
-
-        if (usePin) {
-            Box(Modifier.graphicsLayer { translationX = shake }) { PinDots(count = secret.length) }
-            Spacer(Modifier.height(Space.x4))
-            PinPad(
-                enabled = canSubmit,
-                onDigit = { digit ->
-                    if (secret.length < VaultManager.MAX_PIN_LENGTH) secret += digit
-                    viewModel.error = null
-                    container.lock.touch()
-                },
-                onBackspace = { secret = secret.dropLast(1) },
-                side = if (biometricReady) Icons.Outlined.Fingerprint else null,
-                onSide = startBiometric,
-            )
-            Spacer(Modifier.height(Space.x3))
-            JkButton(
-                text = "解锁",
-                onClick = submit,
-                enabled = secret.length >= VaultManager.MIN_PIN_LENGTH && waitSeconds == 0L,
-                loading = viewModel.busy,
-                modifier = Modifier.width(232.dp),
-            )
-        } else {
-            JkTextField(
-                value = secret,
-                onValueChange = { value ->
-                    secret = value
-                    viewModel.error = null
-                },
-                placeholder = "主密码",
-                secret = true,
-                keyboardType = KeyboardType.Password,
-                imeAction = ImeAction.Done,
-                onImeAction = submit,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .graphicsLayer { translationX = shake },
-            )
-            Spacer(Modifier.height(Space.x2))
-            JkButton(
-                text = "解锁",
-                onClick = submit,
-                enabled = secret.isNotEmpty() && waitSeconds == 0L,
-                loading = viewModel.busy,
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
-
-        Spacer(Modifier.height(Space.x2))
-        Row(horizontalArrangement = Arrangement.spacedBy(Space.x1)) {
-            if (biometricReady && !usePin) {
-                JkButton(
-                    text = "生物识别",
-                    icon = Icons.Outlined.Fingerprint,
-                    style = ButtonStyle.Secondary,
-                    compact = true,
-                    onClick = startBiometric,
-                )
-            }
-            if (pinEnabled) {
-                JkButton(
-                    text = if (usePin) "改用主密码" else "改用 PIN",
-                    style = ButtonStyle.Ghost,
-                    compact = true,
-                    onClick = {
-                        usePin = !usePin
-                        secret = ""
-                        viewModel.error = null
-                    },
-                )
-            }
-        }
-
-        if (container.settings.current.wipeOnFailure) {
-            Spacer(Modifier.height(Space.x3))
-            Text(
-                text = "连续输错 ${VaultManager.MAX_ATTEMPTS} 次将清空全部数据",
-                style = JkType.caption,
-                color = colors.textTertiary,
-            )
-        }
-        Spacer(Modifier.height(Space.x1))
-        JkButton("忘记主密码？", { showForgot = true }, style = ButtonStyle.Ghost, compact = true)
-        Spacer(Modifier.height(Space.x4))
-    }
+    LockContent(
+        state = LockUiState(
+            waitSeconds = waitSeconds,
+            busy = viewModel.busy,
+            usePin = usePin,
+            secretLength = secret.length,
+            secret = secret,
+            error = viewModel.error,
+            pinEnabled = pinEnabled,
+            biometricReady = biometricReady,
+            wipeOnFailure = container.settings.current.wipeOnFailure,
+        ),
+        shake = shake,
+        onDigit = { digit ->
+            if (secret.length < VaultManager.MAX_PIN_LENGTH) secret += digit
+            viewModel.error = null
+            container.lock.touch()
+        },
+        onBackspace = { secret = secret.dropLast(1) },
+        onSecretChange = { value ->
+            secret = value
+            viewModel.error = null
+        },
+        onSubmit = submit,
+        onBiometric = startBiometric,
+        onToggleMode = {
+            usePin = !usePin
+            secret = ""
+            viewModel.error = null
+        },
+        onForgot = { showForgot = true },
+    )
 
     if (showForgot) {
         JkDialog(
@@ -331,21 +260,54 @@ fun LockScreen() {
     }
 }
 
-/** 已输入位数的圆点。PIN 长度不固定，所以按最短位数留出空位，超出后继续增加。 */
+/** 已输入位数的圆点。PIN 长度不固定，所以按最短位数留出空位，超出后继续增加；新点亮的一位轻轻弹一下。 */
 @Composable
-private fun PinDots(count: Int) {
+private fun PinDots(count: Int, error: Boolean) {
     val colors = Jk.colors
-    Row(horizontalArrangement = Arrangement.spacedBy(Space.x1_5), verticalAlignment = Alignment.CenterVertically) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(Space.x1_5),
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .heightIn(min = 20.dp)
+            .semantics { contentDescription = "已输入 $count 位" },
+    ) {
         for (index in 0 until maxOf(VaultManager.MIN_PIN_LENGTH, count)) {
             val filled = index < count
+            val scale by animateFloatAsState(if (filled) 1f else 0.8f, spring(dampingRatio = 0.45f, stiffness = 900f), label = "dot")
+            val fill = when {
+                error -> colors.danger
+                filled -> colors.textPrimary
+                else -> colors.bg
+            }
             Box(
                 Modifier
                     .size(12.dp)
+                    .graphicsLayer {
+                        scaleX = scale
+                        scaleY = scale
+                    }
                     .clip(CircleShape)
-                    .background(if (filled) colors.textPrimary else colors.bg)
-                    .border(1.dp, if (filled) colors.textPrimary else colors.textTertiary, CircleShape),
+                    .background(fill)
+                    .border(1.dp, if (filled || error) fill else colors.textTertiary, CircleShape),
             )
         }
+    }
+}
+
+/** 锁屏上的一条状态提示：浅底胶囊 + 图标 + 文字。 */
+@Composable
+private fun LockNotice(icon: ImageVector, text: String, tint: androidx.compose.ui.graphics.Color, background: androidx.compose.ui.graphics.Color) {
+    Row(
+        modifier = Modifier
+            .clip(Radius.control)
+            .background(background)
+            .padding(horizontal = Space.x1_5, vertical = Space.x1)
+            .semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(16.dp))
+        Spacer(Modifier.width(Space.x1))
+        Text(text, style = JkType.small.copy(fontFeatureSettings = "tnum"), color = tint, textAlign = TextAlign.Start)
     }
 }
 
@@ -367,7 +329,7 @@ private fun PinPad(
             Row(horizontalArrangement = Arrangement.spacedBy(Space.x2_5)) {
                 for (digit in rowKeys) {
                     PadKey(enabled = enabled, onClick = { onDigit(digit) }) {
-                        Text(digit.toString(), style = JkType.display, color = colors.textPrimary)
+                        Text(digit.toString(), style = JkType.display.copy(fontFeatureSettings = "tnum"), color = if (enabled) colors.textPrimary else colors.textTertiary)
                     }
                 }
             }
@@ -381,7 +343,7 @@ private fun PinPad(
                 Spacer(Modifier.size(64.dp))
             }
             PadKey(enabled = enabled, onClick = { onDigit('0') }) {
-                Text("0", style = JkType.display, color = colors.textPrimary)
+                Text("0", style = JkType.display.copy(fontFeatureSettings = "tnum"), color = if (enabled) colors.textPrimary else colors.textTertiary)
             }
             PadKey(enabled = true, outlined = false, onClick = onBackspace) {
                 Icon(
@@ -403,22 +365,187 @@ private fun PadKey(
     content: @Composable () -> Unit,
 ) {
     val colors = Jk.colors
+    val view = LocalView.current
+    val press = rememberJkPress(0.92f)
+    val pressed by press.interaction.collectIsPressedAsState()
+    // 数字键：浅灰圆底、不画描边；按下时加深一档
+    // 1.3：数字键是一颗颗玻璃圆钮，按下时更亮一档
+    val fill by animateColorAsState(if (pressed && outlined) Jk.surfaces.chipSelected.fill else Jk.surfaces.chip.fill, tween(90), label = "padKey")
+    val edge = Jk.surfaces.chip
     Box(
         modifier = Modifier
             .size(64.dp)
+            .pressScale(press)
             .clip(CircleShape)
             .then(
                 if (outlined) {
                     Modifier
-                        .background(colors.surface)
-                        .border(1.dp, colors.border, CircleShape)
+                        .background(fill)
+                        .border(1.dp, com.xiguli.jinkui.ui.theme.specularBrush(edge.highlightColor, edge.highlight), CircleShape)
                 } else {
                     Modifier
                 },
             )
-            .clickable(enabled = enabled, onClick = onClick),
+            .clickable(interactionSource = press.interaction, indication = LocalIndication.current, enabled = enabled, role = Role.Button) {
+                // 键盘触感，跟随系统“触摸反馈”设置
+                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                onClick()
+            },
         contentAlignment = Alignment.Center,
     ) {
         content()
     }
+}
+
+/** 锁屏要显示的状态（无状态的 [LockContent] 用；界面测试可以直接构造）。 */
+data class LockUiState(
+    val waitSeconds: Long = 0L,
+    val busy: Boolean = false,
+    val usePin: Boolean = false,
+    val secretLength: Int = 0,
+    /** 主密码输入框的内容；PIN 模式下不用。 */
+    val secret: String = "",
+    val error: String? = null,
+    val pinEnabled: Boolean = false,
+    val biometricReady: Boolean = false,
+    val wipeOnFailure: Boolean = true,
+)
+
+/** 锁屏主体（无状态）：品牌、提示、状态条、PIN 圆点与数字键盘（或主密码输入框）、切换与说明。 */
+@Composable
+fun LockContent(
+    state: LockUiState,
+    shake: Float = 0f,
+    onDigit: (Char) -> Unit = {},
+    onBackspace: () -> Unit = {},
+    onSecretChange: (String) -> Unit = {},
+    onSubmit: () -> Unit = {},
+    onBiometric: () -> Unit = {},
+    onToggleMode: () -> Unit = {},
+    onForgot: () -> Unit = {},
+) {
+    val colors = Jk.colors
+    val waitSeconds = state.waitSeconds
+    val usePin = state.usePin
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .systemBarsPadding()
+            .imePadding()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = Space.x3),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Spacer(Modifier.height(Space.x6 + Space.x3))
+        BrandMark(size = 72.dp)
+        Spacer(Modifier.height(Space.x2_5))
+        Text("金匮", style = JkType.brand, color = colors.textPrimary)
+        Spacer(Modifier.height(Space.x05))
+        Text(
+            text = when {
+                waitSeconds > 0 -> "请等待 $waitSeconds 秒后再试"
+                state.busy -> "正在解锁…"
+                usePin -> "输入 PIN 解锁"
+                else -> "输入主密码解锁"
+            },
+            style = JkType.small,
+            color = colors.textSecondary,
+        )
+
+        // 状态条：冷却倒计时 / 错误提示。没有内容时也占着同样的高度，界面不上下跳。
+        val error = state.error
+        Spacer(Modifier.height(Space.x2))
+        Box(Modifier.heightIn(min = 40.dp).widthIn(max = 340.dp), contentAlignment = Alignment.Center) {
+            when {
+                waitSeconds > 0 -> LockNotice(
+                    icon = Icons.Outlined.Timer,
+                    text = "输错次数较多，请等待 $waitSeconds 秒",
+                    tint = colors.accent,
+                    background = colors.accentSoft,
+                )
+                error != null -> LockNotice(
+                    icon = Icons.Outlined.ErrorOutline,
+                    text = error,
+                    tint = colors.danger,
+                    background = colors.dangerSoft,
+                )
+            }
+        }
+        Spacer(Modifier.height(Space.x2))
+
+        if (usePin) {
+            Box(Modifier.graphicsLayer { translationX = shake }) { PinDots(count = state.secretLength, error = state.error != null) }
+            Spacer(Modifier.height(Space.x4))
+            PinPad(
+                enabled = waitSeconds == 0L && !state.busy,
+                onDigit = onDigit,
+                onBackspace = onBackspace,
+                side = if (state.biometricReady) Icons.Outlined.Fingerprint else null,
+                onSide = onBiometric,
+            )
+            Spacer(Modifier.height(Space.x3))
+            JkButton(
+                text = "解锁",
+                onClick = onSubmit,
+                enabled = state.secretLength >= VaultManager.MIN_PIN_LENGTH && waitSeconds == 0L,
+                loading = state.busy,
+                modifier = Modifier.width(232.dp),
+            )
+        } else {
+            JkTextField(
+                value = state.secret,
+                onValueChange = onSecretChange,
+                placeholder = "主密码",
+                secret = true,
+                keyboardType = KeyboardType.Password,
+                imeAction = ImeAction.Done,
+                onImeAction = onSubmit,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .graphicsLayer { translationX = shake },
+            )
+            Spacer(Modifier.height(Space.x2))
+            JkButton(
+                text = "解锁",
+                onClick = onSubmit,
+                enabled = state.secret.isNotEmpty() && waitSeconds == 0L,
+                loading = state.busy,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+
+        Spacer(Modifier.height(Space.x2))
+        Row(horizontalArrangement = Arrangement.spacedBy(Space.x1)) {
+            if (state.biometricReady && !usePin) {
+                JkButton(
+                    text = "生物识别",
+                    icon = Icons.Outlined.Fingerprint,
+                    style = ButtonStyle.Secondary,
+                    compact = true,
+                    onClick = onBiometric,
+                )
+            }
+            if (state.pinEnabled) {
+                JkButton(
+                    text = if (usePin) "改用主密码" else "改用 PIN",
+                    style = ButtonStyle.Ghost,
+                    compact = true,
+                    onClick = onToggleMode,
+                )
+            }
+        }
+
+        if (state.wipeOnFailure) {
+            Spacer(Modifier.height(Space.x3))
+            Text(
+                text = "连续输错 ${VaultManager.MAX_ATTEMPTS} 次将清空全部数据",
+                style = JkType.caption,
+                color = colors.textTertiary,
+            )
+        }
+        Spacer(Modifier.height(Space.x1))
+        JkButton("忘记主密码？", onForgot, style = ButtonStyle.Ghost, compact = true)
+        Spacer(Modifier.height(Space.x4))
+    }
+
 }

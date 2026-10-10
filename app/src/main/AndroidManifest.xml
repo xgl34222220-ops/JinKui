@@ -19,6 +19,7 @@
         android:name=".JinKuiApp"
         android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
+        android:enableOnBackInvokedCallback="true"
         android:fullBackupContent="false"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
@@ -36,6 +37,25 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- 桌面长按图标的“记一笔”快捷方式（静态快捷方式，不需要任何权限） -->
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
         </activity>
+
+        <!--
+            自动记账（默认关闭）：读取微信 / 支付宝 / 银行 App 的收付款通知，生成“待确认”记录。
+            android:permission 表示只有系统能绑定这个服务；它不是金匮申请的权限，
+            用户要在系统设置里手动授予“通知使用权”才会生效，随时可以收回。
+        -->
+        <service
+            android:name=".core.auto.PaymentNotificationService"
+            android:exported="true"
+            android:label="@string/auto_bookkeeping_label"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
     </application>
 </manifest>

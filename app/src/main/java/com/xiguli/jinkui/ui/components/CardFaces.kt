@@ -66,7 +66,11 @@ class CardTheme(val start: Color, val end: Color, val accent: Color)
  *
  * 用户在编辑页另选颜色后，底色跟着换，纹理仍按类型保留。
  */
-fun cardTheme(type: CardType, colorIndex: Int): CardTheme {
+fun cardTheme(type: CardType, colorIndex: Int, brand: Color? = null): CardTheme {
+    if (brand != null && colorIndex < 0) {
+        // 银行品牌色：亮端略压暗、暗端压到接近墨色，白字与金色芯片都保持足够对比
+        return CardTheme(lerp(brand, Color.Black, 0.12f), lerp(brand, Color.Black, 0.64f), Color(0xFFE8C77E))
+    }
     if (colorIndex >= 0) {
         val base = Color(CardPalette.argb(colorIndex))
         return CardTheme(lerp(base, Color.White, 0.10f), lerp(base, Color.Black, 0.26f), Color.White)
@@ -102,17 +106,32 @@ fun CardFace(
     pinned: Boolean = false,
     aspect: Float = 1.586f,
     mini: Boolean = false,
+    /** 银行品牌色（[BankBrand]），null 时用类型默认卡面。 */
+    brand: Color? = null,
 ) {
-    val theme = cardTheme(type, colorIndex)
+    val theme = cardTheme(type, colorIndex, brand)
     val ink = Color.White
     Box(
         modifier = modifier
             .aspectRatio(aspect)
             .clip(if (mini) Radius.field else Radius.card)
             .background(Brush.linearGradient(listOf(theme.start, theme.end)))
-            .border(1.dp, ink.copy(alpha = 0.14f), if (mini) Radius.field else Radius.card),
+            .border(1.dp, com.xiguli.jinkui.ui.theme.specularBrush(ink, 0.55f), if (mini) Radius.field else Radius.card),
     ) {
-        Canvas(Modifier.matchParentSize()) { drawCardTexture(type, theme.accent, mini) }
+        Canvas(Modifier.matchParentSize()) {
+            drawCardTexture(type, theme.accent, mini)
+            // 1.3 玻璃卡面：左上一道斜向的光泽带
+            drawRect(
+                Brush.linearGradient(
+                    0f to ink.copy(alpha = 0.22f),
+                    0.38f to ink.copy(alpha = 0.10f),
+                    0.39f to ink.copy(alpha = 0.04f),
+                    1f to ink.copy(alpha = 0f),
+                    start = androidx.compose.ui.geometry.Offset.Zero,
+                    end = androidx.compose.ui.geometry.Offset(size.width, size.height),
+                ),
+            )
+        }
         if (mini) {
             Column(
                 modifier = Modifier
@@ -142,7 +161,7 @@ fun CardFace(
                     Column(Modifier.weight(1f)) {
                         Text(
                             text = hint,
-                            style = JkType.mono.copy(fontSize = JkType.small.fontSize),
+                            style = JkType.cardNumber,
                             color = ink.copy(alpha = 0.74f),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -163,7 +182,7 @@ fun CardFace(
                             Text(secondaryLabel, style = JkType.caption, color = theme.accent, maxLines = 1)
                             Text(
                                 text = secondary,
-                                style = JkType.mono.copy(fontSize = JkType.small.fontSize),
+                                style = JkType.cardNumber,
                                 color = ink.copy(alpha = 0.92f),
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
@@ -185,7 +204,8 @@ private fun DrawScope.drawCardTexture(type: CardType, accent: Color, mini: Boole
     val h = size.height
     val u = 1.dp.toPx()
     val ink = Color.White
-    val roomy = !mini && h > 150f * u
+    // 置顶区的卡面（最宽 260dp，约 164dp 高）放不下芯片等大标志物，否则会压住卡号
+    val roomy = !mini && h > 180f * u
     val hair = Stroke(width = 1.2f * u)
 
     when (type) {

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 启动画面的薄荷渐变（与 Compose 里的页面底一致）。 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <gradient
+        android:angle="270"
+        android:endColor="@color/splash_bottom"
+        android:startColor="@color/splash_top"
+        android:type="linear" />
+</shape>

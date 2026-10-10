@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        Android 12 起使用系统原生启动画面：薄荷底色 + 金匮图标（自适应图标，系统裁成圆形）。
+        不引入 core-splashscreen：minSdk 26，12 以下用 windowBackground 的图层就够了。
+        第一帧画好后系统启动画面立即消失，Compose 里再把同样的画面淡出到玻璃背景；不人为拖延启动。
+    -->
+    <style name="Theme.JinKui" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="android:windowBackground">@drawable/splash_gradient</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowSplashScreenBackground">@color/splash_background</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
+        <item name="android:windowSplashScreenAnimationDuration">0</item>
+    </style>
+</resources>

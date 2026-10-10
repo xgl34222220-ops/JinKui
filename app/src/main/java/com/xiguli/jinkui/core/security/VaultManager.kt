@@ -86,6 +86,9 @@ class VaultManager(
     /** 锁定或清空时执行（仓库在这里丢弃明文缓存）。可能在后台线程调用。 */
     var onLocked: (() -> Unit)? = null
 
+    /** 清空全部数据之后执行（删除自动记账的暂存等保险库之外的数据）。 */
+    var onWiped: (() -> Unit)? = null
+
     val isUnlocked: Boolean get() = mutableState.value == VaultState.Unlocked
     val pinEnabled: Boolean get() = meta.pinBlob != null
     val biometricEnabled: Boolean get() = meta.biometricBlob != null
@@ -323,6 +326,7 @@ class VaultManager(
         attachments.deleteAll()
         meta.clear()
         keystore.deleteAll()
+        runCatching { onWiped?.invoke() }
         mutableState.value = VaultState.Uninitialized
     }
 
