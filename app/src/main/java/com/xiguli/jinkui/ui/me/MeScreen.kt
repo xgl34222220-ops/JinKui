@@ -126,6 +126,7 @@ fun MeScreen(actions: MeActions) {
             onHealth = actions.onHealth,
             onGenerator = { showGenerator = true },
             onImport = actions.onImport,
+            onImportHistory = actions.onImportHistory,
             onAuto = actions.onAuto,
         ),
     )
