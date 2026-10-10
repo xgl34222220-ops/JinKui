@@ -20,6 +20,10 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.unit.dp
@@ -110,14 +114,15 @@ class LedgerScreensUiTest {
     @Test
     fun ledgerHomeShowsSummaryDaysAndRows() {
         val activity = show { LedgerHome(homeUi(), TxFilter(), LazyListState(), LedgerHomeActions()) }
-        compose.onNodeWithText("10月支出").assertExists()
-        // 月度支出：¥32.50 + ¥18.00 + ¥3,800.00 + ¥129.90 + ¥68.00
-        compose.onNodeWithText("¥4,048.40").assertExists()
+        compose.onNodeWithText("本月支出(元)").assertExists()
+        // 月度支出：¥32.50 + ¥18.00 + ¥3,800.00 + ¥129.90 + ¥68.00（头图里不带货币符号）
+        compose.onNodeWithText("4,048.40").assertExists()
         compose.onNodeWithText("今天").assertExists()
         compose.onNodeWithText("-¥32.50").assertExists()
         compose.onNodeWithText("餐饮 · 午餐").assertExists()
-        compose.onNodeWithText("快速记一笔").assertExists()
-        compose.onNodeWithText("明细").assertExists()
+        compose.onNodeWithText("添加一条新记账").assertExists()
+        compose.onNodeWithText("常用").assertExists()
+        compose.onNodeWithText("剩余预算").assertExists()
         snapshot(activity, "ledger-home-light")
     }
 
@@ -125,27 +130,56 @@ class LedgerScreensUiTest {
     fun quickAddPicksMostUsedCategoryFirst() {
         var picked: String? = null
         show { LedgerHome(homeUi(), TxFilter(), LazyListState(), LedgerHomeActions(onQuickAdd = { picked = it })) }
-        compose.onNodeWithText("快速记一笔").assertExists()
-        // 点“快速记一笔”里的“餐饮”胶囊
+        compose.onNodeWithText("常用").assertExists()
+        // 点“常用”里的“餐饮”胶囊
         compose.onAllNodesWithText("餐饮").onFirst().performClick()
         assertEquals("cat-food", picked)
     }
 
     @Test
-    fun ledgerCalendarLightAndDark() {
-        val light = show { LedgerHome(homeUi(), TxFilter(), LazyListState(), LedgerHomeActions(), initialCalendar = true) }
-        compose.onNodeWithContentDescription("10月10日，今天，支 ¥50.50").assertExists()
-        // 默认选中今天，下面列出今天的流水（真实字体下日历更高，流水可能在首屏之外，先滚过去）
+    fun calendarLightDarkAndFontScale() {
+        var selected = LedgerSamples.today
+        val light = show {
+            var day by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(LedgerSamples.today) }
+            CalendarContent(homeUi(), day, { day = it; selected = it }, {}, {}, LedgerHomeActions())
+        }
+        // 2026-10-10 是农历九月初一，格子里显示月名；10 月 8 日寒露、10 月 18 日重阳、10 月 1 日国庆节
+        compose.onNodeWithContentDescription("10月10日，今天，农历九月初一，支 ¥50.50").assertExists()
+        compose.onNodeWithText("九月").assertExists()
+        compose.onNodeWithText("寒露").assertExists()
+        compose.onNodeWithText("重阳").assertExists()
+        compose.onNodeWithText("国庆节").assertExists()
         scrollList(androidx.compose.ui.test.hasText("餐饮 · 午餐"))
         compose.onNodeWithText("餐饮 · 午餐").assertExists()
-        snapshot(light, "ledger-calendar-light")
-        scrollList(androidx.compose.ui.test.hasContentDescription("10月8日，支 ¥3,800.00"))
-        compose.onNodeWithContentDescription("10月8日，支 ¥3,800.00").performClick()
+        snapshot(light, "calendar-light")
+        scrollList(androidx.compose.ui.test.hasContentDescription("10月8日，农历八月廿八，寒露，支 ¥3,800.00"))
+        compose.onNodeWithContentDescription("10月8日，农历八月廿八，寒露，支 ¥3,800.00").performClick()
         compose.waitForIdle()
+        assertEquals(java.time.LocalDate.of(2026, 10, 8), selected)
         scrollList(androidx.compose.ui.test.hasText("居住 · 房租房贷"))
         compose.onNodeWithText("居住 · 房租房贷").assertExists()
-        val dark = show(dark = true) { LedgerHome(homeUi(), TxFilter(), LazyListState(), LedgerHomeActions(), initialCalendar = true) }
-        snapshot(dark, "ledger-calendar-dark")
+        val dark = show(dark = true) { CalendarContent(homeUi(), LedgerSamples.today, {}, {}, {}, LedgerHomeActions()) }
+        snapshot(dark, "calendar-dark")
+    }
+
+    @Test
+    fun calendarEmptyDayShowsIllustration() {
+        val activity = show { CalendarContent(homeUi(), java.time.LocalDate.of(2026, 10, 2), {}, {}, {}, LedgerHomeActions()) }
+        scrollList(androidx.compose.ui.test.hasText("这一天你还没有任何记账"))
+        compose.onNodeWithText("这一天你还没有任何记账").assertExists()
+        snapshot(activity, "calendar-empty-day")
+    }
+
+    @Test
+    fun calendarAtLargeFontScale() {
+        org.robolectric.RuntimeEnvironment.setFontScale(1.3f)
+        try {
+            val activity = show { CalendarContent(homeUi(), LedgerSamples.today, {}, {}, {}, LedgerHomeActions()) }
+            compose.onNodeWithText("九月").assertExists()
+            snapshot(activity, "calendar-font130")
+        } finally {
+            org.robolectric.RuntimeEnvironment.setFontScale(1f)
+        }
     }
 
     /** 在账本首页的纵向列表里滚到某个节点（横向的“快速记一笔”不算）。 */
@@ -162,7 +196,7 @@ class LedgerScreensUiTest {
         org.robolectric.RuntimeEnvironment.setFontScale(1.3f)
         try {
             val activity = show { LedgerHome(homeUi(), TxFilter(), LazyListState(), LedgerHomeActions()) }
-            compose.onNodeWithText("¥4,048.40").assertExists()
+            compose.onNodeWithText("4,048.40").assertExists()
             snapshot(activity, "ledger-home-font130")
         } finally {
             org.robolectric.RuntimeEnvironment.setFontScale(1f)
@@ -189,18 +223,41 @@ class LedgerScreensUiTest {
         assertEquals("牛肉面", deleted?.note)
     }
 
-    @Test
-    fun homeTabBarCenterButtonFollowsTab() {
-        val added = mutableListOf<com.xiguli.jinkui.ui.nav.HomeTab>()
-        val activity = show {
-            androidx.compose.foundation.layout.Column(Modifier.fillMaxSize()) {
-                androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
-                HomeTabBar(com.xiguli.jinkui.ui.nav.HomeTab.LEDGER, {}, { added += it })
-            }
+    /** 首页外壳：内容铺满整屏、从悬浮底栏后面滚过；底栏单独截一张近景。 */
+    private fun showTabs(dark: Boolean, start: com.xiguli.jinkui.ui.nav.HomeTab = com.xiguli.jinkui.ui.nav.HomeTab.LEDGER, onSelect: (com.xiguli.jinkui.ui.nav.HomeTab) -> Unit = {}) = show(dark) {
+        var tab by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(start) }
+        com.xiguli.jinkui.ui.nav.HomeTabs(selected = tab, onSelect = { tab = it; onSelect(it) }) {
+            LedgerHome(homeUi(), TxFilter(), LazyListState(), LedgerHomeActions())
         }
-        compose.onNodeWithContentDescription("记一笔").performClick()
-        assertEquals(listOf(com.xiguli.jinkui.ui.nav.HomeTab.LEDGER), added)
-        snapshot(activity, "home-tab-bar")
+    }
+
+    @Test
+    fun homeTabBarSelectsTabs() {
+        val picked = mutableListOf<com.xiguli.jinkui.ui.nav.HomeTab>()
+        val activity = showTabs(dark = false, onSelect = { picked += it })
+        for (label in listOf("账本", "日历", "卡包", "统计", "我的")) compose.onAllNodesWithText(label).onFirst().assertExists()
+        // 每个标签的触控区至少 48dp 高、宽度均分
+        compose.onNodeWithText("日历").assertExists()
+        compose.onAllNodes(androidx.compose.ui.test.SemanticsMatcher.expectValue(androidx.compose.ui.semantics.SemanticsProperties.Role, androidx.compose.ui.semantics.Role.Tab)).assertCountEquals(5)
+        snapshot(activity, "tabbar-light")
+        compose.onNodeWithText("统计").performClick()
+        compose.waitForIdle()
+        assertEquals(listOf(com.xiguli.jinkui.ui.nav.HomeTab.STATS), picked)
+        snapshot(activity, "tabbar-light-stats")
+    }
+
+    @Test
+    fun homeTabBarDarkAndFontScale() {
+        val dark = showTabs(dark = true, start = com.xiguli.jinkui.ui.nav.HomeTab.CARDS)
+        snapshot(dark, "tabbar-dark")
+        org.robolectric.RuntimeEnvironment.setFontScale(1.3f)
+        try {
+            val big = showTabs(dark = false, start = com.xiguli.jinkui.ui.nav.HomeTab.ME)
+            compose.onAllNodesWithText("我的").onFirst().assertExists()
+            snapshot(big, "tabbar-font130")
+        } finally {
+            org.robolectric.RuntimeEnvironment.setFontScale(1f)
+        }
     }
 
     @Test
@@ -242,29 +299,72 @@ class LedgerScreensUiTest {
     }
 
     @Test
-    fun filterChipKeepsVisualSizeWith48dpTouchTarget() {
-        show { LedgerHome(homeUi(), TxFilter(), LazyListState(), LedgerHomeActions()) }
-        compose.onNodeWithText("全部账户").assertHeightIsEqualTo(32.dp)
-        compose.onNodeWithText("全部账户").assertTouchHeightIsEqualTo(48.dp)
+    fun filterPillHas48dpTouchTarget() {
+        var picked = false
+        show { LedgerHome(homeUi(), TxFilter(), LazyListState(), LedgerHomeActions(onPickAccount = { picked = true })) }
+        compose.onNodeWithText("账户").assertTouchHeightIsEqualTo(48.dp)
+        compose.onNodeWithText("账户").performClick()
+        assertTrue(picked)
     }
 
     @Test
-    fun statsLightAndDark() {
-        val stats = buildStatsUi(LedgerSamples.data, october, TxType.EXPENSE, LedgerSamples.zone)
+    fun statsMonthLightAndDark() {
+        val stats = buildStatsUi(LedgerSamples.data, StatsMode.MONTH, october, 2026, LedgerSamples.zone, LedgerSamples.today)
         val light = show { LedgerStatsContent(stats, {}, {}, {}) }
-        compose.onNodeWithText("合计").assertExists()
+        compose.onNodeWithText("月支出").assertExists()
+        compose.onNodeWithText("收支热力").assertExists()
         compose.onNodeWithText("居住").assertExists()
-        snapshot(light, "ledger-stats-light")
+        snapshot(light, "stats-month-light")
         val dark = show(dark = true) { LedgerStatsContent(stats, {}, {}, {}) }
-        snapshot(dark, "ledger-stats-dark")
+        snapshot(dark, "stats-month-dark")
+    }
+
+    @Test
+    fun statsYearLightDarkAndFontScale() {
+        val stats = buildStatsUi(LedgerSamples.data, StatsMode.YEAR, october, 2026, LedgerSamples.zone, LedgerSamples.today)
+        assertEquals(12, stats.bars.size)
+        assertEquals(12, stats.heat.size)
+        assertEquals(stats.summary.expense, stats.bars.sumOf { it.summary.expense })
+        val light = show { LedgerStatsContent(stats, {}, {}, {}) }
+        compose.onNodeWithText("年支出").assertExists()
+        compose.onNodeWithText("今年").assertExists()
+        compose.onNodeWithText("收支统计").assertExists()
+        snapshot(light, "stats-year-light")
+        val dark = show(dark = true) { LedgerStatsContent(stats, {}, {}, {}) }
+        snapshot(dark, "stats-year-dark")
+        org.robolectric.RuntimeEnvironment.setFontScale(1.3f)
+        try {
+            val big = show { LedgerStatsContent(stats, {}, {}, {}) }
+            snapshot(big, "stats-year-font130")
+        } finally {
+            org.robolectric.RuntimeEnvironment.setFontScale(1f)
+        }
     }
 
     @Test
     fun statsEmpty() {
-        val stats = buildStatsUi(LedgerData(categories = LedgerDefaults.categories()), october, TxType.INCOME, LedgerSamples.zone)
+        val stats = buildStatsUi(LedgerData(categories = LedgerDefaults.categories()), StatsMode.MONTH, october, 2026, LedgerSamples.zone, LedgerSamples.today)
         val activity = show { LedgerStatsContent(stats, {}, {}, {}) }
-        compose.onNodeWithText("这个月还没有收入记录").assertExists()
-        snapshot(activity, "ledger-stats-empty")
+        compose.onNodeWithText("这个月还没有支出记录").performScrollTo()
+        compose.onNodeWithText("这个月还没有支出记录").assertExists()
+        snapshot(activity, "stats-empty")
+    }
+
+    @Test
+    fun assetsOverviewLightAndDark() {
+        val ui = buildAssetsUi(LedgerSamples.data)
+        assertEquals(ui.assets - ui.liabilities, ui.net)
+        val light = show { LedgerAssetsContent(ui, {}, {}) }
+        compose.onNodeWithText("净资产(元)").assertExists()
+        compose.onNodeWithText("资金账户").assertExists()
+        snapshot(light, "assets-light")
+        val dark = show(dark = true) { LedgerAssetsContent(ui, {}, {}) }
+        snapshot(dark, "assets-dark")
+    }
+
+    private fun scrollTo(target: androidx.compose.ui.test.SemanticsMatcher) {
+        compose.onAllNodes(androidx.compose.ui.test.hasScrollToNodeAction()).onFirst().performScrollToNode(target)
+        compose.waitForIdle()
     }
 
     @Test

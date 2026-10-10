@@ -21,16 +21,20 @@ sealed interface Screen {
     data object Health : Screen
     data object Organize : Screen
     data object LedgerAccounts : Screen
-    data object LedgerStats : Screen
     data object LedgerBudget : Screen
     data object LedgerCategories : Screen
     data object LedgerRecurring : Screen
+    /** 资产总览：净资产、负债与信用账户，按现有账户算出。 */
+    data object LedgerAssets : Screen
 }
 
-/** 首页底部的两个分区。 */
+/** 首页底部悬浮栏的五个分区（1.1 起）：账本是首页；卡包保留全部卡片功能。 */
 enum class HomeTab(val label: String) {
-    CARDS("卡包"),
     LEDGER("账本"),
+    CALENDAR("日历"),
+    CARDS("卡包"),
+    STATS("统计"),
+    ME("我的"),
 }
 
 /**
@@ -48,13 +52,7 @@ class Navigator {
     val current: NavEntry get() = stack.last()
 
     /** 首页当前停在哪个分区；进详情再返回时保持不变。 */
-    var homeTab by mutableStateOf(HomeTab.CARDS)
-
-    /**
-     * 底部栏中间的“＋”被点了、还没被对应分区处理的请求。分区处理后清空，
-     * 这样从详情页返回、页面重新进入组合时不会再弹一次。
-     */
-    var pendingAdd by mutableStateOf<HomeTab?>(null)
+    var homeTab by mutableStateOf(HomeTab.LEDGER)
     val canPop: Boolean get() = stack.size > 1
 
     fun push(screen: Screen) {
@@ -74,8 +72,9 @@ class Navigator {
 
 /** 用给定的构造逻辑在当前页面作用域内取得 ViewModel。 */
 @Composable
-inline fun <reified VM : ViewModel> jkViewModel(crossinline build: () -> VM): VM =
+inline fun <reified VM : ViewModel> jkViewModel(key: String? = null, crossinline build: () -> VM): VM =
     viewModel(
+        key = key,
         factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T = build() as T

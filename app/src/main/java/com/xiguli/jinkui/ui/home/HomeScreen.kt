@@ -202,8 +202,6 @@ fun HomeScreen(
     onSettings: () -> Unit,
     onHealth: () -> Unit,
     onOrganize: () -> Unit,
-    addRequested: Boolean = false,
-    onAddHandled: () -> Unit = {},
 ) {
     val container = LocalContainer.current
     val viewModel = jkViewModel { HomeViewModel(container) }
@@ -218,14 +216,6 @@ fun HomeScreen(
     var showTypes by remember { mutableStateOf(false) }
     var showGenerator by remember { mutableStateOf(false) }
     var showMore by remember { mutableStateOf(false) }
-
-    // 底部栏中间的“＋”：在卡包分区里打开“新建卡片”
-    LaunchedEffect(addRequested) {
-        if (addRequested) {
-            showTypes = true
-            onAddHandled()
-        }
-    }
 
     // 列表视图有自己的一整套版面；牌堆与空首页继续用下面原来的布局。
     if (!settings.deckView && ui.total > 0) {
@@ -242,6 +232,7 @@ fun HomeScreen(
             onCopy = { card, field -> viewModel.copy(card, field) },
             onToggleView = { container.settings.update { it.copy(deckView = true) } },
             onLock = { container.vault.lock() },
+            onCreate = { showTypes = true },
             onMore = { showMore = true },
             onHealth = onHealth,
             onSort = { order -> container.settings.update { it.copy(sortOrder = order) } },
@@ -275,7 +266,7 @@ fun HomeScreen(
                             onClick = { container.settings.update { it.copy(deckView = !it.deckView) } },
                         )
                     }
-                    JkIconButton(Icons.Outlined.Lock, "立即锁定", { container.vault.lock() })
+                    if (ui.total > 0) NewCardButton { showTypes = true }
                     JkIconButton(Icons.Outlined.MoreHoriz, "更多", { showMore = true })
                 }
 
@@ -443,6 +434,16 @@ fun HomeScreen(
                 onClick = {
                     showMore = false
                     onSettings()
+                },
+            )
+            JkRow(
+                title = "立即锁定",
+                subtitle = "清掉内存里的明文，回到解锁页",
+                icon = Icons.Outlined.Lock,
+                modifier = Modifier.clip(Radius.control),
+                onClick = {
+                    showMore = false
+                    container.vault.lock()
                 },
             )
         }

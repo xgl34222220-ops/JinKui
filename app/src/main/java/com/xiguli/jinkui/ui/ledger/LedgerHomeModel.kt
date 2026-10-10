@@ -32,6 +32,10 @@ data class TxRowUi(
     val iconKey: String?,
     val amountText: String,
     val tx: LedgerTransaction,
+    /** 1.1 的行把时间、账户、备注分开排：时间用数字字体放在分类下面，账户在金额下面。 */
+    val time: String = "",
+    val where: String = "",
+    val detail: String = "",
 )
 
 /** 一天的分组头与这一天的流水。 */
@@ -42,7 +46,7 @@ data class DayUi(
     val weekday: String,
     val totals: String,
     val rows: List<TxRowUi>,
-    /** 当日支出 / 收入（分），日历视图按它着色。 */
+    /** 当日支出 / 收入（分），日历视图按它着色、分组头显示“收 / 支”。 */
     val expense: Long = 0L,
     val income: Long = 0L,
 )
@@ -171,5 +175,5 @@ fun txRow(
         TxType.INCOME -> "+" + Money.format(tx.amount)
         TxType.TRANSFER -> Money.format(tx.amount)
     }
-    return TxRowUi(tx.id, tx.type, title, subtitle, iconKey, amountText, tx)
+    return TxRowUi(tx.id, tx.type, title, subtitle, iconKey, amountText, tx, "%02d:%02d".format(time.hour, time.minute), where, detail)
 }

@@ -302,7 +302,7 @@ private fun DeckInfo(card: Card, onOpen: () -> Unit, onCopy: (CardField) -> Unit
             .graphicsLayer { alpha = fade }
             .verticalScroll(rememberScrollState())
             .padding(horizontal = Space.x2_5)
-            .padding(top = Space.x2_5, bottom = 112.dp),
+            .padding(top = Space.x2_5, bottom = com.xiguli.jinkui.ui.nav.LocalTabBarInset.current + Space.x2),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {

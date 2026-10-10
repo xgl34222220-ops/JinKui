@@ -141,142 +141,7 @@ import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.YearMonth
 
-// ── 首页分区：卡包 / 账本 ─────────────────────────────────────────
 
-/**
- * 首页外壳：上面是当前分区，下面是底部栏——左“卡包”、右“账本”，中间一个品牌色的圆形“＋”。
- * “＋”跟着当前分区走：在卡包里新建卡片，在账本里直接打开“记一笔”（参考钱迹首页中央的“＋”）。
- * 主操作因此固定在拇指够得着的正下方，不再有浮在列表上、挡住复制按钮和金额的悬浮按钮。
- * 两个分区之间短暂淡入淡出（只有 180ms，离开的分区随即销毁）。
- */
-@Composable
-fun HomeTabs(
-    selected: HomeTab,
-    onSelect: (HomeTab) -> Unit,
-    onAdd: (HomeTab) -> Unit = {},
-    content: @Composable (HomeTab) -> Unit,
-) {
-    Column(Modifier.fillMaxSize()) {
-        Crossfade(
-            targetState = selected,
-            animationSpec = tween(180),
-            label = "homeTab",
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()
-                .consumeWindowInsets(WindowInsets.navigationBars),
-        ) { tab ->
-            Box(Modifier.fillMaxSize()) { content(tab) }
-        }
-        HomeTabBar(selected, onSelect, onAdd)
-    }
-}
-
-@Composable
-fun HomeTabBar(selected: HomeTab, onSelect: (HomeTab) -> Unit, onAdd: (HomeTab) -> Unit) {
-    val colors = Jk.colors
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .background(colors.surface),
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .navigationBarsPadding()
-                .height(68.dp)
-                .padding(horizontal = Space.x2),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            TabItem(HomeTab.CARDS, selected == HomeTab.CARDS, onSelect, Modifier.weight(1f))
-            AddButton(
-                description = if (selected == HomeTab.LEDGER) "记一笔" else "新建卡片",
-                onClick = { onAdd(selected) },
-            )
-            TabItem(HomeTab.LEDGER, selected == HomeTab.LEDGER, onSelect, Modifier.weight(1f))
-        }
-    }
-}
-
-@Composable
-private fun TabItem(tab: HomeTab, active: Boolean, onSelect: (HomeTab) -> Unit, modifier: Modifier) {
-    val colors = Jk.colors
-    val haptic = LocalHapticFeedback.current
-    val pill by animateColorAsState(if (active) colors.accentSoft else Color.Transparent, tween(200), label = "tabPill")
-    val tint by animateColorAsState(if (active) colors.accent else colors.textTertiary, tween(200), label = "tabTint")
-    val pillWidth by animateDpAsState(if (active) 60.dp else 36.dp, spring(dampingRatio = 0.8f, stiffness = 600f), label = "tabPillWidth")
-    Column(
-        modifier = modifier
-            .fillMaxHeight()
-            .selectable(
-                selected = active,
-                role = Role.Tab,
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = {
-                    if (!active) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    onSelect(tab)
-                },
-            ),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-    ) {
-        Box(
-            Modifier
-                .width(pillWidth)
-                .height(30.dp)
-                .clip(CircleShape)
-                .background(pill),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                imageVector = when (tab) {
-                    HomeTab.CARDS -> if (active) Icons.Filled.Style else Icons.Outlined.Style
-                    HomeTab.LEDGER -> if (active) Icons.Filled.AccountBalanceWallet else Icons.Outlined.AccountBalanceWallet
-                },
-                contentDescription = null,
-                tint = tint,
-                modifier = Modifier.size(JkSize.icon),
-            )
-        }
-        Spacer(Modifier.height(2.dp))
-        Text(
-            text = tab.label,
-            style = if (active) JkType.caption.copy(fontWeight = FontWeight.SemiBold) else JkType.caption,
-            color = if (active) colors.textPrimary else colors.textTertiary,
-            maxLines = 1,
-        )
-    }
-}
-
-/** 中间的“＋”：56dp 品牌色圆钮，按下缩小并有触感。 */
-@Composable
-private fun AddButton(description: String, onClick: () -> Unit) {
-    val colors = Jk.colors
-    val haptic = LocalHapticFeedback.current
-    val interaction = remember { MutableInteractionSource() }
-    val pressed by interaction.collectIsPressedAsState()
-    val scale by animateFloatAsState(if (pressed) 0.92f else 1f, spring(dampingRatio = 0.6f, stiffness = 800f), label = "addScale")
-    Box(
-        modifier = Modifier
-            .padding(horizontal = Space.x1)
-            .size(56.dp)
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-            }
-            .clip(CircleShape)
-            .background(colors.primary)
-            .clickable(interactionSource = interaction, indication = LocalIndication.current, role = Role.Button) {
-                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                onClick()
-            }
-            .semantics { contentDescription = description },
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(Icons.Outlined.Add, contentDescription = null, tint = colors.onPrimary, modifier = Modifier.size(28.dp))
-    }
-}
 
 // ── 图标与配色 ────────────────────────────────────────────────────
 
@@ -339,31 +204,31 @@ fun accountIcon(kind: AccountKind): ImageVector = when (kind) {
     AccountKind.OTHER -> Icons.Outlined.AccountBalanceWallet
 }
 
-/** 图表用的一组低饱和色，与卡面配色同一气质；深色模式下整体提亮一档，保证在墨黑底上分得清。 */
+/** 图表色（1.1 薄荷）：第一色是品牌薄荷，其余是同样柔和、互相分得清的颜色；深色模式整体提亮一档。 */
 private val ChartPalette = listOf(
-    Color(0xFF3E4FC1), // 靛青（品牌色，占比最大的一项）
-    Color(0xFFB8863B), // 琥珀
-    Color(0xFF2F6B57), // 松绿
-    Color(0xFFA8483A), // 朱砂
-    Color(0xFF6B4E8C), // 黛紫
-    Color(0xFF2E7A86), // 石青
-    Color(0xFF8C6E4E), // 赭石
-    Color(0xFF5E7D3A), // 苔绿
-    Color(0xFF8C4E6B), // 绛紫
-    Color(0xFF6E6A62), // 岩灰
+    Color(0xFF3AA084), // 薄荷（品牌色，占比最大的一项）
+    Color(0xFFE07A6E), // 珊瑚
+    Color(0xFFE2A94F), // 杏黄
+    Color(0xFF5B8FD1), // 晴蓝
+    Color(0xFF9B7FC6), // 藤紫
+    Color(0xFF2E7F86), // 石青
+    Color(0xFFC98A5B), // 赭石
+    Color(0xFF8DAA4E), // 苔绿
+    Color(0xFFCF7FA0), // 桃粉
+    Color(0xFF8A928E), // 岩灰
 )
 
 private val ChartPaletteDark = listOf(
-    Color(0xFF9AA6FF),
-    Color(0xFFD9AE62),
-    Color(0xFF6FBF9F),
-    Color(0xFFE58C7C),
-    Color(0xFFAE93D3),
-    Color(0xFF6CC0CB),
-    Color(0xFFC9A887),
-    Color(0xFFA2C274),
-    Color(0xFFD08EAE),
-    Color(0xFFADA79D),
+    Color(0xFF5FC4A6),
+    Color(0xFFF59A8D),
+    Color(0xFFF0C070),
+    Color(0xFF86B2EC),
+    Color(0xFFB9A0E2),
+    Color(0xFF63B8BF),
+    Color(0xFFE0A87C),
+    Color(0xFFAFCB72),
+    Color(0xFFE6A1BE),
+    Color(0xFFADB5B1),
 )
 
 fun chartColor(index: Int, dark: Boolean = false): Color {
@@ -468,11 +333,12 @@ fun MonthSwitcher(
         }
         Text(
             text = monthLabel(month),
-            style = JkType.heading,
+            style = JkType.amount.copy(fontWeight = FontWeight.Bold),
             color = colors.textPrimary,
             textAlign = TextAlign.Center,
+            maxLines = 1,
             modifier = Modifier
-                .width(120.dp)
+                .width(124.dp)
                 .heightIn(min = 48.dp)
                 .wrapContentHeight(Alignment.CenterVertically)
                 .clickable(enabled = month != current, role = Role.Button, onClickLabel = "回到本月") { onChange(current) },

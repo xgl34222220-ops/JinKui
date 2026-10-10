@@ -56,6 +56,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.Role
+import androidx.compose.material.icons.outlined.Add
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
@@ -136,6 +138,8 @@ internal fun ListHome(
     onHealth: () -> Unit,
     onSort: (SortOrder) -> Unit,
     onTogglePin: (Card) -> Unit = {},
+    /** 标题栏右侧的“＋”：新建卡片。 */
+    onCreate: () -> Unit = {},
     /** 筛“两步验证”时验证码每秒刷新；测试传 false 并给固定时钟。 */
     ticking: Boolean = true,
     clock: () -> Long = System::currentTimeMillis,
@@ -159,7 +163,7 @@ internal fun ListHome(
             .fillMaxSize()
             .statusBarsPadding(),
     ) {
-        ListHeader(total = ui.total, onToggleView = onToggleView, onLock = onLock, onMore = onMore)
+        ListHeader(total = ui.total, onToggleView = onToggleView, onCreate = onCreate, onMore = onMore)
         SearchBar(query = query, onQuery = onQuery)
         if (ui.filters.isNotEmpty()) {
             LazyRow(
@@ -176,7 +180,7 @@ internal fun ListHome(
 
         LazyColumn(
             state = listState,
-            contentPadding = PaddingValues(top = Space.x1, bottom = Space.x4),
+            contentPadding = PaddingValues(top = Space.x1, bottom = com.xiguli.jinkui.ui.nav.LocalTabBarInset.current + Space.x2),
             modifier = Modifier.weight(1f),
         ) {
             val results = ui.results
@@ -254,7 +258,7 @@ internal fun ListHome(
 
 /** 顶栏：左边是分区大标题与一行概况，右边三个不带边框的图标。 */
 @Composable
-private fun ListHeader(total: Int, onToggleView: () -> Unit, onLock: () -> Unit, onMore: () -> Unit) {
+private fun ListHeader(total: Int, onToggleView: () -> Unit, onCreate: () -> Unit, onMore: () -> Unit) {
     val colors = Jk.colors
     Row(
         modifier = Modifier
@@ -267,8 +271,26 @@ private fun ListHeader(total: Int, onToggleView: () -> Unit, onLock: () -> Unit,
             Text("$total 张卡片 · 只在本机加密保存", style = JkType.caption, color = colors.textTertiary)
         }
         JkIconButton(Icons.Outlined.Layers, "切换为牌堆", onToggleView)
-        JkIconButton(Icons.Outlined.Lock, "立即锁定", onLock)
+        NewCardButton(onCreate)
         JkIconButton(Icons.Outlined.MoreHoriz, "更多", onMore)
+    }
+}
+
+/** 标题栏里的“新建卡片”：薄荷实心小圆钮（48dp 触控区）。卡包分区不再有悬浮按钮。 */
+@Composable
+internal fun NewCardButton(onClick: () -> Unit) {
+    val colors = Jk.colors
+    Box(
+        Modifier
+            .size(JkSize.touch)
+            .clip(CircleShape)
+            .clickable(role = Role.Button, onClickLabel = "新建卡片", onClick = onClick)
+            .semantics { contentDescription = "新建卡片" },
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(Modifier.size(36.dp).clip(CircleShape).background(colors.primary), contentAlignment = Alignment.Center) {
+            Icon(Icons.Outlined.Add, contentDescription = null, tint = colors.onPrimary, modifier = Modifier.size(22.dp))
+        }
     }
 }
 
