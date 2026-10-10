@@ -49,6 +49,12 @@ class Navigator {
 
     /** 首页当前停在哪个分区；进详情再返回时保持不变。 */
     var homeTab by mutableStateOf(HomeTab.CARDS)
+
+    /**
+     * 底部栏中间的“＋”被点了、还没被对应分区处理的请求。分区处理后清空，
+     * 这样从详情页返回、页面重新进入组合时不会再弹一次。
+     */
+    var pendingAdd by mutableStateOf<HomeTab?>(null)
     val canPop: Boolean get() = stack.size > 1
 
     fun push(screen: Screen) {

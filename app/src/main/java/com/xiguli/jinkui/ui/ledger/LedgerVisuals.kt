@@ -1,5 +1,14 @@
 package com.xiguli.jinkui.ui.ledger
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.material.icons.outlined.Add
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import com.xiguli.jinkui.data.ledger.Money
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.Crossfade
@@ -8,7 +17,6 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -40,12 +48,9 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -139,14 +144,16 @@ import java.time.YearMonth
 // ── 首页分区：卡包 / 账本 ─────────────────────────────────────────
 
 /**
- * 首页外壳：上面是当前分区，下面是分区切换栏。
- * 分区内容不再自己处理导航栏留白（由底部切换栏统一处理），卡包页面本身一行未改。
+ * 首页外壳：上面是当前分区，下面是底部栏——左“卡包”、右“账本”，中间一个品牌色的圆形“＋”。
+ * “＋”跟着当前分区走：在卡包里新建卡片，在账本里直接打开“记一笔”（参考钱迹首页中央的“＋”）。
+ * 主操作因此固定在拇指够得着的正下方，不再有浮在列表上、挡住复制按钮和金额的悬浮按钮。
  * 两个分区之间短暂淡入淡出（只有 180ms，离开的分区随即销毁）。
  */
 @Composable
 fun HomeTabs(
     selected: HomeTab,
     onSelect: (HomeTab) -> Unit,
+    onAdd: (HomeTab) -> Unit = {},
     content: @Composable (HomeTab) -> Unit,
 ) {
     Column(Modifier.fillMaxSize()) {
@@ -161,80 +168,113 @@ fun HomeTabs(
         ) { tab ->
             Box(Modifier.fillMaxSize()) { content(tab) }
         }
-        HomeTabBar(selected, onSelect)
+        HomeTabBar(selected, onSelect, onAdd)
     }
 }
 
 @Composable
-private fun HomeTabBar(selected: HomeTab, onSelect: (HomeTab) -> Unit) {
+fun HomeTabBar(selected: HomeTab, onSelect: (HomeTab) -> Unit, onAdd: (HomeTab) -> Unit) {
     val colors = Jk.colors
     Column(
         Modifier
             .fillMaxWidth()
-            .background(colors.bg),
+            .background(colors.surface),
     ) {
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(1.dp)
-                .background(colors.border),
-        )
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .navigationBarsPadding()
-                .height(64.dp),
+                .height(68.dp)
+                .padding(horizontal = Space.x2),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            for (tab in HomeTab.entries) {
-                val active = tab == selected
-                val haptic = LocalHapticFeedback.current
-                val pill by animateColorAsState(if (active) colors.accentSoft else Color.Transparent, tween(200), label = "tabPill")
-                val tint by animateColorAsState(if (active) colors.accent else colors.textTertiary, tween(200), label = "tabTint")
-                val pillWidth by animateDpAsState(if (active) 56.dp else 32.dp, spring(dampingRatio = 0.8f, stiffness = 600f), label = "tabPillWidth")
-                Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxSize()
-                        .selectable(
-                            selected = active,
-                            role = Role.Tab,
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null,
-                            onClick = {
-                                if (!active) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                onSelect(tab)
-                            },
-                        ),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center,
-                ) {
-                    Box(
-                        Modifier
-                            .width(pillWidth)
-                            .height(30.dp)
-                            .clip(CircleShape)
-                            .background(pill),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            imageVector = when (tab) {
-                                HomeTab.CARDS -> if (active) Icons.Filled.Style else Icons.Outlined.Style
-                                HomeTab.LEDGER -> if (active) Icons.Filled.AccountBalanceWallet else Icons.Outlined.AccountBalanceWallet
-                            },
-                            contentDescription = null,
-                            tint = tint,
-                            modifier = Modifier.size(JkSize.icon),
-                        )
-                    }
-                    Spacer(Modifier.height(2.dp))
-                    Text(
-                        text = tab.label,
-                        style = if (active) JkType.caption.copy(fontWeight = FontWeight.Medium) else JkType.caption,
-                        color = if (active) colors.textPrimary else colors.textTertiary,
-                    )
-                }
-            }
+            TabItem(HomeTab.CARDS, selected == HomeTab.CARDS, onSelect, Modifier.weight(1f))
+            AddButton(
+                description = if (selected == HomeTab.LEDGER) "记一笔" else "新建卡片",
+                onClick = { onAdd(selected) },
+            )
+            TabItem(HomeTab.LEDGER, selected == HomeTab.LEDGER, onSelect, Modifier.weight(1f))
         }
+    }
+}
+
+@Composable
+private fun TabItem(tab: HomeTab, active: Boolean, onSelect: (HomeTab) -> Unit, modifier: Modifier) {
+    val colors = Jk.colors
+    val haptic = LocalHapticFeedback.current
+    val pill by animateColorAsState(if (active) colors.accentSoft else Color.Transparent, tween(200), label = "tabPill")
+    val tint by animateColorAsState(if (active) colors.accent else colors.textTertiary, tween(200), label = "tabTint")
+    val pillWidth by animateDpAsState(if (active) 60.dp else 36.dp, spring(dampingRatio = 0.8f, stiffness = 600f), label = "tabPillWidth")
+    Column(
+        modifier = modifier
+            .fillMaxHeight()
+            .selectable(
+                selected = active,
+                role = Role.Tab,
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = {
+                    if (!active) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    onSelect(tab)
+                },
+            ),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Box(
+            Modifier
+                .width(pillWidth)
+                .height(30.dp)
+                .clip(CircleShape)
+                .background(pill),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = when (tab) {
+                    HomeTab.CARDS -> if (active) Icons.Filled.Style else Icons.Outlined.Style
+                    HomeTab.LEDGER -> if (active) Icons.Filled.AccountBalanceWallet else Icons.Outlined.AccountBalanceWallet
+                },
+                contentDescription = null,
+                tint = tint,
+                modifier = Modifier.size(JkSize.icon),
+            )
+        }
+        Spacer(Modifier.height(2.dp))
+        Text(
+            text = tab.label,
+            style = if (active) JkType.caption.copy(fontWeight = FontWeight.SemiBold) else JkType.caption,
+            color = if (active) colors.textPrimary else colors.textTertiary,
+            maxLines = 1,
+        )
+    }
+}
+
+/** 中间的“＋”：56dp 品牌色圆钮，按下缩小并有触感。 */
+@Composable
+private fun AddButton(description: String, onClick: () -> Unit) {
+    val colors = Jk.colors
+    val haptic = LocalHapticFeedback.current
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val scale by animateFloatAsState(if (pressed) 0.92f else 1f, spring(dampingRatio = 0.6f, stiffness = 800f), label = "addScale")
+    Box(
+        modifier = Modifier
+            .padding(horizontal = Space.x1)
+            .size(56.dp)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .clip(CircleShape)
+            .background(colors.primary)
+            .clickable(interactionSource = interaction, indication = LocalIndication.current, role = Role.Button) {
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                onClick()
+            }
+            .semantics { contentDescription = description },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(Icons.Outlined.Add, contentDescription = null, tint = colors.onPrimary, modifier = Modifier.size(28.dp))
     }
 }
 
@@ -301,8 +341,8 @@ fun accountIcon(kind: AccountKind): ImageVector = when (kind) {
 
 /** 图表用的一组低饱和色，与卡面配色同一气质；深色模式下整体提亮一档，保证在墨黑底上分得清。 */
 private val ChartPalette = listOf(
-    Color(0xFFB8863B), // 赤金
-    Color(0xFF3B5B8C), // 靛蓝
+    Color(0xFF3E4FC1), // 靛青（品牌色，占比最大的一项）
+    Color(0xFFB8863B), // 琥珀
     Color(0xFF2F6B57), // 松绿
     Color(0xFFA8483A), // 朱砂
     Color(0xFF6B4E8C), // 黛紫
@@ -314,8 +354,8 @@ private val ChartPalette = listOf(
 )
 
 private val ChartPaletteDark = listOf(
+    Color(0xFF9AA6FF),
     Color(0xFFD9AE62),
-    Color(0xFF7F9DD0),
     Color(0xFF6FBF9F),
     Color(0xFFE58C7C),
     Color(0xFFAE93D3),
@@ -489,8 +529,8 @@ fun BudgetBar(ratio: Float, over: Boolean, modifier: Modifier = Modifier) {
     val fill by animateColorAsState(
         when {
             over -> colors.danger
-            ratio >= 0.8f -> colors.accent
-            else -> colors.success
+            ratio >= 0.8f -> colors.expense // 快用完：账本里的支出橙作提醒
+            else -> colors.accent // 正常：唯一的品牌靛青
         },
         tween(240),
         label = "budgetColor",

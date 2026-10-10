@@ -191,7 +191,8 @@ private fun DrawScope.drawCardTexture(type: CardType, accent: Color, mini: Boole
     val h = size.height
     val u = 1.dp.toPx()
     val ink = Color.White
-    val roomy = !mini && h > 150f * u
+    // 置顶区的卡面（最宽 260dp，约 164dp 高）放不下芯片等大标志物，否则会压住卡号
+    val roomy = !mini && h > 180f * u
     val hair = Stroke(width = 1.2f * u)
 
     when (type) {

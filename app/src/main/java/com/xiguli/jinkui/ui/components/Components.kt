@@ -1,5 +1,6 @@
 package com.xiguli.jinkui.ui.components
 
+import com.xiguli.jinkui.ui.theme.segmentSelected
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
@@ -13,6 +14,8 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.heading
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -154,7 +157,10 @@ fun JkIconButton(
     }
 }
 
-/** 白底、1dp 极淡描边、24dp 圆角的容器；不使用投影。 */
+/**
+ * 分组容器：白底（深色为抬高一档的炭灰）、20dp 圆角，不画描边也不用投影——
+ * 和页面底色本身就分得开，少一圈线，页面更安静。
+ */
 @Composable
 fun JkCard(
     modifier: Modifier = Modifier,
@@ -165,7 +171,6 @@ fun JkCard(
         modifier = modifier
             .clip(Radius.card)
             .background(Jk.colors.surface)
-            .border(1.dp, Jk.colors.border, Radius.card)
             .padding(padding),
         content = content,
     )
@@ -214,14 +219,14 @@ fun JkButton(
     val background = when (style) {
         ButtonStyle.Primary -> colors.primary
         ButtonStyle.Danger -> colors.dangerSoft
-        ButtonStyle.Secondary -> colors.surface
+        ButtonStyle.Secondary -> colors.accentSoft
         ButtonStyle.Ghost -> Color.Transparent
     }
     val foreground = when (style) {
         ButtonStyle.Primary -> colors.onPrimary
         ButtonStyle.Danger -> colors.danger
-        ButtonStyle.Secondary -> colors.textPrimary
-        ButtonStyle.Ghost -> colors.textSecondary
+        ButtonStyle.Secondary -> colors.accent
+        ButtonStyle.Ghost -> colors.accent
     }
     val active = enabled && !loading
     // 按压反馈：按下时轻微缩小，松手回弹。
@@ -235,11 +240,9 @@ fun JkButton(
                 scaleY = scale
             }
             .heightIn(min = if (compact) 36.dp else 48.dp)
-            .clip(Radius.control)
-            .background(if (active || style != ButtonStyle.Primary) background else colors.textTertiary)
-            .then(
-                if (style == ButtonStyle.Secondary) Modifier.border(1.dp, colors.border, Radius.control) else Modifier,
-            )
+            .clip(Radius.pill)
+            // 不可用的主按钮退成浅灰底 + 三级文字，不再是一大块深灰
+            .background(if (active || style != ButtonStyle.Primary) background else colors.surfaceAlt)
             .clickable(interactionSource = interaction, indication = LocalIndication.current, enabled = active, onClick = onClick)
             .padding(horizontal = if (compact) Space.x1_5 else Space.x2_5),
         horizontalArrangement = Arrangement.Center,
@@ -259,7 +262,7 @@ fun JkButton(
         Text(
             text = text,
             style = if (compact) JkType.small else JkType.bodyStrong,
-            color = if (active || style == ButtonStyle.Primary) foreground else colors.textTertiary,
+            color = if (active) foreground else colors.textTertiary,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
@@ -497,16 +500,15 @@ fun JkChip(
     modifier: Modifier = Modifier,
 ) {
     val colors = Jk.colors
-    val background by animateColorAsState(if (selected) colors.primary else colors.surface, tween(160), label = "chipBg")
-    val borderColor by animateColorAsState(if (selected) colors.primary else colors.border, tween(160), label = "chipBorder")
-    val content by animateColorAsState(if (selected) colors.onPrimary else colors.textSecondary, tween(160), label = "chipText")
+    // 未选中是浅灰底、无描边；选中换成品牌浅底 + 品牌色字，比整块墨黑更安静
+    val background by animateColorAsState(if (selected) colors.accentSoft else colors.surfaceAlt, tween(160), label = "chipBg")
+    val content by animateColorAsState(if (selected) colors.accent else colors.textSecondary, tween(160), label = "chipText")
     Box(
         modifier = modifier
             .minimumInteractiveComponentSize()
             .height(32.dp)
             .clip(Radius.chip)
             .background(background)
-            .border(BorderStroke(1.dp, borderColor), Radius.chip)
             .clickable(onClick = onClick)
             .semantics { this.selected = selected }
             .padding(horizontal = Space.x1_5),
@@ -514,7 +516,7 @@ fun JkChip(
     ) {
         Text(
             text = text,
-            style = JkType.small,
+            style = if (selected) JkType.small.copy(fontWeight = FontWeight.Medium) else JkType.small,
             color = content,
             maxLines = 1,
         )
@@ -533,7 +535,7 @@ fun <T> JkSegmented(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .clip(Radius.control)
+            .clip(Radius.pill)
             .background(colors.surfaceAlt)
             .padding(Space.x05),
         horizontalArrangement = Arrangement.spacedBy(Space.x05),
@@ -543,11 +545,10 @@ fun <T> JkSegmented(
             Box(
                 modifier = Modifier
                     .weight(1f)
-                    .height(36.dp)
-                    .clip(Radius.chip)
-                    .background(if (active) colors.surface else Color.Transparent)
-                    .then(if (active) Modifier.border(1.dp, colors.border, Radius.chip) else Modifier)
-                    .clickable { onSelect(value) },
+                    .heightIn(min = 36.dp)
+                    .clip(Radius.pill)
+                    .background(if (active) colors.segmentSelected else Color.Transparent)
+                    .selectable(selected = active, role = androidx.compose.ui.semantics.Role.Tab, onClick = { onSelect(value) }),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
@@ -641,7 +642,6 @@ fun JkSheet(
                     .fillMaxWidth()
                     .clip(Radius.sheet)
                     .background(Jk.colors.surface)
-                    .border(1.dp, Jk.colors.border, Radius.sheet)
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,

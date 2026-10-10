@@ -23,6 +23,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.CopyAll
+import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.History
@@ -250,7 +251,6 @@ fun CardDetailScreen(cardId: String, onBack: () -> Unit, onEdit: () -> Unit) {
                     tint = if (current.pinned) colors.accent else colors.textSecondary,
                 )
                 JkIconButton(Icons.Outlined.Edit, "编辑", onEdit)
-                JkIconButton(Icons.Outlined.DeleteOutline, "删除", { confirmDelete = true })
             }
         }
         if (current == null) {
@@ -278,6 +278,7 @@ fun CardDetailScreen(cardId: String, onBack: () -> Unit, onEdit: () -> Unit) {
                     showHistory = true
                 },
                 onDuplicate = viewModel::duplicate,
+                onDelete = { confirmDelete = true },
                 onViewAttachment = { viewing = it },
                 loadAttachment = { viewModel.attachmentBytes(it) },
                 modifier = Modifier.weight(1f),
@@ -353,6 +354,7 @@ fun CardDetailContent(
     onViewAttachment: (Attachment) -> Unit,
     loadAttachment: suspend (String) -> ByteArray,
     modifier: Modifier = Modifier,
+    onDelete: (() -> Unit)? = null,
     ticking: Boolean = true,
     clock: () -> Long = System::currentTimeMillis,
 ) {
@@ -396,6 +398,38 @@ fun CardDetailContent(
             }
         }
         ExpiryNote(card, Modifier.padding(start = Space.x05, top = Space.x1_5))
+
+        // 大号快捷复制：卡片最要紧的一到两个字段（账号与密码、持卡人与卡号……），拇指一按就复制，
+        // 参考 1Password / Proton Pass 详情页顶部的复制按钮。敏感字段复制时不显示明文。
+        val quick = remember(card) { card.quickCopyFields }
+        if (quick.isNotEmpty()) {
+            // 两个按钮并排放不下完整名称时（字段名较长或放大字号）改为上下两行，不截断成“公民身份号…”
+            val fontScale = androidx.compose.ui.platform.LocalDensity.current.fontScale
+            val stacked = quick.size > 1 && quick.maxOf { it.label.length } * fontScale > 5.5f
+            if (stacked) {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(Space.x1),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = Space.x2),
+                ) {
+                    for (field in quick) {
+                        QuickCopyButton(field, copied = copiedKey == field.id, onClick = { onCopy(field) }, modifier = Modifier.fillMaxWidth())
+                    }
+                }
+            } else {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(Space.x1),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = Space.x2),
+                ) {
+                    for (field in quick) {
+                        QuickCopyButton(field, copied = copiedKey == field.id, onClick = { onCopy(field) }, modifier = Modifier.weight(1f))
+                    }
+                }
+            }
+        }
 
         // 按该类型模板的重要程度排序展示；保存的顺序不变。
         val visibleFields = remember(card) { CardTemplates.displayOrder(card).filter { it.value.isNotBlank() } }
@@ -494,6 +528,15 @@ fun CardDetailContent(
                 onClick = onDuplicate,
                 trailing = {},
             )
+            if (onDelete != null) {
+                JkDivider(inset = Space.x6 + Space.x05)
+                JkRow(
+                    title = "删除这张卡片",
+                    icon = Icons.Outlined.DeleteOutline,
+                    danger = true,
+                    onClick = onDelete,
+                )
+            }
         }
 
         Spacer(Modifier.height(Space.x2))
@@ -506,6 +549,39 @@ fun CardDetailContent(
                 Text(line, style = JkType.caption.copy(fontFeatureSettings = "tnum"), color = colors.textTertiary, maxLines = 1, softWrap = false)
             }
         }
+    }
+}
+
+/** 大号快捷复制按钮：品牌浅底胶囊，复制后短暂变成对勾与“已复制”。 */
+@Composable
+private fun QuickCopyButton(field: CardField, copied: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val colors = Jk.colors
+    val bg by animateColorAsState(if (copied) colors.primary else colors.accentSoft, tween(160), label = "quickCopyBg")
+    val fg = if (copied) colors.onPrimary else colors.accent
+    Row(
+        modifier = modifier
+            .heightIn(min = 52.dp)
+            .clip(Radius.pill)
+            .background(bg)
+            .clickable(role = androidx.compose.ui.semantics.Role.Button, onClickLabel = "复制${field.label}", onClick = onClick)
+            .padding(horizontal = Space.x2, vertical = Space.x1),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            if (copied) Icons.Outlined.Check else Icons.Outlined.ContentCopy,
+            contentDescription = null,
+            tint = fg,
+            modifier = Modifier.size(18.dp),
+        )
+        Spacer(Modifier.width(Space.x1))
+        Text(
+            if (copied) "已复制" else field.label.ifBlank { "复制" },
+            style = JkType.bodyStrong,
+            color = fg,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 

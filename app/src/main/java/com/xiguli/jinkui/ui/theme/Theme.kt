@@ -1,6 +1,10 @@
 package com.xiguli.jinkui.ui.theme
 
 import android.app.Activity
+import android.os.Build
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -25,13 +29,15 @@ import androidx.core.view.WindowCompat
 import com.xiguli.jinkui.data.repo.ThemeMode
 
 /**
- * 金匮的设计令牌。
+ * 金匮的设计令牌（1.0 重做）。
  *
- *  - 间距：统一 8dp 节奏（[Space]）。
- *  - 文字：标题亮 / 正文适中 / 辅助灰 三级（textPrimary / textSecondary / textTertiary）。
- *  - 层次：用 1dp 极淡描边（border）区分，不用投影。
- *  - 圆角：卡片与面板 24dp，控件 14dp（[Radius]）。
- *  - 配色：浅色暖纸白，深色暖墨黑；赤金只作点缀（置顶、选中、品牌）。
+ *  - 品牌色只有一个：靛青（primary = accent）。按钮、选中、置顶、底部栏中央的“＋”都用它；
+ *    其余全是中性灰阶，收入 / 支出 / 转账三色只在账本里出现。
+ *  - 层次靠底色区分（bg → surface → surfaceAlt），默认不画描边；border 只留给输入框与分隔线。
+ *  - 间距 4dp 网格、常用 8 / 12 / 16 / 20 / 24；页面左右 20dp。
+ *  - 圆角：卡片与分组 20dp，控件 14dp，标签与按钮全圆角（[Radius]）。
+ *  - 文字：页面大标题 28sp 粗体；正文 15sp；辅助 13 / 12sp。三级文字对比度均 ≥ 4.5:1。
+ *  - 可选 Material You 动态取色（设置里开启，默认关闭）：只替换品牌色一组，中性色不变。
  */
 @Immutable
 data class JkColors(
@@ -60,52 +66,66 @@ data class JkColors(
 )
 
 val LightColors = JkColors(
-    bg = Color(0xFFF7F6F3),
+    bg = Color(0xFFF5F6F8),
     surface = Color(0xFFFFFFFF),
-    surfaceAlt = Color(0xFFF0EEE9),
-    border = Color(0xFFE6E3DC),
-    textPrimary = Color(0xFF1A1815),
-    textSecondary = Color(0xFF5A554D),
-    textTertiary = Color(0xFF736D62), // 0.9.0：由 8C867B 加深，正文底上对比度 ≥ 4.5（WCAG AA）
-    primary = Color(0xFF1A1815),
-    onPrimary = Color(0xFFF7F6F3),
-    accent = Color(0xFF946616),
-    accentSoft = Color(0xFFF3EBDA),
-    danger = Color(0xFFB3261E),
-    dangerSoft = Color(0xFFF9E7E5),
-    success = Color(0xFF2B6B4F),
-    expense = Color(0xFFA9562C),
-    expenseSoft = Color(0xFFF6E8DF),
-    income = Color(0xFF2B6B4F),
-    incomeSoft = Color(0xFFE2EFE8),
-    transfer = Color(0xFF475D86),
-    transferSoft = Color(0xFFE5EAF3),
+    surfaceAlt = Color(0xFFEDEFF3),
+    border = Color(0xFFE2E5EA),
+    textPrimary = Color(0xFF15171C),
+    textSecondary = Color(0xFF4B515C),
+    textTertiary = Color(0xFF646C7B), // 在 bg / surface / surfaceAlt 上对比度 ≥ 4.5（WCAG AA）
+    primary = Color(0xFF3E4FC1),
+    onPrimary = Color(0xFFFFFFFF),
+    accent = Color(0xFF3E4FC1),
+    accentSoft = Color(0xFFE8EAFA),
+    danger = Color(0xFFC0352B),
+    dangerSoft = Color(0xFFFBE9E7),
+    success = Color(0xFF1E7A52),
+    expense = Color(0xFFC4532D),
+    expenseSoft = Color(0xFFFBEBE4),
+    income = Color(0xFF1E7A52),
+    incomeSoft = Color(0xFFE2F2EA),
+    transfer = Color(0xFF5B6577),
+    transferSoft = Color(0xFFE9ECF1),
     isDark = false,
 )
 
 val DarkColors = JkColors(
-    bg = Color(0xFF141210),
-    surface = Color(0xFF1C1A17),
-    surfaceAlt = Color(0xFF25221E),
-    border = Color(0xFF2F2B26),
-    textPrimary = Color(0xFFF2EEE7),
-    textSecondary = Color(0xFFB8B1A6),
-    textTertiary = Color(0xFF948D81), // 0.9.0：由 857E73 提亮，卡片底上对比度 ≥ 4.5
-    primary = Color(0xFFF2EEE7),
-    onPrimary = Color(0xFF141210),
-    accent = Color(0xFFD4A857),
-    accentSoft = Color(0xFF2E2718),
-    danger = Color(0xFFF2857A),
-    dangerSoft = Color(0xFF34201D),
-    success = Color(0xFF7FC9A4),
-    expense = Color(0xFFE99A72),
-    expenseSoft = Color(0xFF372419),
-    income = Color(0xFF7FC9A4),
-    incomeSoft = Color(0xFF19302A),
-    transfer = Color(0xFF9FB3DA),
-    transferSoft = Color(0xFF1F2636),
+    bg = Color(0xFF0E1014),
+    surface = Color(0xFF171A20),
+    surfaceAlt = Color(0xFF20242C),
+    border = Color(0xFF2A2F38),
+    textPrimary = Color(0xFFECEEF2),
+    textSecondary = Color(0xFFB3B9C4),
+    textTertiary = Color(0xFF8A93A1), // 在 surfaceAlt 上对比度 ≥ 5
+    primary = Color(0xFF9AA6FF),
+    onPrimary = Color(0xFF0E1233),
+    accent = Color(0xFF9AA6FF),
+    accentSoft = Color(0xFF22274A),
+    danger = Color(0xFFFF8A80),
+    dangerSoft = Color(0xFF3A1E1C),
+    success = Color(0xFF6FD3A2),
+    expense = Color(0xFFF59A7B),
+    expenseSoft = Color(0xFF3A2219),
+    income = Color(0xFF6FD3A2),
+    incomeSoft = Color(0xFF15302A),
+    transfer = Color(0xFFA9B3C4),
+    transferSoft = Color(0xFF222832),
     isDark = true,
 )
+
+/**
+ * 动态取色：只拿系统配色里的 primary 一组替换品牌色，背景与文字仍用金匮自己的中性色，
+ * 这样换壁纸不会把账本的收支色、卡面配色带偏。
+ */
+fun JkColors.withBrand(primary: Color, onPrimary: Color, soft: Color): JkColors =
+    copy(primary = primary, onPrimary = onPrimary, accent = primary, accentSoft = soft)
+
+/**
+ * 分段控件里选中那一段的底色：浅色用 surface（白）；深色下 surface 比轨道（surfaceAlt）还暗，
+ * 选中反而像“凹下去”，所以深色单独提亮一档。
+ */
+val JkColors.segmentSelected: Color
+    get() = if (isDark) Color(0xFF323844) else surface
 
 val LocalJkColors = staticCompositionLocalOf { LightColors }
 
@@ -133,18 +153,21 @@ object JkSize {
 }
 
 object Radius {
-    val card = RoundedCornerShape(24.dp)
-    val sheet = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+    val card = RoundedCornerShape(20.dp)
+    val sheet = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
     val control = RoundedCornerShape(14.dp)
-    val field = RoundedCornerShape(20.dp)
-    val chip = RoundedCornerShape(10.dp)
+    val field = RoundedCornerShape(16.dp)
+    val chip = RoundedCornerShape(50)
     val tile = RoundedCornerShape(12.dp)
+    val pill = RoundedCornerShape(50)
 }
 
 object JkType {
     /** 品牌字标与卡面标题用宋体，其余界面文字用系统黑体。 */
     val brand = TextStyle(fontSize = 26.sp, lineHeight = 34.sp, fontWeight = FontWeight.SemiBold, fontFamily = FontFamily.Serif, letterSpacing = 2.sp)
     val display = TextStyle(fontSize = 28.sp, lineHeight = 36.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.4).sp)
+    /** 首页分区的大标题（“卡包”“账本”）：粗一档的黑体，比宋体字标更利落。 */
+    val pageTitle = TextStyle(fontSize = 28.sp, lineHeight = 36.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.2).sp)
     val title = TextStyle(fontSize = 20.sp, lineHeight = 28.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.2).sp)
     val heading = TextStyle(fontSize = 16.sp, lineHeight = 24.sp, fontWeight = FontWeight.SemiBold)
     val body = TextStyle(fontSize = 15.sp, lineHeight = 22.sp, fontWeight = FontWeight.Normal)
@@ -181,18 +204,29 @@ object Jk {
 }
 
 @Composable
-fun JinKuiTheme(mode: ThemeMode, content: @Composable () -> Unit) {
+fun JinKuiTheme(mode: ThemeMode, dynamicColor: Boolean = false, content: @Composable () -> Unit) {
     val dark = when (mode) {
         ThemeMode.SYSTEM -> isSystemInDarkTheme()
         ThemeMode.LIGHT -> false
         ThemeMode.DARK -> true
     }
-    val colors = if (dark) DarkColors else LightColors
+    val base = if (dark) DarkColors else LightColors
+    val context = LocalContext.current
+    val colors = if (dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        val system = if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+        base.withBrand(system.primary, system.onPrimary, system.primaryContainer.copy(alpha = if (dark) 0.55f else 0.7f))
+    } else {
+        base
+    }
     val scheme = if (dark) {
         darkColorScheme(
             primary = colors.accent,
-            onPrimary = colors.bg,
+            onPrimary = colors.onPrimary,
             secondary = colors.accent,
+            primaryContainer = colors.accentSoft,
+            onPrimaryContainer = colors.textPrimary,
+            secondaryContainer = colors.accentSoft,
+            onSecondaryContainer = colors.textPrimary,
             background = colors.bg,
             onBackground = colors.textPrimary,
             surface = colors.surface,
@@ -211,8 +245,12 @@ fun JinKuiTheme(mode: ThemeMode, content: @Composable () -> Unit) {
     } else {
         lightColorScheme(
             primary = colors.accent,
-            onPrimary = colors.surface,
+            onPrimary = colors.onPrimary,
             secondary = colors.accent,
+            primaryContainer = colors.accentSoft,
+            onPrimaryContainer = colors.textPrimary,
+            secondaryContainer = colors.accentSoft,
+            onSecondaryContainer = colors.textPrimary,
             background = colors.bg,
             onBackground = colors.textPrimary,
             surface = colors.surface,
@@ -255,8 +293,8 @@ fun JinKuiTheme(mode: ThemeMode, content: @Composable () -> Unit) {
                 extraSmall = RoundedCornerShape(8.dp),
                 small = RoundedCornerShape(12.dp),
                 medium = RoundedCornerShape(16.dp),
-                large = RoundedCornerShape(24.dp),
-                extraLarge = RoundedCornerShape(24.dp),
+                large = RoundedCornerShape(20.dp),
+                extraLarge = RoundedCornerShape(28.dp),
             ),
             content = content,
         )

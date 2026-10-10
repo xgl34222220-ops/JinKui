@@ -70,7 +70,7 @@ fun JinKuiRoot(container: AppContainer) {
     val state by container.vault.state.collectAsStateWithLifecycle()
     val touch: () -> Unit = remember(container) { { container.lock.touch() } }
 
-    JinKuiTheme(settings.theme) {
+    JinKuiTheme(settings.theme, dynamicColor = settings.dynamicColor) {
         CompositionLocalProvider(
             LocalContainer provides container,
             LocalUserActivity provides touch,
@@ -114,6 +114,7 @@ private fun MainNavigation() {
                 Screen.Home -> HomeTabs(
                     selected = navigator.homeTab,
                     onSelect = { navigator.homeTab = it },
+                    onAdd = { navigator.pendingAdd = it },
                 ) { tab ->
                     when (tab) {
                         HomeTab.CARDS -> HomeScreen(
@@ -122,6 +123,8 @@ private fun MainNavigation() {
                             onSettings = { navigator.push(Screen.Settings) },
                             onHealth = { navigator.push(Screen.Health) },
                             onOrganize = { navigator.push(Screen.Organize) },
+                            addRequested = navigator.pendingAdd == HomeTab.CARDS,
+                            onAddHandled = { navigator.pendingAdd = null },
                         )
                         HomeTab.LEDGER -> LedgerScreen(
                             onAccounts = { navigator.push(Screen.LedgerAccounts) },
@@ -130,6 +133,8 @@ private fun MainNavigation() {
                             onCategories = { navigator.push(Screen.LedgerCategories) },
                             onRecurring = { navigator.push(Screen.LedgerRecurring) },
                             onSettings = { navigator.push(Screen.Settings) },
+                            addRequested = navigator.pendingAdd == HomeTab.LEDGER,
+                            onAddHandled = { navigator.pendingAdd = null },
                         )
                     }
                 }
@@ -207,11 +212,12 @@ private fun BoxScope.MessageHost(bus: MessageBus) {
         Text(
             text = text,
             style = JkType.small,
-            color = Jk.colors.onPrimary,
+            color = Jk.colors.bg,
             modifier = Modifier
+                // 消息条在底部切换栏之上，不挡住中间的“＋”
+                .padding(bottom = 72.dp)
                 .clip(Radius.control)
-                .background(Jk.colors.primary)
-                .border(1.dp, Jk.colors.border, Radius.control)
+                .background(Jk.colors.textPrimary)
                 .padding(horizontal = Space.x2, vertical = Space.x1_5),
         )
     }

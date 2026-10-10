@@ -56,6 +56,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.mutableStateOf
@@ -201,6 +202,8 @@ fun HomeScreen(
     onSettings: () -> Unit,
     onHealth: () -> Unit,
     onOrganize: () -> Unit,
+    addRequested: Boolean = false,
+    onAddHandled: () -> Unit = {},
 ) {
     val container = LocalContainer.current
     val viewModel = jkViewModel { HomeViewModel(container) }
@@ -215,6 +218,14 @@ fun HomeScreen(
     var showTypes by remember { mutableStateOf(false) }
     var showGenerator by remember { mutableStateOf(false) }
     var showMore by remember { mutableStateOf(false) }
+
+    // 底部栏中间的“＋”：在卡包分区里打开“新建卡片”
+    LaunchedEffect(addRequested) {
+        if (addRequested) {
+            showTypes = true
+            onAddHandled()
+        }
+    }
 
     // 列表视图有自己的一整套版面；牌堆与空首页继续用下面原来的布局。
     if (!settings.deckView && ui.total > 0) {
@@ -232,9 +243,9 @@ fun HomeScreen(
             onToggleView = { container.settings.update { it.copy(deckView = true) } },
             onLock = { container.vault.lock() },
             onMore = { showMore = true },
-            onCreate = { showTypes = true },
             onHealth = onHealth,
             onSort = { order -> container.settings.update { it.copy(sortOrder = order) } },
+            onTogglePin = viewModel::togglePin,
         )
     } else {
         Box(Modifier.fillMaxSize()) {
@@ -250,9 +261,9 @@ fun HomeScreen(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Column(Modifier.weight(1f)) {
-                        Text("金匮", style = JkType.brand, color = colors.textPrimary)
+                        Text("卡包", style = JkType.pageTitle, color = colors.textPrimary)
                         Text(
-                            text = if (ui.total == 0) "只存在这台手机里的安全卡包" else "${ui.total} 张卡片，加密保存在本机",
+                            text = if (ui.total == 0) "只存在这台手机里的安全卡包" else "${ui.total} 张卡片 · 只在本机加密保存",
                             style = JkType.caption,
                             color = colors.textTertiary,
                         )
@@ -364,26 +375,6 @@ fun HomeScreen(
                 }
             }
 
-            if (ui.total > 0) {
-                val press = com.xiguli.jinkui.ui.components.rememberJkPress(0.95f)
-                Row(
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .navigationBarsPadding()
-                        .padding(Space.x2_5)
-                        .pressScale(press)
-                        .height(52.dp)
-                        .clip(CircleShape)
-                        .background(colors.primary)
-                        .pressClickable(press, onClickLabel = "新建卡片", onClick = { showTypes = true })
-                        .padding(start = Space.x2, end = Space.x2_5),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(Icons.Outlined.Add, contentDescription = null, tint = colors.onPrimary, modifier = Modifier.size(20.dp))
-                    Spacer(Modifier.width(Space.x1))
-                    Text("新建", style = JkType.bodyStrong, color = colors.onPrimary)
-                }
-            }
         }
     }
 

@@ -97,7 +97,7 @@ data class RecurringRowUi(
     val blocked: String?,
 )
 
-private fun buildRecurringUi(data: LedgerData): List<RecurringRowUi> {
+internal fun buildRecurringUi(data: LedgerData): List<RecurringRowUi> {
     val categories = data.categories.associateBy { it.id }
     val accounts = data.accounts.associateBy { it.id }
     return data.recurring
@@ -172,45 +172,12 @@ fun LedgerRecurringScreen(onBack: () -> Unit) {
         )
     }
 
-    Column(
-        Modifier
-            .fillMaxSize()
-            .statusBarsPadding(),
-    ) {
-        JkTopBar("周期记账", onBack = onBack) {
-            JkIconButton(Icons.Outlined.Add, "添加周期记账", { editing = newRule() })
-        }
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = Space.x2_5, end = Space.x2_5, bottom = Space.x6),
-        ) {
-            item {
-                Text(
-                    "房租、工资、会员订阅这类固定收支，设一次就好：每次解锁金匮时，把到期的各期自动记上。不需要后台任务，也不联网。",
-                    style = JkType.small,
-                    color = colors.textTertiary,
-                    modifier = Modifier.padding(horizontal = Space.x05, vertical = Space.x1),
-                )
-            }
-            if (rows.isEmpty()) {
-                item {
-                    JkEmpty(
-                        title = "还没有周期记账",
-                        message = "点右上角的 + 添加一条，例如每月 10 日的工资。",
-                    )
-                }
-            } else {
-                item {
-                    JkCard(Modifier.fillMaxWidth(), padding = PaddingValues(vertical = Space.x05)) {
-                        rows.forEachIndexed { index, row ->
-                            if (index > 0) JkDivider(inset = Space.x6 + Space.x05)
-                            RecurringRow(row, onClick = { editing = row.rule })
-                        }
-                    }
-                }
-            }
-        }
-    }
+    LedgerRecurringContent(
+        rows = rows,
+        onBack = onBack,
+        onAdd = { editing = newRule() },
+        onEdit = { editing = it },
+    )
 
     editing?.let { rule ->
         RecurringEditSheet(
@@ -530,5 +497,55 @@ private fun PickRow(label: String, value: String, onClick: () -> Unit) {
             modifier = Modifier.weight(1f),
         )
         Text("›", style = JkType.body, color = colors.textTertiary)
+    }
+}
+
+/** 周期记账列表（无状态）。 */
+@Composable
+fun LedgerRecurringContent(
+    rows: List<RecurringRowUi>,
+    onBack: () -> Unit,
+    onAdd: () -> Unit,
+    onEdit: (LedgerRecurring) -> Unit,
+) {
+    val colors = Jk.colors
+    Column(
+        Modifier
+            .fillMaxSize()
+            .statusBarsPadding(),
+    ) {
+        JkTopBar("周期记账", onBack = onBack) {
+            JkIconButton(Icons.Outlined.Add, "添加周期记账", onAdd)
+        }
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(start = Space.x2_5, end = Space.x2_5, bottom = Space.x6),
+        ) {
+            item {
+                Text(
+                    "房租、工资、会员订阅这类固定收支，设一次就好：每次解锁金匮时，把到期的各期自动记上。不需要后台任务，也不联网。",
+                    style = JkType.small,
+                    color = colors.textTertiary,
+                    modifier = Modifier.padding(horizontal = Space.x05, vertical = Space.x1),
+                )
+            }
+            if (rows.isEmpty()) {
+                item {
+                    JkEmpty(
+                        title = "还没有周期记账",
+                        message = "点右上角的 + 添加一条，例如每月 10 日的工资。",
+                    )
+                }
+            } else {
+                item {
+                    JkCard(Modifier.fillMaxWidth(), padding = PaddingValues(vertical = Space.x05)) {
+                        rows.forEachIndexed { index, row ->
+                            if (index > 0) JkDivider(inset = Space.x6 + Space.x05)
+                            RecurringRow(row, onClick = { onEdit(row.rule) })
+                        }
+                    }
+                }
+            }
+        }
     }
 }

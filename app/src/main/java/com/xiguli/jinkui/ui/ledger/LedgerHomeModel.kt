@@ -2,6 +2,7 @@ package com.xiguli.jinkui.ui.ledger
 
 import androidx.compose.runtime.Immutable
 import com.xiguli.jinkui.data.ledger.BudgetProgress
+import com.xiguli.jinkui.data.ledger.EntryDefaults
 import com.xiguli.jinkui.data.ledger.LedgerAccount
 import com.xiguli.jinkui.data.ledger.LedgerCategory
 import com.xiguli.jinkui.data.ledger.LedgerClock
@@ -41,6 +42,9 @@ data class DayUi(
     val weekday: String,
     val totals: String,
     val rows: List<TxRowUi>,
+    /** 当日支出 / 收入（分），日历视图按它着色。 */
+    val expense: Long = 0L,
+    val income: Long = 0L,
 )
 
 /** 月度视图需要的一切，在后台线程一次算好。 */
@@ -62,6 +66,10 @@ data class LedgerUi(
     val dailyAverage: Long?,
     /** 第一次在后台算好之前为 true：此时不显示空状态，免得一闪而过。 */
     val loading: Boolean = false,
+    /** “快速记一笔”的常用支出分类（最近用得多的在前）。 */
+    val quickCategories: List<LedgerCategory> = emptyList(),
+    /** 今天的日期（日历视图标出今天）。 */
+    val today: LocalDate? = null,
 ) {
     companion object {
         fun placeholder(month: YearMonth) = LedgerUi(
@@ -102,6 +110,8 @@ fun buildLedgerUi(
             weekday = weekdayLabel(day.date),
             totals = dayTotals(day.summary),
             rows = day.items.map { txRow(it, accountsById, categoriesById, zone) },
+            expense = day.summary.expense,
+            income = day.summary.income,
         )
     }
     return LedgerUi(
@@ -117,6 +127,12 @@ fun buildLedgerUi(
         unreadable = data.unreadable,
         latestMonth = LedgerMath.latestMonth(data.transactions, zone),
         dailyAverage = LedgerClock.dailyAverage(summary.expense, month, today),
+        quickCategories = EntryDefaults.frequentCategories(
+            data.transactions,
+            data.categories,
+            nowMillis = today.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli(),
+        ),
+        today = today,
     )
 }
 

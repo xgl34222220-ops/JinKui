@@ -75,7 +75,7 @@ data class AccountsUi(
     val usage: Map<String, Int>,
 )
 
-private fun buildAccountsUi(data: LedgerData): AccountsUi {
+internal fun buildAccountsUi(data: LedgerData): AccountsUi {
     val balances = LedgerMath.balances(data.accounts, data.transactions)
     return AccountsUi(
         accounts = data.accounts.sortedWith(compareBy<LedgerAccount> { it.archived }.thenBy { it.position }),
@@ -126,67 +126,13 @@ fun LedgerAccountsScreen(onBack: () -> Unit) {
     val colors = Jk.colors
     var editing by remember { mutableStateOf<LedgerAccount?>(null) }
 
-    Column(
-        Modifier
-            .fillMaxSize()
-            .statusBarsPadding(),
-    ) {
-        JkTopBar("账户与余额", onBack = onBack) {
-            JkIconButton(Icons.Outlined.Add, "添加账户", {
-                editing = LedgerAccount(LedgerIds.newId(), "", AccountKind.BANK)
-            })
-        }
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = Space.x2_5, end = Space.x2_5, bottom = Space.x6),
-        ) {
-            item {
-                JkCard(Modifier.fillMaxWidth()) {
-                    Text("净资产", style = JkType.overline, color = colors.textTertiary)
-                    RollingAmount(
-                        ui.netWorth,
-                        JkType.amountLarge,
-                        if (ui.netWorth < 0) colors.danger else colors.textPrimary,
-                    )
-                    Text("余额 = 期初余额 + 全部收支与转账，随流水自动更新", style = JkType.caption, color = colors.textTertiary)
-                }
-                Spacer(Modifier.height(Space.x2))
-            }
-            item {
-                JkCard(Modifier.fillMaxWidth(), padding = PaddingValues(vertical = Space.x05)) {
-                    if (ui.accounts.isEmpty()) {
-                        Text("还没有账户，点右上角添加。", style = JkType.small, color = colors.textTertiary, modifier = Modifier.padding(Space.x2))
-                    }
-                    ui.accounts.forEachIndexed { index, account ->
-                        if (index > 0) JkDivider(inset = Space.x6 + Space.x05)
-                        val linked = account.cardId?.let { id -> cards.firstOrNull { it.id == id } }
-                        val balance = ui.balances[account.id] ?: 0L
-                        JkRow(
-                            title = account.name,
-                            subtitle = buildString {
-                                append(account.kind.label)
-                                if (linked != null) append(" · ").append(linked.title).append(" ").append(linked.faceHint)
-                                if (account.archived) append(" · 已停用")
-                            },
-                            icon = accountIcon(account.kind),
-                            onClick = { editing = account },
-                            trailing = {
-                                Text(
-                                    Money.format(balance),
-                                    style = JkType.amount,
-                                    color = when {
-                                        balance < 0 -> colors.danger
-                                        account.archived -> colors.textTertiary
-                                        else -> colors.textPrimary
-                                    },
-                                )
-                            },
-                        )
-                    }
-                }
-            }
-        }
-    }
+    LedgerAccountsContent(
+        ui = ui,
+        cards = cards,
+        onBack = onBack,
+        onAdd = { editing = LedgerAccount(LedgerIds.newId(), "", AccountKind.BANK) },
+        onEdit = { editing = it },
+    )
 
     editing?.let { account ->
         AccountEditSheet(
@@ -302,6 +248,77 @@ private fun AccountEditSheet(
                 },
                 modifier = Modifier.weight(1f),
             )
+        }
+    }
+}
+
+/** 账户与余额（无状态）：净资产卡 + 账户分组列表。界面测试直接渲染它。 */
+@Composable
+fun LedgerAccountsContent(
+    ui: AccountsUi,
+    cards: List<com.xiguli.jinkui.data.model.Card>,
+    onBack: () -> Unit,
+    onAdd: () -> Unit,
+    onEdit: (LedgerAccount) -> Unit,
+) {
+    val colors = Jk.colors
+    Column(
+        Modifier
+            .fillMaxSize()
+            .statusBarsPadding(),
+    ) {
+        JkTopBar("账户与余额", onBack = onBack) {
+            JkIconButton(Icons.Outlined.Add, "添加账户", onAdd)
+        }
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(start = Space.x2_5, end = Space.x2_5, bottom = Space.x6),
+        ) {
+            item {
+                JkCard(Modifier.fillMaxWidth()) {
+                    Text("净资产", style = JkType.overline, color = colors.textTertiary)
+                    RollingAmount(
+                        ui.netWorth,
+                        JkType.amountLarge,
+                        if (ui.netWorth < 0) colors.danger else colors.textPrimary,
+                    )
+                    Text("余额 = 期初余额 + 全部收支与转账，随流水自动更新", style = JkType.caption, color = colors.textTertiary)
+                }
+                Spacer(Modifier.height(Space.x2))
+            }
+            item {
+                JkCard(Modifier.fillMaxWidth(), padding = PaddingValues(vertical = Space.x05)) {
+                    if (ui.accounts.isEmpty()) {
+                        Text("还没有账户，点右上角添加。", style = JkType.small, color = colors.textTertiary, modifier = Modifier.padding(Space.x2))
+                    }
+                    ui.accounts.forEachIndexed { index, account ->
+                        if (index > 0) JkDivider(inset = Space.x6 + Space.x05)
+                        val linked = account.cardId?.let { id -> cards.firstOrNull { it.id == id } }
+                        val balance = ui.balances[account.id] ?: 0L
+                        JkRow(
+                            title = account.name,
+                            subtitle = buildString {
+                                append(account.kind.label)
+                                if (linked != null) append(" · ").append(linked.title).append(" ").append(linked.faceHint)
+                                if (account.archived) append(" · 已停用")
+                            },
+                            icon = accountIcon(account.kind),
+                            onClick = { onEdit(account) },
+                            trailing = {
+                                Text(
+                                    Money.format(balance),
+                                    style = JkType.amount,
+                                    color = when {
+                                        balance < 0 -> colors.danger
+                                        account.archived -> colors.textTertiary
+                                        else -> colors.textPrimary
+                                    },
+                                )
+                            },
+                        )
+                    }
+                }
+            }
         }
     }
 }

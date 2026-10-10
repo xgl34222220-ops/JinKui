@@ -1,5 +1,26 @@
 package com.xiguli.jinkui.ui.ledger
 
+import com.xiguli.jinkui.ui.theme.segmentSelected
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.border
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.automirrored.outlined.ViewList
+import androidx.compose.material.icons.outlined.CalendarMonth
+import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.unit.sp
+import com.xiguli.jinkui.ui.components.JkButton
+import com.xiguli.jinkui.ui.components.SwipeAction
+import com.xiguli.jinkui.ui.components.SwipeActionsBox
+import com.xiguli.jinkui.ui.components.JkDialog
+import com.xiguli.jinkui.ui.components.ButtonStyle
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -202,6 +223,8 @@ fun LedgerScreen(
     onCategories: () -> Unit,
     onSettings: () -> Unit,
     onRecurring: () -> Unit = {},
+    addRequested: Boolean = false,
+    onAddHandled: () -> Unit = {},
 ) {
     val container = LocalContainer.current
     val viewModel = jkViewModel { LedgerViewModel(container) }
@@ -214,6 +237,21 @@ fun LedgerScreen(
     var showMore by remember { mutableStateOf(false) }
     var pickAccount by remember { mutableStateOf(false) }
     var pickCategory by remember { mutableStateOf(false) }
+    /** 新记一笔时预选的分类（首页“快速记一笔”）或照着记的那一笔（“再记一笔”）。 */
+    var presetCategory by remember { mutableStateOf<String?>(null) }
+    var template by remember { mutableStateOf<LedgerTransaction?>(null) }
+    var confirmDelete by remember { mutableStateOf<LedgerTransaction?>(null) }
+    var menuFor by remember { mutableStateOf<LedgerTransaction?>(null) }
+
+    // 底部栏中间的“＋”：在账本分区里直接打开“记一笔”
+    LaunchedEffect(addRequested) {
+        if (addRequested) {
+            presetCategory = null
+            template = null
+            creating = true
+            onAddHandled()
+        }
+    }
 
     // 每次回到账本页补记到期的周期记账（例如解锁状态下跨过了午夜）。
     LaunchedEffect(Unit) { viewModel.runRecurring() }
@@ -236,6 +274,18 @@ fun LedgerScreen(
             onBudget = onBudget,
             onLock = { container.vault.lock() },
             onMore = { showMore = true },
+            onQuickAdd = {
+                template = null
+                presetCategory = it
+                creating = true
+            },
+            onRepeat = {
+                presetCategory = null
+                template = it
+                creating = true
+            },
+            onDelete = { confirmDelete = it },
+            onRowMenu = { menuFor = it },
         ),
     )
 
@@ -243,15 +293,21 @@ fun LedgerScreen(
         EntrySheet(
             data = data,
             existing = editing,
+            initialCategory = presetCategory,
+            template = template,
             onDismiss = {
                 creating = false
                 editing = null
+                presetCategory = null
+                template = null
             },
             onSave = { tx, keepOpen, reset ->
                 viewModel.save(tx) {
                     if (!keepOpen) {
                         creating = false
                         editing = null
+                        presetCategory = null
+                        template = null
                     } else {
                         reset()
                         container.messages.show("已记下，继续下一笔")
@@ -263,6 +319,40 @@ fun LedgerScreen(
                 editing = null
             },
         )
+    }
+
+    menuFor?.let { tx ->
+        JkSheet(onDismiss = { menuFor = null }, title = categoryLabel(tx.categoryId, data.categories.associateBy { it.id }).takeIf { tx.type != TxType.TRANSFER } ?: "转账") {
+            JkRow(title = "修改", icon = Icons.Outlined.Edit, modifier = Modifier.clip(Radius.control), trailing = {}, onClick = {
+                menuFor = null
+                editing = tx
+            })
+            JkRow(title = "再记一笔", subtitle = "金额、分类、账户和备注照搬，时间是现在", icon = Icons.Outlined.ContentCopy, modifier = Modifier.clip(Radius.control), trailing = {}, onClick = {
+                menuFor = null
+                presetCategory = null
+                template = tx
+                creating = true
+            })
+            JkRow(title = "删除", icon = Icons.Outlined.DeleteOutline, danger = true, modifier = Modifier.clip(Radius.control), onClick = {
+                menuFor = null
+                confirmDelete = tx
+            })
+        }
+    }
+
+    confirmDelete?.let { tx ->
+        JkDialog(
+            title = "删除这笔记录？",
+            onDismiss = { confirmDelete = null },
+            confirmText = "删除",
+            danger = true,
+            onConfirm = {
+                confirmDelete = null
+                viewModel.delete(tx)
+            },
+        ) {
+            Text("${Money.format(tx.amount)}，删除后账户余额会随之调整，无法撤销。", style = JkType.body)
+        }
     }
 
     if (pickAccount) {
@@ -315,6 +405,7 @@ fun LedgerScreen(
                 Triple("周期记账", "房租、工资、订阅等固定收支自动记上", Icons.Outlined.Repeat) to onRecurring,
                 Triple("分类管理", "增加、改名或隐藏分类", Icons.Outlined.Category) to onCategories,
                 Triple("设置", "解锁方式、自动锁定、加密备份", Icons.Outlined.Settings) to onSettings,
+                Triple("立即锁定", "清掉内存里的明文，回到解锁页", Icons.Outlined.Lock) to { container.vault.lock() },
             )
             for ((info, go) in entries) {
                 JkRow(
@@ -346,9 +437,22 @@ class LedgerHomeActions(
     val onBudget: () -> Unit = {},
     val onLock: () -> Unit = {},
     val onMore: () -> Unit = {},
+    /** 首页“快速记一笔”：点一个分类，直接打开已选好这个分类的记账面板。 */
+    val onQuickAdd: (String) -> Unit = {},
+    /** 右滑 / 长按菜单：照这一笔再记一笔（金额、分类、账户、备注带过去，时间是现在）。 */
+    val onRepeat: (LedgerTransaction) -> Unit = {},
+    /** 左滑 / 长按菜单：删除（由页面弹确认）。 */
+    val onDelete: (LedgerTransaction) -> Unit = {},
+    /** 长按一行：修改 / 再记一笔 / 删除。 */
+    val onRowMenu: (LedgerTransaction) -> Unit = {},
 )
 
-/** 账本首页（无状态）：标题栏、月份切换、月度汇总、筛选条、按天分组的流水与“记一笔”。 */
+/**
+ * 账本首页（无状态，1.0 重做）：大标题 → 月份与“明细 / 日历”切换 → 月度汇总 → 快速记一笔（常用分类）
+ * → 筛选 → 按天分组的流水（或日历月视图 + 选中那天的流水）。
+ * 参考：钱迹 / iCost 的“打开即记”（常用分类一点就进记账面板）、一木 / 小星记账 / Money Manager 的日历视图、
+ * Cashew 的流水滑动操作。“记一笔”本身在底部栏中央的“＋”。
+ */
 @Composable
 fun LedgerHome(
     ui: LedgerUi,
@@ -356,106 +460,148 @@ fun LedgerHome(
     listState: LazyListState,
     actions: LedgerHomeActions,
     modifier: Modifier = Modifier,
+    initialCalendar: Boolean = false,
 ) {
     val colors = Jk.colors
     var showSearch by rememberSaveable { mutableStateOf(false) }
-    // 往下滚动后“记一笔”收成圆形按钮，不挡住流水的金额
-    val collapsed by remember(listState) { derivedStateOf { listState.firstVisibleItemIndex > 2 } }
+    var calendar by rememberSaveable { mutableStateOf(initialCalendar) }
+    var selectedDay by remember(ui.month) {
+        mutableStateOf(ui.today?.takeIf { YearMonth.from(it) == ui.month } ?: ui.days.firstOrNull()?.date)
+    }
 
-    Box(modifier.fillMaxSize()) {
-        LazyColumn(
-            state = listState,
-            modifier = Modifier
-                .fillMaxSize()
-                .statusBarsPadding(),
-            contentPadding = PaddingValues(bottom = 112.dp),
-        ) {
-            item(key = "header", contentType = "header") {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(start = Space.x2_5, end = Space.x1, top = Space.x1_5, bottom = Space.x05),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text("账本", style = JkType.brand, color = colors.textPrimary)
-                        Text("每一笔都加密保存在本机", style = JkType.caption, color = colors.textTertiary)
-                    }
-                    JkIconButton(Icons.Outlined.Search, "搜索", { showSearch = !showSearch })
-                    JkIconButton(Icons.Outlined.BarChart, "统计", actions.onStats)
-                    JkIconButton(Icons.Outlined.Lock, "立即锁定", actions.onLock)
-                    JkIconButton(Icons.Outlined.MoreHoriz, "更多", actions.onMore)
+    LazyColumn(
+        state = listState,
+        modifier = modifier
+            .fillMaxSize()
+            .statusBarsPadding(),
+        contentPadding = PaddingValues(bottom = Space.x4),
+    ) {
+        item(key = "header", contentType = "header") {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = Space.x2_5, end = Space.x1, top = Space.x2, bottom = Space.x05),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("账本", style = JkType.pageTitle, color = colors.textPrimary, modifier = Modifier.semantics { heading() })
+                    Text("每一笔都加密保存在本机", style = JkType.caption, color = colors.textTertiary)
                 }
+                JkIconButton(Icons.Outlined.Search, "搜索", { showSearch = !showSearch })
+                JkIconButton(Icons.Outlined.BarChart, "统计", actions.onStats)
+                JkIconButton(Icons.Outlined.MoreHoriz, "更多", actions.onMore)
             }
-            item(key = "month", contentType = "month") {
+        }
+        item(key = "month", contentType = "month") {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = Space.x1, end = Space.x2_5),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 MonthSwitcher(
                     month = ui.month,
                     onChange = actions.onMonth,
-                    modifier = Modifier.padding(horizontal = Space.x1_5),
                     latest = ui.latestMonth,
                 )
+                Spacer(Modifier.weight(1f))
+                ViewToggle(calendar = calendar, onChange = { calendar = it })
             }
-            item(key = "summary", contentType = "summary") {
-                MonthSummaryCard(ui, actions.onBudget, Modifier.padding(horizontal = Space.x2_5, vertical = Space.x05))
+        }
+        item(key = "summary", contentType = "summary") {
+            MonthSummaryCard(ui, actions.onBudget, Modifier.padding(horizontal = Space.x2_5, vertical = Space.x05))
+        }
+        if (ui.quickCategories.isNotEmpty() && !ui.filterActive) {
+            item(key = "quick", contentType = "quick") {
+                QuickAddRow(ui.quickCategories, actions.onQuickAdd)
             }
-            item(key = "filters", contentType = "filters") {
-                Column(Modifier.animateContentSize(tween(220))) {
-                    if (showSearch || filter.query.isNotEmpty()) {
-                        JkTextField(
-                            value = filter.query,
-                            onValueChange = actions.onQuery,
-                            placeholder = "搜索备注或标签",
-                            leading = Icons.Outlined.Search,
-                            modifier = Modifier.padding(start = Space.x2_5, end = Space.x2_5, top = Space.x1),
-                            trailing = {
-                                JkIconButton(Icons.Outlined.Close, "清除", {
-                                    actions.onQuery("")
-                                    showSearch = false
-                                })
-                            },
+        }
+        item(key = "filters", contentType = "filters") {
+            Column(Modifier.animateContentSize(tween(220))) {
+                if (showSearch || filter.query.isNotEmpty()) {
+                    JkTextField(
+                        value = filter.query,
+                        onValueChange = actions.onQuery,
+                        placeholder = "搜索备注或标签",
+                        leading = Icons.Outlined.Search,
+                        modifier = Modifier.padding(start = Space.x2_5, end = Space.x2_5, top = Space.x1),
+                        trailing = {
+                            JkIconButton(Icons.Outlined.Close, "清除", {
+                                actions.onQuery("")
+                                showSearch = false
+                            })
+                        },
+                    )
+                }
+                // JkChip 的布局高度是 48dp（视觉 32dp），这里不再额外留上下边距
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = Space.x2_5),
+                    horizontalArrangement = Arrangement.spacedBy(Space.x1),
+                ) {
+                    item(key = "account") {
+                        JkChip(
+                            text = filter.accountId?.let { ui.accountsById[it]?.name } ?: "全部账户",
+                            selected = filter.accountId != null,
+                            onClick = actions.onPickAccount,
                         )
                     }
-                    // JkChip 的布局高度是 48dp（视觉 32dp），这里不再额外留上下边距
-                    LazyRow(
-                        contentPadding = PaddingValues(horizontal = Space.x2_5),
-                        horizontalArrangement = Arrangement.spacedBy(Space.x1),
-                        modifier = Modifier.padding(top = Space.x05),
-                    ) {
-                        item(key = "account") {
-                            JkChip(
-                                text = filter.accountId?.let { ui.accountsById[it]?.name } ?: "全部账户",
-                                selected = filter.accountId != null,
-                                onClick = actions.onPickAccount,
-                            )
-                        }
-                        item(key = "category") {
-                            JkChip(
-                                text = filter.categoryId?.let { categoryLabel(it, ui.categoriesById) } ?: "全部分类",
-                                selected = filter.categoryId != null,
-                                onClick = actions.onPickCategory,
-                            )
-                        }
-                        if (ui.filterActive) {
-                            item(key = "clear") { JkChip("清除筛选", false, actions.onClearFilters) }
-                        }
+                    item(key = "category") {
+                        JkChip(
+                            text = filter.categoryId?.let { categoryLabel(it, ui.categoriesById) } ?: "全部分类",
+                            selected = filter.categoryId != null,
+                            onClick = actions.onPickCategory,
+                        )
+                    }
+                    if (ui.filterActive) {
+                        item(key = "clear") { JkChip("清除筛选", false, actions.onClearFilters) }
                     }
                 }
             }
-            if (ui.unreadable > 0) {
-                item(key = "unreadable") {
+        }
+        if (ui.unreadable > 0) {
+            item(key = "unreadable") {
+                Text(
+                    "有 ${ui.unreadable} 条记录数据损坏，无法解密，已略过",
+                    style = JkType.small,
+                    color = colors.danger,
+                    modifier = Modifier.padding(horizontal = Space.x2_5, vertical = Space.x05),
+                )
+            }
+        }
+        if (calendar) {
+            item(key = "calendar", contentType = "calendar") {
+                MonthCalendar(
+                    month = ui.month,
+                    days = ui.days,
+                    today = ui.today,
+                    selected = selectedDay,
+                    onSelect = { selectedDay = it },
+                    modifier = Modifier.padding(horizontal = Space.x2_5, vertical = Space.x1),
+                )
+            }
+            val day = ui.days.firstOrNull { it.date == selectedDay }
+            if (day != null) {
+                item(key = "cal-day-${day.date}", contentType = "day") { DayHeader(day) }
+                dayRows(day, actions)
+            } else if (!ui.loading) {
+                item(key = "cal-empty") {
                     Text(
-                        "有 ${ui.unreadable} 条记录数据损坏，无法解密，已略过",
+                        if (selectedDay == null) "点日期查看当天的明细" else "这一天没有记录",
                         style = JkType.small,
-                        color = colors.danger,
-                        modifier = Modifier.padding(horizontal = Space.x2_5, vertical = Space.x05),
+                        color = colors.textTertiary,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = Space.x3),
                     )
                 }
             }
+        } else {
             if (ui.days.isEmpty() && !ui.loading) {
                 item(key = "empty", contentType = "empty") {
                     JkEmpty(
                         title = if (ui.filterActive) "没有符合条件的记录" else "这个月还没有记账",
-                        message = if (ui.filterActive) "换个筛选条件试试" else "点右下角“记一笔”，三秒记完一笔开销。",
+                        message = if (ui.filterActive) "换个筛选条件试试" else "点上面的常用分类，或底部中间的“＋”，三秒记完一笔。",
                         illustration = { LedgerIllustration(if (ui.filterActive) LedgerArt.NO_MATCH else LedgerArt.EMPTY_MONTH) },
                     )
                 }
@@ -464,52 +610,207 @@ fun LedgerHome(
                 stickyHeader(key = "d-${day.date}", contentType = "day") {
                     DayHeader(day)
                 }
-                itemsIndexed(day.rows, key = { _, row -> row.id }, contentType = { _, _ -> "tx" }) { index, row ->
-                    TransactionRow(row, showDivider = index < day.rows.lastIndex, onClick = { actions.onOpen(row.tx) })
+                dayRows(day, actions)
+            }
+            if (ui.days.isNotEmpty()) {
+                item(key = "hint") {
+                    Text(
+                        "右滑再记一笔，左滑删除，长按更多操作",
+                        style = JkType.caption,
+                        color = colors.textTertiary,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = Space.x3, vertical = Space.x2),
+                    )
                 }
             }
         }
+    }
+}
 
-        NewEntryButton(
-            collapsed = collapsed,
-            onClick = actions.onCreate,
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .navigationBarsPadding()
-                .padding(Space.x2_5),
+/** 一天的流水：同一天的几笔放在一块白底分组里。 */
+private fun androidx.compose.foundation.lazy.LazyListScope.dayRows(day: DayUi, actions: LedgerHomeActions) {
+    itemsIndexed(day.rows, key = { _, row -> row.id }, contentType = { _, _ -> "tx" }) { index, row ->
+        TransactionRow(
+            row = row,
+            shape = rowShape(index, day.rows.size),
+            showDivider = index < day.rows.lastIndex,
+            onClick = { actions.onOpen(row.tx) },
+            onLongClick = { actions.onRowMenu(row.tx) },
+            onRepeat = { actions.onRepeat(row.tx) },
+            onDelete = { actions.onDelete(row.tx) },
         )
     }
 }
 
-/** 右下角的“记一笔”：按下时轻轻缩小并震动一下；列表往下滚后收成圆形。 */
+private fun rowShape(index: Int, count: Int): androidx.compose.ui.graphics.Shape {
+    val r = 20.dp
+    return when {
+        count == 1 -> RoundedCornerShape(r)
+        index == 0 -> RoundedCornerShape(topStart = r, topEnd = r)
+        index == count - 1 -> RoundedCornerShape(bottomStart = r, bottomEnd = r)
+        else -> RoundedCornerShape(0.dp)
+    }
+}
+
+/** “明细 / 日历”切换：小号分段，放在月份右边。 */
 @Composable
-private fun NewEntryButton(collapsed: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+private fun ViewToggle(calendar: Boolean, onChange: (Boolean) -> Unit) {
     val colors = Jk.colors
-    val haptic = LocalHapticFeedback.current
-    val interaction = remember { MutableInteractionSource() }
-    val pressed by interaction.collectIsPressedAsState()
-    val scale by animateFloatAsState(if (pressed) 0.94f else 1f, spring(dampingRatio = 0.6f, stiffness = 800f), label = "fabScale")
+    val roomy = androidx.compose.ui.platform.LocalDensity.current.fontScale <= 1.15f
     Row(
-        modifier = modifier
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-            }
-            .height(52.dp)
-            .clip(CircleShape)
-            .background(colors.primary)
-            .clickable(interactionSource = interaction, indication = LocalIndication.current, role = Role.Button, onClickLabel = "记一笔") {
-                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                onClick()
-            }
-            .animateContentSize(spring(dampingRatio = 0.85f, stiffness = 500f))
-            .padding(horizontal = if (collapsed) 14.dp else Space.x2),
-        verticalAlignment = Alignment.CenterVertically,
+        Modifier
+            .clip(Radius.pill)
+            .background(colors.surfaceAlt)
+            .padding(3.dp),
     ) {
-        Icon(Icons.Outlined.Add, contentDescription = if (collapsed) "记一笔" else null, tint = colors.onPrimary, modifier = Modifier.size(24.dp))
-        if (!collapsed) {
-            Spacer(Modifier.width(Space.x1))
-            Text("记一笔", style = JkType.bodyStrong, color = colors.onPrimary, modifier = Modifier.padding(end = Space.x05))
+        for ((value, label, icon) in listOf(
+            Triple(false, "明细", Icons.AutoMirrored.Outlined.ViewList),
+            Triple(true, "日历", Icons.Outlined.CalendarMonth),
+        )) {
+            val active = value == calendar
+            Row(
+                modifier = Modifier
+                    .heightIn(min = 40.dp)
+                    .clip(Radius.pill)
+                    .background(if (active) colors.segmentSelected else Color.Transparent)
+                    .selectable(selected = active, role = Role.Tab, onClick = { onChange(value) })
+                    .padding(horizontal = Space.x1_5),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // 放大字号时省掉图标，保证“明细 / 日历”各自一行、不折成两行
+                if (roomy) {
+                    Icon(icon, contentDescription = null, tint = if (active) colors.accent else colors.textTertiary, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(Space.x05))
+                }
+                Text(label, style = JkType.small, color = if (active) colors.textPrimary else colors.textSecondary, maxLines = 1, softWrap = false)
+            }
+        }
+    }
+}
+
+/** 快速记一笔：最常用的几个支出分类，点一下就带着这个分类打开记账面板（之后只要输金额、点完成）。 */
+@Composable
+private fun QuickAddRow(categories: List<LedgerCategory>, onPick: (String) -> Unit) {
+    val colors = Jk.colors
+    Column(Modifier.padding(top = Space.x1)) {
+        Text(
+            "快速记一笔",
+            style = JkType.overline,
+            color = colors.textTertiary,
+            modifier = Modifier
+                .padding(start = Space.x3, bottom = Space.x05)
+                .semantics { heading() },
+        )
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = Space.x2_5),
+            horizontalArrangement = Arrangement.spacedBy(Space.x1),
+        ) {
+            items(categories, key = { it.id }) { category ->
+                Row(
+                    modifier = Modifier
+                        .clip(Radius.pill)
+                        .background(colors.surface)
+                        .clickable(role = Role.Button, onClickLabel = "记一笔${category.name}") { onPick(category.id) }
+                        .heightIn(min = JkSize.touch)
+                        .padding(start = Space.x1, end = Space.x2),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    CategoryChip(categoryIcon(category.icon), TxType.EXPENSE, size = 32.dp)
+                    Spacer(Modifier.width(Space.x1))
+                    Text(category.name, style = JkType.small, color = colors.textPrimary, maxLines = 1)
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 日历月视图：7 列，每格是日期与当日支出（简写），支出越多底色越深；今天的日期用品牌色，
+ * 选中的那天加一圈品牌色描边。点日期在下面列出那天的流水。
+ */
+@Composable
+fun MonthCalendar(
+    month: YearMonth,
+    days: List<DayUi>,
+    today: LocalDate?,
+    selected: LocalDate?,
+    onSelect: (LocalDate) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = Jk.colors
+    val byDate = remember(days) { days.associateBy { it.date } }
+    val maxExpense = remember(days) { days.maxOfOrNull { it.expense }?.coerceAtLeast(1L) ?: 1L }
+    val first = month.atDay(1)
+    val lead = first.dayOfWeek.value - 1 // 周一开头
+    val cells = lead + month.lengthOfMonth()
+    val rows = (cells + 6) / 7
+    JkCard(modifier.fillMaxWidth(), padding = PaddingValues(horizontal = Space.x1, vertical = Space.x1_5)) {
+        Row(Modifier.fillMaxWidth()) {
+            for (w in listOf("一", "二", "三", "四", "五", "六", "日")) {
+                Text(w, style = JkType.caption, color = colors.textTertiary, textAlign = TextAlign.Center, modifier = Modifier.weight(1f))
+            }
+        }
+        Spacer(Modifier.height(Space.x05))
+        for (r in 0 until rows) {
+            Row(Modifier.fillMaxWidth()) {
+                for (c in 0 until 7) {
+                    val index = r * 7 + c - lead
+                    if (index < 0 || index >= month.lengthOfMonth()) {
+                        Spacer(Modifier.weight(1f))
+                        continue
+                    }
+                    val date = month.atDay(index + 1)
+                    val day = byDate[date]
+                    val isToday = date == today
+                    val isSelected = date == selected
+                    val heat = day?.let { (it.expense.toFloat() / maxExpense).coerceIn(0f, 1f) } ?: 0f
+                    val tint = if (day != null && day.expense > 0) colors.expenseSoft.copy(alpha = 0.35f + 0.65f * heat) else Color.Transparent
+                    val future = today != null && date > today
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(2.dp)
+                            .heightIn(min = 52.dp)
+                            .clip(Radius.tile)
+                            .background(tint)
+                            .then(if (isSelected) Modifier.border(1.5.dp, colors.accent, Radius.tile) else Modifier)
+                            .selectable(selected = isSelected, role = Role.Button, onClick = { onSelect(date) })
+                            .semantics(mergeDescendants = true) {
+                                contentDescription = buildString {
+                                    append("${date.monthValue}月${date.dayOfMonth}日")
+                                    if (isToday) append("，今天")
+                                    if (day != null && day.totals.isNotEmpty()) append("，${day.totals}") else append("，没有记录")
+                                }
+                            }
+                            .padding(vertical = Space.x05),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                    ) {
+                        Text(
+                            "${date.dayOfMonth}",
+                            style = if (isToday) JkType.bodyStrong else JkType.body,
+                            color = when {
+                                isToday -> colors.accent
+                                future -> colors.textTertiary
+                                else -> colors.textPrimary
+                            },
+                        )
+                        val amount = when {
+                            day == null -> ""
+                            day.expense > 0 -> Money.compact(day.expense)
+                            day.income > 0 -> "+" + Money.compact(day.income)
+                            else -> ""
+                        }
+                        Text(
+                            amount,
+                            style = JkType.amountCaption.copy(fontSize = 10.sp, lineHeight = 13.sp),
+                            color = if (day != null && day.expense == 0L && day.income > 0) colors.income else colors.textSecondary,
+                            maxLines = 1,
+                        )
+                    }
+                }
+            }
         }
     }
 }
@@ -519,19 +820,18 @@ private fun NewEntryButton(collapsed: Boolean, onClick: () -> Unit, modifier: Mo
 fun MonthSummaryCard(ui: LedgerUi, onBudget: () -> Unit, modifier: Modifier = Modifier) {
     val colors = Jk.colors
     JkCard(modifier.fillMaxWidth().animateContentSize(tween(240)), padding = PaddingValues(Space.x2_5)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            LegendDot(colors.expense)
-            Spacer(Modifier.width(Space.x1))
-            Text(
-                if (ui.filterActive) "筛选结果 · 支出" else "${ui.month.monthValue}月支出",
-                style = JkType.overline,
-                color = colors.textTertiary,
-            )
-        }
+        Text(
+            if (ui.filterActive) "筛选结果 · 支出" else "${ui.month.monthValue}月支出",
+            style = JkType.overline,
+            color = colors.textTertiary,
+        )
         Spacer(Modifier.height(Space.x05))
         RollingAmount(ui.summary.expense, JkType.amountHero, colors.textPrimary)
         Spacer(Modifier.height(Space.x2))
-        Row(Modifier.fillMaxWidth()) {
+        // 放大字号时三栏金额会挤在一起：日均支出挪到第二行
+        val roomy = androidx.compose.ui.platform.LocalDensity.current.fontScale <= 1.15f
+        val average = ui.dailyAverage?.takeIf { !ui.filterActive }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.x1)) {
             SummaryCell("收入", ui.summary.income, colors.income, Modifier.weight(1f))
             SummaryCell(
                 "结余",
@@ -539,23 +839,27 @@ fun MonthSummaryCard(ui: LedgerUi, onBudget: () -> Unit, modifier: Modifier = Mo
                 if (ui.summary.balance < 0) colors.danger else colors.textPrimary,
                 Modifier.weight(1f),
             )
-            val average = ui.dailyAverage
-            if (average != null && !ui.filterActive) {
-                SummaryCell("日均支出", average, colors.textSecondary, Modifier.weight(1f))
-            } else {
-                Spacer(Modifier.weight(1f))
+            if (roomy) {
+                if (average != null) {
+                    SummaryCell("日均支出", average, colors.textSecondary, Modifier.weight(1f))
+                } else {
+                    Spacer(Modifier.weight(1f))
+                }
             }
         }
+        if (!roomy && average != null) {
+            Spacer(Modifier.height(Space.x1))
+            SummaryCell("日均支出", average, colors.textSecondary)
+        }
         val budget = ui.totalBudget
-        Spacer(Modifier.height(Space.x2))
-        JkDivider()
         if (budget != null) {
             Column(
                 Modifier
+                    .padding(top = Space.x1_5)
                     .fillMaxWidth()
                     .clip(Radius.chip)
                     .clickable(onClickLabel = "查看预算", onClick = onBudget)
-                    .padding(top = Space.x1_5, bottom = Space.x05),
+                    .padding(vertical = Space.x1),
             ) {
                 Row(Modifier.fillMaxWidth()) {
                     Text("月预算 ${Money.format(budget.budget.amount)}", style = JkType.amountCaption, color = colors.textSecondary, modifier = Modifier.weight(1f))
@@ -574,7 +878,7 @@ fun MonthSummaryCard(ui: LedgerUi, onBudget: () -> Unit, modifier: Modifier = Mo
                 style = JkType.caption,
                 color = colors.accent,
                 modifier = Modifier
-                    .padding(top = Space.x05)
+                    .padding(top = Space.x1)
                     .heightIn(min = 40.dp)
                     .clip(Radius.chip)
                     .clickable(role = Role.Button, onClick = onBudget)
@@ -597,59 +901,92 @@ private fun SummaryCell(label: String, cents: Long, color: Color, modifier: Modi
 @Composable
 private fun DayHeader(day: DayUi) {
     val colors = Jk.colors
-    Column(Modifier.background(colors.bg)) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = Space.x2_5, end = Space.x2_5, top = Space.x2, bottom = Space.x1)
-                .semantics(mergeDescendants = true) { heading() },
-            verticalAlignment = Alignment.Bottom,
-        ) {
-            Text(day.label, style = JkType.bodyStrong, color = colors.textPrimary)
-            Spacer(Modifier.width(Space.x1))
-            Text(day.weekday, style = JkType.caption, color = colors.textTertiary, modifier = Modifier.padding(bottom = 2.dp))
-            Spacer(Modifier.weight(1f))
-            Text(day.totals, style = JkType.amountCaption, color = colors.textTertiary, modifier = Modifier.padding(bottom = 2.dp))
-        }
-        JkDivider(Modifier.padding(horizontal = Space.x2_5))
+    Row(
+        modifier = Modifier
+            .background(colors.bg)
+            .fillMaxWidth()
+            .padding(start = Space.x3, end = Space.x3, top = Space.x2, bottom = Space.x1)
+            .semantics(mergeDescendants = true) { heading() },
+        verticalAlignment = Alignment.Bottom,
+    ) {
+        Text(day.label, style = JkType.bodyStrong, color = colors.textPrimary)
+        Spacer(Modifier.width(Space.x1))
+        Text(day.weekday, style = JkType.caption, color = colors.textTertiary, modifier = Modifier.padding(bottom = 2.dp))
+        Spacer(Modifier.weight(1f))
+        Text(day.totals, style = JkType.amountCaption, color = colors.textTertiary, modifier = Modifier.padding(bottom = 2.dp))
     }
 }
 
-/** 一笔流水：左边分类图标底，中间分类与时间 / 账户 / 备注，右边等宽数字的金额（右对齐）。 */
+/**
+ * 一笔流水：左边分类图标底，中间分类与时间 / 账户 / 备注，右边等宽数字的金额（右对齐）。
+ * 点 → 修改；长按 → 菜单；右滑 → 再记一笔；左滑 → 删除（页面会先确认）。
+ */
 @Composable
-private fun TransactionRow(row: TxRowUi, showDivider: Boolean, onClick: () -> Unit) {
+private fun TransactionRow(
+    row: TxRowUi,
+    shape: androidx.compose.ui.graphics.Shape,
+    showDivider: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+    onRepeat: () -> Unit,
+    onDelete: () -> Unit,
+) {
     val colors = Jk.colors
-    Column {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(min = 64.dp)
-                .clickable(onClickLabel = "修改这笔", onClick = onClick)
-                .padding(horizontal = Space.x2_5, vertical = Space.x1_5),
-            verticalAlignment = Alignment.CenterVertically,
+    val haptic = LocalHapticFeedback.current
+    // 不用 clip：圆角只画在底色上（clip 会让触摸命中检测依赖圆角轮廓）
+    Box(Modifier.padding(horizontal = Space.x2_5)) {
+        SwipeActionsBox(
+            start = SwipeAction("再记一笔", Icons.Outlined.ContentCopy, colors.accentSoft, colors.accent, onRepeat),
+            end = SwipeAction("删除", Icons.Outlined.DeleteOutline, colors.danger, Color.White, onDelete),
+            shape = shape,
         ) {
-            CategoryChip(
-                icon = if (row.type == TxType.TRANSFER) TransferIcon else categoryIcon(row.iconKey),
-                type = row.type,
-            )
-            Spacer(Modifier.width(Space.x1_5))
-            Column(Modifier.weight(1f)) {
-                Text(row.title, style = JkType.body, color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Spacer(Modifier.height(2.dp))
-                Text(row.subtitle, style = JkType.caption, color = colors.textTertiary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Column(Modifier.background(colors.surface, shape)) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 64.dp)
+                        .combinedClickable(
+                            onClickLabel = "修改这笔",
+                            onClick = onClick,
+                            onLongClickLabel = "更多操作",
+                            onLongClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                onLongClick()
+                            },
+                        )
+                        .semantics {
+                            customActions = listOf(
+                                CustomAccessibilityAction("再记一笔") { onRepeat(); true },
+                                CustomAccessibilityAction("删除") { onDelete(); true },
+                            )
+                        }
+                        .padding(horizontal = Space.x2, vertical = Space.x1_5),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    CategoryChip(
+                        icon = if (row.type == TxType.TRANSFER) TransferIcon else categoryIcon(row.iconKey),
+                        type = row.type,
+                    )
+                    Spacer(Modifier.width(Space.x1_5))
+                    Column(Modifier.weight(1f)) {
+                        Text(row.title, style = JkType.body, color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Spacer(Modifier.height(2.dp))
+                        Text(row.subtitle, style = JkType.caption, color = colors.textTertiary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    Spacer(Modifier.width(Space.x1_5))
+                    Text(
+                        text = row.amountText,
+                        style = JkType.amount,
+                        color = amountColor(row.type),
+                        textAlign = TextAlign.End,
+                        maxLines = 1,
+                    )
+                }
+                if (showDivider) {
+                    // 分隔线从文字处开始，与图标底对齐
+                    JkDivider(inset = Space.x2 + JkSize.chip + Space.x1_5)
+                }
             }
-            Spacer(Modifier.width(Space.x1_5))
-            Text(
-                text = row.amountText,
-                style = JkType.amount,
-                color = amountColor(row.type),
-                textAlign = TextAlign.End,
-                maxLines = 1,
-            )
-        }
-        if (showDivider) {
-            // 分隔线从文字处开始，与图标底对齐
-            JkDivider(Modifier.padding(end = Space.x2_5), inset = Space.x2_5 + JkSize.chip + Space.x1_5)
         }
     }
 }

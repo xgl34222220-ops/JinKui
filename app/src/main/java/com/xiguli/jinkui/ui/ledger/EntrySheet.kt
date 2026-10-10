@@ -1,5 +1,11 @@
 package com.xiguli.jinkui.ui.ledger
 
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import com.xiguli.jinkui.data.ledger.EntryDefaults
+import com.xiguli.jinkui.ui.components.JkBareField
 import android.os.Build
 import android.view.HapticFeedbackConstants
 import androidx.compose.animation.animateColorAsState
@@ -101,8 +107,12 @@ import java.time.ZoneId
 import java.time.ZoneOffset
 
 /**
- * 记一笔 / 改一笔。金额用面板自带的数字键盘输入（不经过系统输入法），支持简单加减；
- * 备注与标签用普通输入框。[onSave] 的第三个参数在保存成功、需要继续记下一笔时调用，用来清空金额与备注。
+ * 记一笔 / 改一笔（1.0 重做，参考钱迹 / iCost 的一屏记账）：
+ * 最上面是类型切换与大号金额，中间是分类宫格（默认选中第一个），下面一行账户 / 日期 / 时间与备注，
+ * 最底下是数字键盘。打开面板 → 输金额 → 点“完成”，不用离开这一屏。
+ * 账户默认跟着分类走：选了分类，就用这个分类上一次用的账户（[EntryDefaults.accountFor]）；手动改过账户后不再自动换。
+ * 金额用面板自带的数字键盘输入（不经过系统输入法），支持简单加减。
+ * [onSave] 的第三个参数在保存成功、需要继续记下一笔时调用，用来清空金额与备注。
  */
 @Composable
 fun EntrySheet(
@@ -115,27 +125,46 @@ fun EntrySheet(
     onMessage: ((String) -> Unit)? = null,
     /** 新记一笔时的初始时间（测试用固定值）。 */
     initialTime: Long? = null,
+    /** 新记一笔时预选的分类（首页“快速记一笔”）。 */
+    initialCategory: String? = null,
+    /** “再记一笔”：照这一笔预填类型、金额、分类、账户、备注与标签；ID 与时间是新的。 */
+    template: LedgerTransaction? = null,
 ) {
     val message: (String) -> Unit = onMessage ?: LocalContainer.current.messages::show
     val touch = LocalUserActivity.current
     val colors = Jk.colors
     val zone = remember { ZoneId.systemDefault() }
     val active = remember(data.accounts) { data.accounts.filter { !it.archived } }
-    // 新记一笔时默认用上一次记账的账户
-    val lastAccount = remember(data) {
-        data.transactions.maxByOrNull { it.createdAt }?.accountId?.takeIf { id -> active.any { it.id == id } }
+    val seed = existing ?: template
+    val presetType = remember(initialCategory, data.categories) {
+        initialCategory?.let { id -> data.categories.firstOrNull { it.id == id }?.type }
     }
+    // 新记一笔时默认用这个分类上一次用的账户；没有就用最近一笔的账户
+    fun defaultAccount(category: String?): String? =
+        EntryDefaults.accountFor(category, data.transactions, data.categories, active)
+
+    fun firstTop(t: TxType): String? =
+        data.categories.filter { it.type == t && it.parentId == null && !it.archived }.minByOrNull { it.position }?.id
 
     var id by remember { mutableStateOf(existing?.id ?: LedgerIds.newId()) }
-    var type by remember { mutableStateOf(existing?.type ?: TxType.EXPENSE) }
-    var amount by remember { mutableStateOf(existing?.amount?.let(Money::plain) ?: "") }
-    var categoryId by remember { mutableStateOf(existing?.categoryId) }
-    var accountId by remember { mutableStateOf(existing?.accountId ?: lastAccount ?: active.firstOrNull()?.id) }
+    var type by remember { mutableStateOf(seed?.type ?: presetType ?: TxType.EXPENSE) }
+    var amount by remember { mutableStateOf(seed?.amount?.let(Money::plain) ?: "") }
+    var categoryId by remember { mutableStateOf(seed?.categoryId ?: initialCategory) }
+    var accountId by remember {
+        mutableStateOf(seed?.accountId?.takeIf { id -> existing != null || active.any { it.id == id } } ?: defaultAccount(seed?.categoryId ?: initialCategory ?: firstTop(seed?.type ?: presetType ?: TxType.EXPENSE)))
+    }
+    /** 用户手动选过账户后，换分类不再自动改账户。改一笔时也不自动改。 */
+    var accountTouched by remember { mutableStateOf(existing != null || template != null) }
     // 转账默认转入另一个账户，避免一打开就是“同一账户转给自己”
-    var toAccountId by remember { mutableStateOf(existing?.toAccountId ?: active.firstOrNull { it.id != accountId }?.id) }
+    var toAccountId by remember { mutableStateOf(seed?.toAccountId ?: active.firstOrNull { it.id != accountId }?.id) }
     var time by remember { mutableLongStateOf(existing?.occurredAt ?: initialTime ?: System.currentTimeMillis()) }
-    var note by remember { mutableStateOf(existing?.note ?: "") }
-    var tags by remember { mutableStateOf(existing?.tags?.joinToString(" ") ?: "") }
+    var note by remember { mutableStateOf(seed?.note ?: "") }
+    var tags by remember { mutableStateOf(seed?.tags?.joinToString(" ") ?: "") }
+
+    fun pickCategory(newId: String) {
+        categoryId = newId
+        if (!accountTouched && type != TxType.TRANSFER) defaultAccount(newId)?.let { accountId = it }
+    }
 
     var showDate by remember { mutableStateOf(false) }
     var showTime by remember { mutableStateOf(false) }
@@ -192,95 +221,25 @@ fun EntrySheet(
     }
 
     JkSheet(onDismiss = onDismiss) {
-        Column(
-            Modifier
-                .heightIn(max = 300.dp)
-                .verticalScroll(rememberScrollState()),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                JkSegmented(
-                    options = TxType.entries.map { it to it.label },
-                    selected = type,
-                    onSelect = { type = it },
-                    modifier = Modifier.weight(1f),
-                )
-                if (existing != null) {
-                    JkIconButton(Icons.Outlined.DeleteOutline, "删除这笔", { confirmDelete = true }, tint = colors.danger)
-                }
-            }
-
-            if (type == TxType.TRANSFER) {
-                Spacer(Modifier.height(Space.x1_5))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    AccountChip("转出", accountId?.let(accountsById::get), { pickFrom = true }, Modifier.weight(1f))
-                    Text("→", style = JkType.heading, color = colors.textTertiary, modifier = Modifier.padding(horizontal = Space.x1))
-                    AccountChip("转入", toAccountId?.let(accountsById::get), { pickTo = true }, Modifier.weight(1f))
-                }
-            } else {
-                Spacer(Modifier.height(Space.x1_5))
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(Space.x1),
-                    verticalArrangement = Arrangement.spacedBy(Space.x1),
-                ) {
-                    for ((index, top) in tops.withIndex()) {
-                        val chosen = selectedTop?.id == top.id || (selectedTop == null && index == 0)
-                        CategoryTile(top, chosen, onClick = { categoryId = top.id })
-                    }
-                }
-                if (children.isNotEmpty()) {
-                    Spacer(Modifier.height(Space.x1))
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(Space.x1)) {
-                        items(children, key = { it.id }) { child ->
-                            JkChip(
-                                text = child.name,
-                                selected = selectedCategory?.id == child.id,
-                                onClick = { categoryId = if (selectedCategory?.id == child.id) child.parentId else child.id },
-                            )
-                        }
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(Space.x1_5))
-            Row(horizontalArrangement = Arrangement.spacedBy(Space.x1)) {
-                JkTextField(
-                    value = note,
-                    onValueChange = { note = it.take(500) },
-                    placeholder = "备注",
-                    modifier = Modifier.weight(3f),
-                )
-                JkTextField(
-                    value = tags,
-                    onValueChange = { tags = it.take(120) },
-                    placeholder = "标签",
-                    modifier = Modifier.weight(2f),
-                )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            JkSegmented(
+                options = TxType.entries.map { it to it.label },
+                selected = type,
+                onSelect = { type = it },
+                modifier = Modifier.weight(1f),
+            )
+            if (existing != null) {
+                JkIconButton(Icons.Outlined.DeleteOutline, "删除这笔", { confirmDelete = true }, tint = colors.danger)
             }
         }
 
-        // 信息条：账户、日期、时间
-        Spacer(Modifier.height(Space.x1_5))
-        Row(horizontalArrangement = Arrangement.spacedBy(Space.x1), verticalAlignment = Alignment.CenterVertically) {
-            if (type != TxType.TRANSFER) {
-                InfoChip(
-                    icon = accountId?.let(accountsById::get)?.kind?.let(::accountIcon) ?: accountIcon(AccountKind.OTHER),
-                    text = accountId?.let(accountsById::get)?.name ?: "选账户",
-                    onClick = { pickFrom = true },
-                )
-            }
-            val date = Instant.ofEpochMilli(time).atZone(zone).toLocalDate()
-            val clock = Instant.ofEpochMilli(time).atZone(zone).toLocalTime()
-            InfoChip(Icons.Outlined.CalendarMonth, shortDate(date), { showDate = true })
-            InfoChip(Icons.Outlined.Schedule, "%02d:%02d".format(clock.hour, clock.minute), { showTime = true })
-        }
-
-        // 金额：左边是这笔的类型与分类，右边等宽数字的金额（颜色随类型）
+        // 金额：整块最显眼。左边是这笔的类型与分类，右边等宽数字的大号金额（颜色随类型）
         Spacer(Modifier.height(Space.x1_5))
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(Radius.control)
-                .background(txSoft(type).copy(alpha = if (colors.isDark) 0.7f else 0.55f))
+                .background(txSoft(type).copy(alpha = if (colors.isDark) 0.6f else 0.5f))
                 .animateContentSize(tween(200))
                 .padding(horizontal = Space.x2, vertical = Space.x1_5),
             verticalAlignment = Alignment.CenterVertically,
@@ -288,23 +247,24 @@ fun EntrySheet(
             Column(Modifier.weight(1f)) {
                 Text(type.label, style = JkType.overline, color = txColor(type))
                 Text(
-                    text = if (type == TxType.TRANSFER) "账户之间" else (selectedCategory?.name ?: tops.firstOrNull()?.name ?: "未分类"),
-                    style = JkType.caption,
-                    color = colors.textTertiary,
+                    text = if (type == TxType.TRANSFER) "账户之间" else (selectedCategory?.let { categoryLabel(it.id, byId) } ?: tops.firstOrNull()?.name ?: "未分类"),
+                    style = JkType.small,
+                    color = colors.textSecondary,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
             Column(horizontalAlignment = Alignment.End) {
                 Row(verticalAlignment = Alignment.Bottom) {
-                    Text("¥", style = JkType.title, color = colors.textTertiary, modifier = Modifier.padding(end = Space.x05, bottom = 3.dp))
+                    Text("¥", style = JkType.title, color = colors.textTertiary, modifier = Modifier.padding(end = Space.x05, bottom = 4.dp))
                     Text(
                         text = amount.ifEmpty { "0" },
-                        style = JkType.amountLarge,
+                        style = JkType.amountHero,
                         color = if (amount.isEmpty()) colors.textTertiary else amountColor(type),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         textAlign = TextAlign.End,
+                        modifier = Modifier.semantics { contentDescription = "金额 ${amount.ifEmpty { "0" }}，用下方键盘输入" },
                     )
                 }
                 if (AmountInput.hasOperator(amount)) {
@@ -318,8 +278,70 @@ fun EntrySheet(
             }
         }
 
+        Column(
+            Modifier
+                .padding(top = Space.x1)
+                .heightIn(max = 236.dp)
+                .verticalScroll(rememberScrollState()),
+        ) {
+            if (type == TxType.TRANSFER) {
+                Spacer(Modifier.height(Space.x05))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    AccountChip("转出", accountId?.let(accountsById::get), { pickFrom = true }, Modifier.weight(1f))
+                    Text("→", style = JkType.heading, color = colors.textTertiary, modifier = Modifier.padding(horizontal = Space.x1))
+                    AccountChip("转入", toAccountId?.let(accountsById::get), { pickTo = true }, Modifier.weight(1f))
+                }
+            } else {
+                // 分类宫格：每行 5 个，圆形图标底 + 名称，选中的填上类型色
+                for (rowItems in tops.chunked(5)) {
+                    Row(Modifier.fillMaxWidth()) {
+                        for (top in rowItems) {
+                            val chosen = selectedTop?.id == top.id || (selectedTop == null && top.id == tops.firstOrNull()?.id)
+                            CategoryTile(top, chosen, onClick = { pickCategory(top.id) }, modifier = Modifier.weight(1f))
+                        }
+                        repeat(5 - rowItems.size) { Spacer(Modifier.weight(1f)) }
+                    }
+                }
+                if (children.isNotEmpty()) {
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(Space.x1)) {
+                        items(children, key = { it.id }) { child ->
+                            JkChip(
+                                text = child.name,
+                                selected = selectedCategory?.id == child.id,
+                                onClick = { pickCategory(if (selectedCategory?.id == child.id) child.parentId ?: child.id else child.id) },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // 信息条：账户、日期、时间；下面是备注与标签
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(Space.x1),
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
+        ) {
+            if (type != TxType.TRANSFER) {
+                InfoChip(
+                    icon = accountId?.let(accountsById::get)?.kind?.let(::accountIcon) ?: accountIcon(AccountKind.OTHER),
+                    text = accountId?.let(accountsById::get)?.name ?: "选账户",
+                    onClick = { pickFrom = true },
+                    description = "账户",
+                )
+            }
+            val date = Instant.ofEpochMilli(time).atZone(zone).toLocalDate()
+            val clock = Instant.ofEpochMilli(time).atZone(zone).toLocalTime()
+            InfoChip(Icons.Outlined.CalendarMonth, shortDate(date), { showDate = true }, description = "日期")
+            InfoChip(Icons.Outlined.Schedule, "%02d:%02d".format(clock.hour, clock.minute), { showTime = true }, description = "时间")
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(Space.x1)) {
+            CompactField(note, { note = it.take(500) }, "添加备注", Modifier.weight(3f))
+            CompactField(tags, { tags = it.take(120) }, "#标签", Modifier.weight(2f))
+        }
+
         // 数字键盘
-        Spacer(Modifier.height(Space.x1))
+        Spacer(Modifier.height(Space.x1_5))
         Keypad(
             onKey = ::press,
             onAgain = if (existing == null) ({ submit(keepOpen = true) }) else null,
@@ -344,6 +366,7 @@ fun EntrySheet(
                     // 新的转出账户正好是转入账户时，两者对调，而不是留下一个注定保存失败的组合
                     if (type == TxType.TRANSFER && account.id == toAccountId) toAccountId = accountId
                     accountId = account.id
+                    accountTouched = true
                 }
                 pickFrom = false
                 pickTo = false
@@ -424,35 +447,55 @@ private fun shortDate(date: LocalDate, today: LocalDate = LocalDate.now()): Stri
 }
 
 @Composable
-private fun CategoryTile(category: LedgerCategory, selected: Boolean, onClick: () -> Unit) {
+private fun CategoryTile(category: LedgerCategory, selected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
     val colors = Jk.colors
     val tone = txColor(category.type)
-    val bg by animateColorAsState(if (selected) txSoft(category.type) else colors.surface, tween(160), label = "tileBg")
-    val edge by animateColorAsState(if (selected) tone else colors.border, tween(160), label = "tileEdge")
+    val bg by animateColorAsState(if (selected) tone else colors.surfaceAlt, tween(160), label = "tileBg")
     Column(
-        modifier = Modifier
-            .width(64.dp)
+        modifier = modifier
             .clip(Radius.tile)
-            .background(bg)
-            .border(1.dp, edge, Radius.tile)
             .selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
             .padding(vertical = Space.x1),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Icon(
-            categoryIcon(category.icon),
-            contentDescription = null,
-            tint = if (selected) tone else colors.textSecondary,
-            modifier = Modifier.size(JkSize.icon),
-        )
-        Spacer(Modifier.height(2.dp))
+        Box(
+            Modifier
+                .size(44.dp)
+                .clip(CircleShape)
+                .background(bg),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                categoryIcon(category.icon),
+                contentDescription = null,
+                tint = if (selected) (if (colors.isDark) colors.bg else Color.White) else colors.textSecondary,
+                modifier = Modifier.size(JkSize.icon),
+            )
+        }
+        Spacer(Modifier.height(Space.x05))
         Text(
             text = category.name,
-            style = JkType.caption,
+            style = if (selected) JkType.caption.copy(fontWeight = FontWeight.Medium) else JkType.caption,
             color = if (selected) colors.textPrimary else colors.textSecondary,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
+    }
+}
+
+/** 一行的小输入框：浅灰胶囊，不画描边。 */
+@Composable
+private fun CompactField(value: String, onChange: (String) -> Unit, placeholder: String, modifier: Modifier = Modifier) {
+    val colors = Jk.colors
+    Box(
+        modifier
+            .heightIn(min = 44.dp)
+            .clip(Radius.pill)
+            .background(colors.surfaceAlt)
+            .padding(horizontal = Space.x2),
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        JkBareField(value = value, onValueChange = onChange, placeholder = placeholder, textStyle = JkType.small, imeAction = ImeAction.Done)
     }
 }
 
@@ -479,16 +522,16 @@ private fun AccountChip(label: String, account: LedgerAccount?, onClick: () -> U
 }
 
 @Composable
-private fun InfoChip(icon: ImageVector, text: String, onClick: () -> Unit) {
+private fun InfoChip(icon: ImageVector, text: String, onClick: () -> Unit, description: String? = null) {
     val colors = Jk.colors
     Row(
         modifier = Modifier
             // 视觉高度 32dp，触控区补足到 48dp
             .minimumInteractiveComponentSize()
             .height(32.dp)
-            .clip(Radius.chip)
+            .clip(Radius.pill)
             .background(colors.surfaceAlt)
-            .clickable(role = Role.Button, onClick = onClick)
+            .clickable(role = Role.Button, onClickLabel = description?.let { "选择$it" }, onClick = onClick)
             .padding(horizontal = Space.x1_5),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -553,11 +596,11 @@ internal fun Keypad(
             DigitKey("0", { onKey(KeypadKey.Digit('0')) })
             if (onAgain != null) {
                 DigitKey("再记", onAgain, subtle = true, small = true, description = "保存并再记一笔")
-            } else {
-                Spacer(Modifier.weight(1f))
             }
+            // 没有“再记”（修改已有流水）时，“完成”占两格，不在键盘上留一个空洞
             PressableKey(
                 onClick = onDone,
+                weight = if (onAgain != null) 1f else 2f,
                 background = Jk.colors.primary,
                 pressedBackground = Jk.colors.primary.copy(alpha = 0.86f),
                 border = null,
@@ -584,6 +627,7 @@ private fun RowScope.PressableKey(
     modifier: Modifier = Modifier,
     onLongClick: (() -> Unit)? = null,
     haptic: Int = HapticFeedbackConstants.KEYBOARD_TAP,
+    weight: Float = 1f,
     content: @Composable () -> Unit,
 ) {
     val view = LocalView.current
@@ -593,8 +637,8 @@ private fun RowScope.PressableKey(
     val fill by animateColorAsState(if (pressed) pressedBackground else background, tween(90), label = "keyFill")
     Box(
         modifier = Modifier
-            .weight(1f)
-            .height(52.dp)
+            .weight(weight)
+            .height(54.dp)
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
@@ -635,9 +679,9 @@ private fun RowScope.DigitKey(
     val colors = Jk.colors
     PressableKey(
         onClick = onClick,
-        background = if (subtle) colors.surfaceAlt else colors.surface,
-        pressedBackground = if (subtle) colors.border else colors.surfaceAlt,
-        border = colors.border,
+        background = if (subtle) colors.accentSoft else colors.surfaceAlt,
+        pressedBackground = colors.border,
+        border = null,
         modifier = if (description != null) Modifier.clearAndSetSemantics { contentDescription = description; role = Role.Button } else Modifier,
     ) {
         Text(text, style = if (small) JkType.bodyStrong else JkType.title.copy(fontFeatureSettings = "tnum"), color = colors.textPrimary)
@@ -650,9 +694,9 @@ private fun RowScope.IconKey(icon: ImageVector, description: String, onClick: ()
     PressableKey(
         onClick = onClick,
         onLongClick = onLongClick,
-        background = colors.surfaceAlt,
+        background = colors.accentSoft,
         pressedBackground = colors.border,
-        border = colors.border,
+        border = null,
     ) {
         Icon(icon, contentDescription = description, tint = colors.textPrimary, modifier = Modifier.size(22.dp))
     }

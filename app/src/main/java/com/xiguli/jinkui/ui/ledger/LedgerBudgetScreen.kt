@@ -73,7 +73,7 @@ data class BudgetUi(
     val allCategories: List<LedgerCategory>,
 )
 
-private fun buildBudgetUi(data: LedgerData, month: YearMonth, zone: ZoneId): BudgetUi {
+internal fun buildBudgetUi(data: LedgerData, month: YearMonth, zone: ZoneId): BudgetUi {
     val inMonth = LedgerMath.inMonth(data.transactions, month, zone)
     val progress = LedgerMath.budgetProgress(data.budgets, inMonth, data.categories)
     return BudgetUi(
@@ -118,128 +118,13 @@ fun LedgerBudgetScreen(onBack: () -> Unit) {
     var edit by remember { mutableStateOf<BudgetEdit?>(null) }
     var pickCategory by remember { mutableStateOf(false) }
 
-    Column(
-        Modifier
-            .fillMaxSize()
-            .statusBarsPadding(),
-    ) {
-        JkTopBar("预算", onBack = onBack)
-        Column(
-            Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = Space.x2_5)
-                .navigationBarsPadding()
-                .padding(bottom = Space.x4),
-        ) {
-            MonthSwitcher(ui.month, { viewModel.month.value = it }, Modifier.align(Alignment.CenterHorizontally))
-            Spacer(Modifier.height(Space.x1))
-            JkCard(Modifier.fillMaxWidth()) {
-                Text("每月总预算", style = JkType.small, color = colors.textTertiary)
-                val total = ui.total
-                if (total == null) {
-                    Text("未设置", style = JkType.title, color = colors.textPrimary)
-                    Text("${ui.month.monthValue}月已支出 ${Money.format(ui.monthExpense)}", style = JkType.caption, color = colors.textTertiary)
-                    Spacer(Modifier.height(Space.x1_5))
-                    JkButton("设置总预算", { edit = BudgetEdit(null, 0L) }, compact = true)
-                } else {
-                    RollingAmount(total.budget.amount, JkType.amountLarge, colors.textPrimary)
-                    Spacer(Modifier.height(Space.x1))
-                    BudgetBar(total.ratio, total.over)
-                    Spacer(Modifier.height(Space.x1))
-                    Row {
-                        Text("已用 ${Money.format(total.spent)}", style = JkType.small, color = colors.textSecondary, modifier = Modifier.weight(1f))
-                        Text(
-                            if (total.over) "超支 ${Money.format(-total.remaining)}" else "剩余 ${Money.format(total.remaining)}",
-                            style = JkType.small,
-                            color = if (total.over) colors.danger else colors.textSecondary,
-                        )
-                    }
-                    val allowance = LedgerMath.dailyAllowance(total, ui.month, LocalDate.now())
-                    if (allowance != null) {
-                        Text(
-                            "本月还剩 ${allowance.daysLeft} 天，每天可用约 ${Money.format(allowance.perDay)}",
-                            style = JkType.caption,
-                            color = colors.textTertiary,
-                            modifier = Modifier.padding(top = Space.x05),
-                        )
-                    }
-                    Spacer(Modifier.height(Space.x1_5))
-                    JkButton("修改", { edit = BudgetEdit(null, total.budget.amount) }, style = ButtonStyle.Secondary, compact = true)
-                }
-            }
-
-            JkSectionLabel("分类预算")
-            JkCard(Modifier.fillMaxWidth(), padding = PaddingValues(vertical = Space.x1)) {
-                if (ui.categories.isEmpty()) {
-                    Text(
-                        "可以给餐饮、购物等单独设预算，子分类的支出会算进所属分类。",
-                        style = JkType.small,
-                        color = colors.textTertiary,
-                        modifier = Modifier.padding(horizontal = Space.x2, vertical = Space.x1),
-                    )
-                }
-                for (progress in ui.categories) {
-                    val id = progress.budget.categoryId
-                    val category = id?.let(ui.categoriesById::get)
-                    Column(
-                        Modifier
-                            .fillMaxWidth()
-                            .clickable { edit = BudgetEdit(id, progress.budget.amount) }
-                            .padding(horizontal = Space.x2, vertical = Space.x1_5),
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            CategoryChip(categoryIcon(category?.icon), TxType.EXPENSE, size = 36.dp)
-                            Spacer(Modifier.width(Space.x1_5))
-                            Column(Modifier.weight(1f)) {
-                                Text(category?.name ?: "已删除的分类", style = JkType.body, color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                Text(
-                                    "${Money.format(progress.spent)} / ${Money.format(progress.budget.amount)}",
-                                    style = JkType.caption,
-                                    color = colors.textTertiary,
-                                )
-                            }
-                            Text(
-                                if (progress.over) "超支 ${Money.format(-progress.remaining)}" else "剩 ${Money.format(progress.remaining)}",
-                                style = JkType.small,
-                                color = if (progress.over) colors.danger else colors.textSecondary,
-                            )
-                        }
-                        Spacer(Modifier.height(Space.x1))
-                        BudgetBar(progress.ratio, progress.over)
-                    }
-                }
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .clip(Radius.control)
-                        .clickable { pickCategory = true }
-                        .padding(horizontal = Space.x2, vertical = Space.x1_5),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(Icons.Outlined.Add, contentDescription = null, tint = colors.accent)
-                    Spacer(Modifier.width(Space.x1))
-                    Text("添加分类预算", style = JkType.body, color = colors.accent)
-                }
-            }
-            val sum = ui.categories.sumOf { it.budget.amount }
-            val total = ui.total
-            if (total != null && sum > total.budget.amount) {
-                Text(
-                    "分类预算合计 ${Money.format(sum)}，已超过总预算",
-                    style = JkType.caption,
-                    color = colors.danger,
-                    modifier = Modifier.padding(start = Space.x05, top = Space.x1),
-                )
-            }
-            Text(
-                "预算按月循环生效，只统计支出，不含转账。",
-                style = JkType.caption,
-                color = colors.textTertiary,
-                modifier = Modifier.padding(start = Space.x05, top = Space.x1),
-            )
-        }
-    }
+    LedgerBudgetContent(
+        ui = ui,
+        onBack = onBack,
+        onMonth = { viewModel.month.value = it },
+        onEdit = { id, amount -> edit = BudgetEdit(id, amount) },
+        onAddCategory = { pickCategory = true },
+    )
 
     if (pickCategory) {
         CategoryPickerSheet(
@@ -295,6 +180,141 @@ private fun BudgetDialog(title: String, current: Long, onDismiss: () -> Unit, on
         )
         if (current > 0) {
             JkButton("取消这项预算", { onSave(0L) }, style = ButtonStyle.Danger, compact = true)
+        }
+    }
+}
+
+/** 预算（无状态）：总预算卡与分类预算列表。[onEdit] 的分类为 null 时是总预算。 */
+@Composable
+fun LedgerBudgetContent(
+    ui: BudgetUi,
+    onBack: () -> Unit,
+    onMonth: (java.time.YearMonth) -> Unit,
+    onEdit: (String?, Long) -> Unit,
+    onAddCategory: () -> Unit,
+    today: LocalDate = LocalDate.now(),
+) {
+    val colors = Jk.colors
+    Column(
+        Modifier
+            .fillMaxSize()
+            .statusBarsPadding(),
+    ) {
+        JkTopBar("预算", onBack = onBack)
+        Column(
+            Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = Space.x2_5)
+                .navigationBarsPadding()
+                .padding(bottom = Space.x4),
+        ) {
+            MonthSwitcher(ui.month, onMonth, Modifier.align(Alignment.CenterHorizontally))
+            Spacer(Modifier.height(Space.x1))
+            JkCard(Modifier.fillMaxWidth()) {
+                Text("每月总预算", style = JkType.small, color = colors.textTertiary)
+                val total = ui.total
+                if (total == null) {
+                    Text("未设置", style = JkType.title, color = colors.textPrimary)
+                    Text("${ui.month.monthValue}月已支出 ${Money.format(ui.monthExpense)}", style = JkType.caption, color = colors.textTertiary)
+                    Spacer(Modifier.height(Space.x1_5))
+                    JkButton("设置总预算", { onEdit(null, 0L) }, compact = true)
+                } else {
+                    RollingAmount(total.budget.amount, JkType.amountLarge, colors.textPrimary)
+                    Spacer(Modifier.height(Space.x1))
+                    BudgetBar(total.ratio, total.over)
+                    Spacer(Modifier.height(Space.x1))
+                    Row {
+                        Text("已用 ${Money.format(total.spent)}", style = JkType.small, color = colors.textSecondary, modifier = Modifier.weight(1f))
+                        Text(
+                            if (total.over) "超支 ${Money.format(-total.remaining)}" else "剩余 ${Money.format(total.remaining)}",
+                            style = JkType.small,
+                            color = if (total.over) colors.danger else colors.textSecondary,
+                        )
+                    }
+                    val allowance = LedgerMath.dailyAllowance(total, ui.month, today)
+                    if (allowance != null) {
+                        Text(
+                            "本月还剩 ${allowance.daysLeft} 天，每天可用约 ${Money.format(allowance.perDay)}",
+                            style = JkType.caption,
+                            color = colors.textTertiary,
+                            modifier = Modifier.padding(top = Space.x05),
+                        )
+                    }
+                    Spacer(Modifier.height(Space.x1_5))
+                    JkButton("修改", { onEdit(null, total.budget.amount) }, style = ButtonStyle.Secondary, compact = true)
+                }
+            }
+
+            JkSectionLabel("分类预算")
+            JkCard(Modifier.fillMaxWidth(), padding = PaddingValues(vertical = Space.x1)) {
+                if (ui.categories.isEmpty()) {
+                    Text(
+                        "可以给餐饮、购物等单独设预算，子分类的支出会算进所属分类。",
+                        style = JkType.small,
+                        color = colors.textTertiary,
+                        modifier = Modifier.padding(horizontal = Space.x2, vertical = Space.x1),
+                    )
+                }
+                for (progress in ui.categories) {
+                    val id = progress.budget.categoryId
+                    val category = id?.let(ui.categoriesById::get)
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable { onEdit(id, progress.budget.amount) }
+                            .padding(horizontal = Space.x2, vertical = Space.x1_5),
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            CategoryChip(categoryIcon(category?.icon), TxType.EXPENSE, size = 36.dp)
+                            Spacer(Modifier.width(Space.x1_5))
+                            Column(Modifier.weight(1f)) {
+                                Text(category?.name ?: "已删除的分类", style = JkType.body, color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(
+                                    "${Money.format(progress.spent)} / ${Money.format(progress.budget.amount)}",
+                                    style = JkType.caption,
+                                    color = colors.textTertiary,
+                                )
+                            }
+                            Text(
+                                if (progress.over) "超支 ${Money.format(-progress.remaining)}" else "剩 ${Money.format(progress.remaining)}",
+                                style = JkType.small,
+                                color = if (progress.over) colors.danger else colors.textSecondary,
+                            )
+                        }
+                        Spacer(Modifier.height(Space.x1))
+                        BudgetBar(progress.ratio, progress.over)
+                    }
+                }
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(Radius.control)
+                        .clickable { onAddCategory() }
+                        .padding(horizontal = Space.x2, vertical = Space.x1_5),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Outlined.Add, contentDescription = null, tint = colors.accent)
+                    Spacer(Modifier.width(Space.x1))
+                    Text("添加分类预算", style = JkType.body, color = colors.accent)
+                }
+            }
+            val sum = ui.categories.sumOf { it.budget.amount }
+            val total = ui.total
+            if (total != null && sum > total.budget.amount) {
+                Text(
+                    "分类预算合计 ${Money.format(sum)}，已超过总预算",
+                    style = JkType.caption,
+                    color = colors.danger,
+                    modifier = Modifier.padding(start = Space.x05, top = Space.x1),
+                )
+            }
+            Text(
+                "预算按月循环生效，只统计支出，不含转账。",
+                style = JkType.caption,
+                color = colors.textTertiary,
+                modifier = Modifier.padding(start = Space.x05, top = Space.x1),
+            )
         }
     }
 }
