@@ -137,6 +137,9 @@ class BillImportViewModel(private val container: AppContainer) : ViewModel() {
                 val source = BillParser.detect(table)
                 stage = if (source != null) {
                     val parsed = withContext(Dispatchers.Default) { BillParser.parse(table, source) }
+                    if (parsed.records.isEmpty()) throw BillFormatException("认出了${source.label}账单，但里面没有可以导入的收支记录")
+                    // 记账 App 导出没有固定的账户来源：和通用表格一样，预览里可以换默认账户
+                    parsedCsv = parsed.takeIf { source == BillSource.APP }
                     ImportStage.Preview(withContext(Dispatchers.Default) { BillImport.preview(parsed, container.ledger.data.value, zone) })
                 } else {
                     if (table.rows.size < 2) throw BillFormatException("这个文件里没有可以导入的表格")
@@ -146,7 +149,7 @@ class BillImportViewModel(private val container: AppContainer) : ViewModel() {
                 error = e.message
                 stage = ImportStage.Intro
             } catch (e: Exception) {
-                error = "无法读取这个文件"
+                error = "无法读取这个文件：格式不受支持或文件已损坏。支持 Excel（.xlsx / .xls）与 CSV"
                 stage = ImportStage.Intro
             }
         }
@@ -265,7 +268,7 @@ fun BillImportScreen(onBack: () -> Unit) {
                 onToggle = viewModel::toggle,
                 onAll = viewModel::setAll,
                 onCategory = { pickCategoryFor = it },
-                onAccount = if (stage.preview.source == BillSource.CSV) ({ pickAccount = true }) else null,
+                onAccount = if (stage.preview.source == BillSource.CSV || stage.preview.source == BillSource.APP) ({ pickAccount = true }) else null,
                 onCommit = viewModel::commit,
             ),
         )
@@ -341,7 +344,7 @@ fun BillImportIntro(reading: Boolean, onBack: () -> Unit, onPick: () -> Unit) {
                 Text("把微信、支付宝的账单一次导进来", style = JkType.section, color = colors.textPrimary)
                 Spacer(Modifier.height(Space.x1))
                 Text(
-                    "支持微信支付账单（.xlsx / .csv）、支付宝账单（.csv），以及任意 CSV 表格。导入前可以逐笔预览、改分类、去掉不想要的。",
+                    "支持微信支付账单（.xlsx / .csv）、支付宝账单（.csv）、记账 App 导出的 Excel（.xls / .xlsx），以及任意 CSV 表格。导入前可以逐笔预览、改分类、去掉不想要的。",
                     style = JkType.small,
                     color = colors.textSecondary,
                 )
@@ -656,6 +659,7 @@ private fun PreviewSummary(preview: ImportPreview, onAccount: (() -> Unit)?, acc
                 BillSource.WECHAT -> "微信支付账单"
                 BillSource.ALIPAY -> "支付宝账单"
                 BillSource.CSV -> "表格账单"
+                BillSource.APP -> "记账 App 账单"
             },
             style = JkType.section,
             color = colors.textPrimary,

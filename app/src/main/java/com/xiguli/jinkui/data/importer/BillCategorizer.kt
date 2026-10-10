@@ -113,4 +113,55 @@ object BillCategorizer {
         val fallback = if (type == TxType.EXPENSE) "cat-other-expense" else "cat-other-income"
         return byId[fallback]?.id ?: usable.filter { it.parentId == null }.minByOrNull { it.position }?.id ?: usable.first().id
     }
+
+    /** 记账 App 的二级分类 → 金匮分类（比一级更具体，先查）。键是“方向:名字”。 */
+    private val appSub = mapOf(
+        "e:打车" to "cat-transport-2", "e:公交" to "cat-transport-1", "e:地铁" to "cat-transport-1", "e:加油" to "cat-transport-3",
+        "e:停车" to "cat-transport-4", "e:火车" to "cat-transport-5", "e:飞机" to "cat-transport-5",
+        "e:手机数码" to "cat-shopping-3", "e:数码" to "cat-shopping-3", "e:服饰" to "cat-shopping-2", "e:衣服" to "cat-shopping-2",
+        "e:日用品" to "cat-shopping-1", "e:家居" to "cat-shopping-4",
+        "e:虚拟充值" to "cat-fun-2", "e:游戏" to "cat-fun-2", "e:电影" to "cat-fun-1", "e:旅游" to "cat-fun-3", "e:运动" to "cat-fun-4",
+        "e:红包" to "cat-social-1", "e:礼金人情" to "cat-social", "e:礼物" to "cat-social-2", "e:请客" to "cat-social-3",
+        "e:早餐" to "cat-food-1", "e:午餐" to "cat-food-2", "e:晚餐" to "cat-food-3", "e:饮料" to "cat-food-4", "e:水果" to "cat-food-5", "e:零食" to "cat-food-5",
+        "e:房租" to "cat-housing-1", "e:水电" to "cat-housing-2", "e:话费" to "cat-housing-4", "e:物业" to "cat-housing-3",
+        "e:药品" to "cat-medical-2", "e:书籍" to "cat-education-1", "e:培训" to "cat-education-2",
+        "e:借出" to "cat-other-expense", "e:理财支出" to "cat-other-expense",
+        "i:工资" to "cat-salary", "i:奖金" to "cat-bonus", "i:理财盈利" to "cat-invest", "i:理财收益" to "cat-invest", "i:利息" to "cat-invest",
+        "i:兼职外快" to "cat-parttime", "i:兼职" to "cat-parttime", "i:红包" to "cat-red-packet", "i:礼金人情" to "cat-red-packet",
+        "i:退款" to "cat-refund",
+    )
+
+    /** 记账 App 的一级类别 → 金匮分类。 */
+    private val appMain = mapOf(
+        "e:食品餐饮" to "cat-food", "e:餐饮" to "cat-food", "e:出行交通" to "cat-transport", "e:交通" to "cat-transport",
+        "e:购物消费" to "cat-shopping", "e:购物" to "cat-shopping", "e:居家生活" to "cat-housing", "e:健康医疗" to "cat-medical",
+        "e:休闲娱乐" to "cat-fun", "e:文化教育" to "cat-education", "e:送礼人情" to "cat-social", "e:人情" to "cat-social",
+        "e:其他" to "cat-other-expense", "i:收入" to "cat-other-income", "i:其他" to "cat-other-income",
+    )
+
+    /**
+     * 记账 App 导出的“类别 / 二级分类”对应到金匮已有的分类（不新建分类，导入一向只归到已有分类）：
+     * 先看二级分类，再看一级类别；都对不上时按备注里的关键词猜，最后落到“其他”。
+     */
+    fun appCategory(type: TxType, main: String, sub: String, note: String, categories: List<LedgerCategory>, time: LocalTime? = null): String? {
+        val usable = categories.filter { !it.archived && it.type == type }
+        if (usable.isEmpty()) return null
+        val byId = usable.associateBy { it.id }
+        val prefix = if (type == TxType.EXPENSE) "e:" else "i:"
+        fun pick(id: String): String? {
+            byId[id]?.let { return it.id }
+            val parent = id.substringBeforeLast('-').takeIf { id.count { c -> c == '-' } >= 2 }
+            return parent?.let { byId[it]?.id }
+        }
+        // 用户自己建过同名分类时直接用它
+        val sameName = listOf(sub, main).filter { it.isNotBlank() }.firstNotNullOfOrNull { name -> usable.firstOrNull { it.name == name.trim() }?.id }
+        if (sameName != null) return sameName
+        appSub[prefix + sub.trim()]?.let { id -> pick(id)?.let { return it } }
+        val mainId = appMain[prefix + main.trim()]
+        if (mainId == "cat-food" && time != null) {
+            categorize(type, listOf(sub, note), categories, time, "餐饮美食")?.let { return it }
+        }
+        if (mainId != null && mainId != "cat-other-expense" && mainId != "cat-other-income") pick(mainId)?.let { return it }
+        return categorize(type, listOf(sub, note), categories, time, "")
+    }
 }

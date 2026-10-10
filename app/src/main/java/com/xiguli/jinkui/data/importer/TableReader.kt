@@ -20,17 +20,62 @@ class TextTable(val rows: List<List<String>>) {
 
 /**
  * 把账单文件读成 [TextTable]：.xlsx 自己解压读 XML（java.util.zip + XmlPullParser，不引入依赖），
- * 其余按 CSV 读，自动识别 UTF-8 / UTF-16 / GBK（GB18030）编码。全部在本机内存里完成。
+ * .xls（Excel 97-2003）用 [XlsReader] 读，文本按 CSV 读（格式只看文件内容，不看扩展名），自动识别 UTF-8 / UTF-16 / GBK（GB18030）编码。全部在本机内存里完成。
  */
 object TableReader {
     const val MAX_BYTES = 30 * 1024 * 1024
     const val MAX_ROWS = 100_000
     private const val MAX_ENTRY_BYTES = 80L * 1024 * 1024
 
+    /** 按文件内容（而不是扩展名）认出的格式。 */
+    enum class Kind { XLSX, XLS, TEXT, UNSUPPORTED }
+
+    /**
+     * 看文件开头的“魔数”判断格式：PK → .xlsx（zip），D0 CF 11 E0 → .xls（OLE2 复合文档），
+     * 能按文本解码且不含二进制控制字符 → CSV / 文本；其余（PDF、图片、压缩包等）不支持。
+     * 扩展名经常不可信（例如 .xls 其实是 CSV，或 .csv 其实是 .xlsx），所以只看内容。
+     */
+    fun sniff(bytes: ByteArray): Kind {
+        if (bytes.size >= 4 && bytes[0] == 'P'.code.toByte() && bytes[1] == 'K'.code.toByte() && bytes[2].toInt() in 1..8) return Kind.XLSX
+        if (XlsReader.isCompoundFile(bytes)) return Kind.XLS
+        if (bytes.isEmpty() || knownBinary(bytes)) return Kind.UNSUPPORTED
+        val head = bytes.copyOf(minOf(bytes.size, 4096))
+        val bom16 = head.size >= 2 && ((head[0] == 0xFF.toByte() && head[1] == 0xFE.toByte()) || (head[0] == 0xFE.toByte() && head[1] == 0xFF.toByte()))
+        if (bom16) return Kind.TEXT
+        // 文本文件里不该出现 NUL 与大量控制字符（制表、换行、回车除外）
+        val control = head.count { val b = it.toInt() and 0xFF; b < 0x20 && b != 0x09 && b != 0x0A && b != 0x0D && b != 0x0C }
+        return if (control == 0 || control * 100 < head.size) Kind.TEXT else Kind.UNSUPPORTED
+    }
+
+    /** PDF、图片、压缩包：开头是可打印字符也不能当文本读。 */
+    private fun knownBinary(bytes: ByteArray): Boolean {
+        fun starts(vararg b: Int) = bytes.size >= b.size && b.indices.all { (bytes[it].toInt() and 0xFF) == b[it] }
+        return starts(0x25, 0x50, 0x44, 0x46) || starts(0x89, 0x50, 0x4E, 0x47) || starts(0xFF, 0xD8, 0xFF) ||
+            starts(0x47, 0x49, 0x46, 0x38) || starts(0x52, 0x61, 0x72, 0x21) || starts(0x37, 0x7A, 0xBC, 0xAF) || starts(0x1F, 0x8B)
+    }
+
+    /** 不支持的文件给出具体的说明（文件名只用来猜用户想导入的是什么）。 */
+    fun unsupportedMessage(bytes: ByteArray, fileName: String): String {
+        val name = fileName.lowercase()
+        fun starts(vararg b: Int) = bytes.size >= b.size && b.indices.all { (bytes[it].toInt() and 0xFF) == b[it] }
+        return when {
+            bytes.isEmpty() -> "这个文件是空的"
+            starts(0x25, 0x50, 0x44, 0x46) -> "暂不支持 PDF 账单。请在微信 / 支付宝或记账 App 里导出 Excel（.xlsx / .xls）或 CSV 文件"
+            starts(0x89, 0x50, 0x4E, 0x47) || starts(0xFF, 0xD8, 0xFF) || starts(0x47, 0x49, 0x46, 0x38) -> "这是一张图片，不是账单文件。请导出 Excel（.xlsx / .xls）或 CSV 文件"
+            starts(0x52, 0x61, 0x72, 0x21) || starts(0x37, 0x7A, 0xBC, 0xAF) || starts(0x1F, 0x8B) || starts(0x50, 0x4B) -> "这是一个压缩包，请先解压，再选择里面的账单文件"
+            name.endsWith(".numbers") || name.endsWith(".et") -> "暂不支持这种表格格式，请另存为 .xlsx 或 .csv 后再导入"
+            else -> "无法识别这个文件的格式。支持 Excel（.xlsx / .xls）与 CSV 文本文件"
+        }
+    }
+
     fun read(bytes: ByteArray, fileName: String = ""): TextTable {
         if (bytes.size > MAX_BYTES) throw BillFormatException("文件太大了（上限 30 MB）")
-        val zip = bytes.size >= 4 && bytes[0] == 'P'.code.toByte() && bytes[1] == 'K'.code.toByte()
-        return if (zip || fileName.lowercase().endsWith(".xlsx")) readXlsx(bytes) else readCsv(decode(bytes))
+        return when (sniff(bytes)) {
+            Kind.XLSX -> readXlsx(bytes)
+            Kind.XLS -> XlsReader.read(bytes)
+            Kind.TEXT -> readCsv(decode(bytes))
+            Kind.UNSUPPORTED -> throw BillFormatException(unsupportedMessage(bytes, fileName))
+        }
     }
 
     // ── 编码 ──────────────────────────────────────────────────────

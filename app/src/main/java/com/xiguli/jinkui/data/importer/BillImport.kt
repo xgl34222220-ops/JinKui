@@ -59,9 +59,12 @@ data class ImportResult(
 
 /** 账单导入的预览与落账计算。纯函数，便于测试。 */
 object BillImport {
-    /** 去重键：有交易单号用单号，否则用“分钟 + 金额 + 交易对方”。 */
+    /** 去重键：有交易单号用单号；记账 App 导出用“分钟 + 金额 + 备注”；否则用“分钟 + 金额 + 交易对方”。 */
     fun dedupeKey(r: BillRecord): String {
         val number = r.txNo.trim()
+        if (r.source == BillSource.APP) {
+            return "app:${r.time.truncatedTo(ChronoUnit.MINUTES)}:${r.type.key}:${r.amount}:${r.note.trim()}"
+        }
         return if (number.isNotEmpty() && number != "/") {
             "no:${r.source.name}:$number"
         } else {
@@ -85,6 +88,8 @@ object BillImport {
             // 支付方式里写着账户名（“招商银行储蓄卡(1234)”→ 账户“招商银行”；“花呗”→ 账户“花呗”）
             active.firstOrNull { method.contains(it.name) }?.let { return it.id }
             if ("花呗" in method) active.firstOrNull { it.kind == AccountKind.CREDIT && "花呗" in it.name }?.let { return it.id }
+            if (method == "支付宝") active.firstOrNull { it.kind == AccountKind.ALIPAY }?.let { return it.id }
+            if (method == "微信") active.firstOrNull { it.kind == AccountKind.WECHAT }?.let { return it.id }
             if ("信用卡" in method) {
                 val bank = method.substringBefore("信用卡").take(4)
                 active.firstOrNull { it.kind == AccountKind.CREDIT && bank.isNotEmpty() && it.name.contains(bank) }?.let { return it.id }
@@ -107,7 +112,7 @@ object BillImport {
         val kind = when (source) {
             BillSource.WECHAT -> AccountKind.WECHAT
             BillSource.ALIPAY -> AccountKind.ALIPAY
-            BillSource.CSV -> null
+            BillSource.CSV, BillSource.APP -> null
         }
         if (kind != null) {
             active.firstOrNull { it.kind == kind }?.let { return it.id to null }
@@ -150,7 +155,11 @@ object BillImport {
             candidates += ImportCandidate(
                 id = id,
                 record = r,
-                categoryId = BillCategorizer.categorize(r.type, listOf(r.counterparty, r.item, r.note), data.categories, r.time.toLocalTime(), r.kind),
+                categoryId = if (r.source == BillSource.APP) {
+                    BillCategorizer.appCategory(r.type, r.kind, r.item, r.note, data.categories, r.time.toLocalTime())
+                } else {
+                    BillCategorizer.categorize(r.type, listOf(r.counterparty, r.item, r.note), data.categories, r.time.toLocalTime(), r.kind)
+                },
                 accountId = accountFor(r, accounts, fallback),
                 checked = flag == CandidateFlag.NEW,
                 flag = flag,

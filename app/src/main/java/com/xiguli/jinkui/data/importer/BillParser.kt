@@ -13,6 +13,8 @@ enum class BillSource(val label: String) {
     WECHAT("微信支付"),
     ALIPAY("支付宝"),
     CSV("表格"),
+    /** 通用“记账 App”导出：表头「日期, 收支类型, 金额, 类别, 二级分类, 账户, 账本, 退款, 优惠, 备注, …」。 */
+    APP("记账 App"),
 }
 
 /** 没有导入的原因。 */
@@ -43,9 +45,10 @@ data class BillRecord(
     /** 退款收入，且文件里找不到被扣减的原支出。 */
     val refund: Boolean = false,
 ) {
-    /** 记到流水备注里的一句话：交易对方 · 商品。 */
+    /** 记到流水备注里的一句话：交易对方 · 商品；记账 App 导出用它自己的备注。 */
     val summary: String
         get() {
+            if (source == BillSource.APP) return note.trim().take(120)
             val parts = listOf(counterparty, item).map { it.trim() }.filter { it.isNotEmpty() && it != "/" && it != "-" }.distinct()
             return parts.joinToString(" · ").take(120)
         }
@@ -92,8 +95,9 @@ object BillParser {
     private val NOTE = listOf("备注")
     private val REFUNDED = listOf("成功退款")
 
-    /** 认出微信或支付宝账单；都不是（通用表格）时返回 null。 */
+    /** 认出微信、支付宝账单或通用记账 App 导出；都不是（通用表格）时返回 null。 */
     fun detect(table: TextTable): BillSource? {
+        if (appHeaderRow(table) != null) return BillSource.APP
         val header = headerRow(table) ?: return null
         val preamble = table.rows.take(header).joinToString(" ") { it.joinToString(" ") }
         val names = table.rows[header].map(::norm)
@@ -119,8 +123,94 @@ object BillParser {
         return null
     }
 
-    /** 解析微信 / 支付宝账单。 */
+    /** 记账 App 导出的表头行：同时有“日期”“收支类型”“金额”“类别”四列（前 20 行里找）。 */
+    fun appHeaderRow(table: TextTable): Int? {
+        for (i in 0 until minOf(table.rows.size, 20)) {
+            val names = table.rows[i].map(::norm)
+            if (APP_REQUIRED.all { it in names }) return i
+        }
+        return null
+    }
+
+    private val APP_REQUIRED = listOf("日期", "收支类型", "金额", "类别")
+
+    /**
+     * 通用记账 App 导出（.xls / .xlsx / .csv）：
+     *  - 金额取绝对值（支出是负数），方向只看“收支类型”（支出 / 收入，其余如“转账”“不计收支”跳过）；
+     *  - “金额”已是扣除退款后的实付（全额退款的行金额为 0），不再二次扣减；金额为 0 且有“退款”的当作全额退款跳过；“优惠”只是说明；
+     *  - 账户：“账户”列有值就用它；为空时备注里写着支付宝 / 微信就记到对应账户；否则用默认账户；
+     *  - 类别 / 二级分类放进 [BillRecord.kind] / [BillRecord.item]，由 [BillCategorizer.appCategory] 对应到金匮的分类；
+     *  - 备注写进流水备注；去重按“分钟 + 金额 + 备注”。
+     */
+    fun parseApp(table: TextTable): ParsedBill {
+        val header = appHeaderRow(table) ?: throw BillFormatException("没有找到记账 App 账单的表头（日期、收支类型、金额、类别）")
+        val names = table.rows[header].map(::norm)
+        fun col(name: String): Int = names.indexOf(name)
+        val timeCol = col("日期")
+        val dirCol = col("收支类型")
+        val amountCol = col("金额")
+        val catCol = col("类别")
+        val subCol = col("二级分类")
+        val accountCol = col("账户")
+        val refundCol = col("退款")
+        val noteCol = col("备注")
+        val skipped = LinkedHashMap<SkipReason, Int>()
+        fun skip(reason: SkipReason) { skipped[reason] = (skipped[reason] ?: 0) + 1 }
+        val kept = ArrayList<BillRecord>()
+        for (r in header + 1 until table.rows.size) {
+            val row = table.rows[r]
+            fun at(c: Int): String = if (c < 0) "" else row.getOrNull(c)?.trim().orEmpty()
+            val time = parseTime(at(timeCol))
+            val amount = parseAmount(at(amountCol))?.let { kotlin.math.abs(it) }
+            if (time == null || amount == null) {
+                skip(SkipReason.INVALID)
+                continue
+            }
+            val type = when (at(dirCol)) {
+                "支出" -> TxType.EXPENSE
+                "收入" -> TxType.INCOME
+                else -> null
+            }
+            if (type == null) {
+                skip(SkipReason.NEUTRAL)
+                continue
+            }
+            // 这类导出里“金额”已经是扣除退款后的实付：全额退款的行金额为 0、“退款”列是原价，
+            // 部分退款的行“退款”小于金额且金额已是余下的部分。所以这里不再二次扣减，金额为 0 且有退款的当作全额退款跳过。
+            val refund = parseAmount(at(refundCol))?.let { kotlin.math.abs(it) } ?: 0L
+            if (amount == 0L && refund > 0) {
+                skip(SkipReason.REFUNDED)
+                continue
+            }
+            if (amount <= 0 || amount > Money.MAX_CENTS) {
+                skip(SkipReason.INVALID)
+                continue
+            }
+            val note = at(noteCol)
+            val account = at(accountCol)
+            val method = when {
+                account.isNotEmpty() -> account
+                "支付宝" in note -> "支付宝"
+                "微信" in note -> "微信"
+                else -> ""
+            }
+            kept += BillRecord(
+                source = BillSource.APP,
+                time = time,
+                type = type,
+                amount = amount,
+                item = at(subCol),
+                kind = at(catCol),
+                method = method,
+                note = note,
+            )
+        }
+        return ParsedBill(BillSource.APP, dedupeInFile(kept, skipped), skipped)
+    }
+
+    /** 解析微信 / 支付宝账单（记账 App 导出转给 [parseApp]）。 */
     fun parse(table: TextTable, source: BillSource): ParsedBill {
+        if (source == BillSource.APP) return parseApp(table)
         val header = headerRow(table) ?: throw BillFormatException("没有找到账单表头，请确认是微信或支付宝导出的原始账单")
         val names = table.rows[header].map(::norm)
         fun col(aliases: List<String>): List<Int> = aliases.mapNotNull { a ->
