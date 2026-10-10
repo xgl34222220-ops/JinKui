@@ -32,6 +32,7 @@ import org.robolectric.shadows.ShadowLooper
 class ScreenHarness(private val compose: ComposeTestRule) {
     private val controllers = mutableListOf<ActivityController<ComponentActivity>>()
     private var container: AppContainer? = null
+    private var paused = false
 
     /** 需要 LocalContainer 的页面（首次设置、密码生成器等）用这个：锁定状态、空数据，不碰 Keystore。 */
     fun container(): AppContainer = container ?: AppContainer(RuntimeEnvironment.getApplication()).also { container = it }
@@ -40,6 +41,7 @@ class ScreenHarness(private val compose: ComposeTestRule) {
      * [pausedClock]：带自动聚焦输入框的对话框（光标一直闪）用暂停的测试时钟渲染，否则 waitForIdle 永远等不到空闲。
      */
     fun show(dark: Boolean = false, withContainer: Boolean = false, pausedClock: Boolean = false, content: @Composable () -> Unit): ComponentActivity {
+        paused = pausedClock
         compose.mainClock.autoAdvance = !pausedClock
         val controller = Robolectric.buildActivity(ComponentActivity::class.java).setup()
         controllers += controller
@@ -57,14 +59,25 @@ class ScreenHarness(private val compose: ComposeTestRule) {
             }
         }
         ShadowLooper.idleMainLooper()
-        compose.waitForIdle()
+        if (pausedClock) {
+            // 不等“空闲”（闪烁的光标永远不空闲），只手动推进几帧
+            repeat(3) { compose.mainClock.advanceTimeByFrame() }
+            ShadowLooper.idleMainLooper()
+        } else {
+            compose.waitForIdle()
+        }
         return activity
     }
 
     /** 尽力而为的截图；[withDialog] 时把最上层的对话框 / 底部面板叠画在页面上。 */
     fun snapshot(activity: ComponentActivity, name: String, withDialog: Boolean = false) {
-        compose.mainClock.advanceTimeBy(2_000)
-        compose.waitForIdle()
+        if (paused) {
+            compose.mainClock.advanceTimeBy(600)
+            ShadowLooper.idleMainLooper()
+        } else {
+            compose.mainClock.advanceTimeBy(2_000)
+            compose.waitForIdle()
+        }
         runCatching {
             val view = activity.window.decorView
             val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
@@ -83,6 +96,7 @@ class ScreenHarness(private val compose: ComposeTestRule) {
 
     fun close() {
         compose.mainClock.autoAdvance = true
+        paused = false
         controllers.forEach { runCatching { it.pause().stop().destroy() } }
         controllers.clear()
         container?.scope?.cancel()

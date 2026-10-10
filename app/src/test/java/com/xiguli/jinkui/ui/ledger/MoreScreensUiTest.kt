@@ -59,11 +59,15 @@ class MoreScreensUiTest {
     }
 
     @Test
-    fun quickUnlockIntroAndPinSetup() {
+    fun quickUnlockIntro() {
         val activity = h.show(withContainer = true) { QuickUnlockIntro(onDone = {}) }
         compose.onNodeWithText("保险库已创建").assertExists()
         h.snapshot(activity, "quick-unlock-intro-light")
-        h.close()
+    }
+
+    /** PIN 输入框自动聚焦、光标一直闪：单独一个测试，用暂停的时钟渲染。 */
+    @Test
+    fun pinSetupDialog() {
         val pin = h.show(withContainer = true, pausedClock = true) { PinSetupDialog(onDismiss = {}, onSaved = {}) }
         h.snapshot(pin, "pin-setup-dialog-light", withDialog = true)
     }
@@ -103,7 +107,7 @@ class MoreScreensUiTest {
     }
 
     @Test
-    fun recurringEditSheetAndBudgetDialog() {
+    fun recurringEditSheet() {
         val rule = LedgerRecurring(
             id = "r-1", type = TxType.EXPENSE, amount = 380_000, accountId = LedgerSamples.bank.id,
             categoryId = "cat-housing-1", note = "房租", frequency = RecurFrequency.MONTHLY, startDate = LocalDate.of(2026, 9, 8),
@@ -112,7 +116,11 @@ class MoreScreensUiTest {
             RecurringEditSheet(rule, LedgerSamples.data, isNew = false, onDismiss = {}, onSave = {}, onDelete = {})
         }
         h.snapshot(activity, "recurring-edit-sheet-light", withDialog = true)
-        h.close()
+    }
+
+    /** 预算输入框自动聚焦：单独一个测试，用暂停的时钟渲染。 */
+    @Test
+    fun budgetDialog() {
         val budget = h.show(pausedClock = true) { BudgetDialog("本月总预算", 500_000, onDismiss = {}, onSave = {}) }
         h.snapshot(budget, "budget-dialog-light", withDialog = true)
     }
