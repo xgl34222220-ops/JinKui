@@ -226,7 +226,8 @@ class SmartScreensUiTest {
         val activity = h.show {
             AutoBookkeepingContent(enabled = false, autoSave = false, accessGranted = false, pendingCount = 0, actions = AutoBookkeepingActions(onToggle = { toggles += it }))
         }
-        compose.onNodeWithText("未授予").assertExists()
+        compose.onNodeWithText("去授权").assertExists()
+        compose.onNodeWithText("开关已关闭").assertExists()
         compose.onNodeWithText("隐私与权限").performScrollTo()
         compose.onNodeWithText("没有联网权限", substring = true).assertExists()
         h.snapshot(activity, "auto-bookkeeping-light")
@@ -234,7 +235,23 @@ class SmartScreensUiTest {
         val dark = h.show(dark = true) { AutoBookkeepingContent(true, false, true, 3, AutoBookkeepingActions()) }
         compose.onNodeWithText("3 笔").assertExists()
         compose.onNodeWithText("已授予").assertExists()
+        compose.onNodeWithText("重新连接").assertExists()
         h.snapshot(dark, "auto-bookkeeping-dark")
+        h.close()
+        // 连接正常、有未识别通知时
+        val status = com.xiguli.jinkui.core.auto.AutoStatus.Snapshot(connectedAt = 1_760_000_000_000L, live = true, lastSeenAt = 1_760_000_100_000L, lastSeenPackage = "com.tencent.mm", recognizedToday = 2, unrecognizedToday = 1)
+        val notice = com.xiguli.jinkui.core.auto.UnrecognizedNotice(1L, com.xiguli.jinkui.core.auto.PaySource.BANK, 1_760_000_100_000L, "招商银行 · 您尾号####的账户变动 ¥##.##")
+        var recorded = 0
+        val live = h.show {
+            AutoBookkeepingContent(true, false, true, 0, AutoBookkeepingActions(onRecord = { recorded++ }), status = status, unrecognized = listOf(notice), xiaomi = true)
+        }
+        compose.onNodeWithText("已连接", substring = true).assertExists()
+        compose.onNodeWithText("识别 2 笔 · 未识别 1 条").assertExists()
+        compose.onNodeWithText("微信 的通知", substring = true).assertExists()
+        compose.onNodeWithText("小米 / 红米手机请先设置这几项").performScrollTo()
+        compose.onNodeWithText("这是一笔记账").performScrollTo().performClick()
+        assertEquals(1, recorded)
+        h.snapshot(live, "auto-bookkeeping-status")
     }
 
     // ── 入口 ──────────────────────────────────────────────────────

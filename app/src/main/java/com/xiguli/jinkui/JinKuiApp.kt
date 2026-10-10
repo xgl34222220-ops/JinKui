@@ -17,6 +17,10 @@ import com.xiguli.jinkui.data.repo.FontMode
 import com.xiguli.jinkui.data.repo.FontStore
 import com.xiguli.jinkui.core.auto.CapturedPayment
 import com.xiguli.jinkui.core.auto.PendingSpool
+import com.xiguli.jinkui.core.auto.AutoStatus
+import com.xiguli.jinkui.core.auto.ListenerRebinder
+import com.xiguli.jinkui.core.auto.UnrecognizedLog
+import com.xiguli.jinkui.core.auto.UnrecognizedNotice
 import com.xiguli.jinkui.ui.theme.FontConfig
 import com.xiguli.jinkui.ui.theme.JkFonts
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -72,6 +76,36 @@ class AppContainer(app: Application) {
     /** 自动记账的加密暂存（锁定期间到达的通知先放这里）。 */
     val intake = PendingSpool(app, keystore)
 
+    /** 自动记账的运行状态（连接、最近通知时间、今日计数；不含通知内容）。 */
+    val autoStatus = AutoStatus(app)
+
+    /** 没认出来的受支持应用通知（数字已换成 #，加密存放，最多 20 条）。 */
+    val unrecognized = UnrecognizedLog(app, keystore)
+
+    private val appContext = app.applicationContext
+    private var rebindTried = false
+
+    /**
+     * 打开金匮时检查通知监听：开关开着、已授权、但监听没连上时请求系统重新绑定；
+     * 几秒后仍没连上，再切换一次组件状态强制重绑（每次进程只做一次，避免反复折腾）。
+     */
+    fun ensureListener() {
+        val on = settings.current.autoBookkeeping
+        if (!ListenerRebinder.ensure(appContext, on, autoStatus.current.live)) return
+        if (rebindTried) return
+        rebindTried = true
+        scope.launch {
+            kotlinx.coroutines.delay(4_000)
+            ListenerRebinder.ensure(appContext, settings.current.autoBookkeeping, autoStatus.current.live, force = true)
+        }
+    }
+
+    /** “未识别通知 → 这是一笔记账”：用户补上金额和方向后，当作识别出的一笔放进待确认。 */
+    fun recordUnrecognized(notice: UnrecognizedNotice, type: com.xiguli.jinkui.data.ledger.TxType, amount: Long) {
+        capturePayment(CapturedPayment(notice.source, type, amount, "", notice.postedAt))
+        runCatching { unrecognized.remove(notice.id) }
+    }
+
     /** 从桌面快捷方式“记一笔”进来：解锁后打开账本并弹出记账面板。每次请求加一。 */
     val quickRecordRequests = mutableStateOf(0)
 
@@ -112,9 +146,13 @@ class AppContainer(app: Application) {
             repository.load()
             ledger.load()
             drainIntake()
+            runCatching { unrecognized.refresh() }
         }
         // 清空全部数据时，自动记账的暂存也一并删除（它在保险库之外）
-        vault.onWiped = { intake.deleteAll() }
+        vault.onWiped = {
+            intake.deleteAll()
+            unrecognized.clear()
+        }
         applyFonts()
         scope.launch {
             settings.flow

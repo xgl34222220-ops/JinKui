@@ -44,6 +44,8 @@ class MainActivity : FragmentActivity() {
     override fun onStart() {
         super.onStart()
         container.lock.onForeground()
+        // 自动记账：监听被系统停掉时请求重新绑定
+        container.ensureListener()
     }
 
     override fun onStop() {

@@ -104,4 +104,63 @@ class PaymentNotificationParserTest {
         assertEquals(entry, back)
         assertTrue(runCatching { PendingMath.read("p", 0, "{\"amount\":0,\"at\":1}") }.isFailure)
     }
+
+    // ── 1.3：更多的通知写法、多字段、聊天过滤、未识别与打码 ─────────────────
+
+    private fun a(pkg: String, title: String, vararg texts: String, chat: Boolean = false) =
+        PaymentNotificationParser.analyze(pkg, title, texts.toList(), t, chat)
+
+    private fun pay(pkg: String, title: String, vararg texts: String): CapturedPayment? =
+        (a(pkg, title, *texts) as? PaymentNotificationParser.Outcome.Payment)?.payment
+
+    @Test
+    fun moreWordingsAreRecognized() {
+        assertEquals(1_200L, pay(wx, "微信支付", "已支付¥12.00")!!.amount)
+        assertEquals(TxType.EXPENSE, pay(ali, "支付宝", "付款成功 ¥8.80")!!.type)
+        assertEquals(2_550L, pay(ali, "支付宝", "你已成功付款25.50元")!!.amount)
+        assertEquals(TxType.EXPENSE, pay(cmb, "招商银行", "您尾号8888的储蓄卡支出66.00元")!!.type)
+        assertEquals(9_900L, pay("com.icbc", "工商银行", "您的信用卡消费人民币99.00元")!!.amount)
+        val received = pay(wx, "微信收款助手", "收款到账18.00元")!!
+        assertEquals(TxType.INCOME, received.type)
+        assertEquals(1_800L, received.amount)
+        assertEquals(TxType.INCOME, pay(wx, "微信转账", "转账收款 ¥200.00，已存入零钱")!!.type)
+        val refund = pay(ali, "支付宝", "退款到账 ¥15.00，原路退回")!!
+        assertEquals(TxType.INCOME, refund.type)
+        // 同时出现“消费”和“退款到账”：是退款
+        assertEquals(TxType.INCOME, pay(cmb, "招商银行", "您的消费退款到账人民币30.00元")!!.type)
+        assertEquals(PaySource.UNIONPAY, pay("com.unionpay", "云闪付", "付款成功 ¥3.00")!!.source)
+    }
+
+    @Test
+    fun scansAllTextFields() {
+        // 金额只在长文本 / 多行文本 / tickerText 里
+        assertEquals(1_200L, pay(ali, "支付宝", "你有一笔交易", "付款成功 ¥12.00，商户名称：示例便利店")!!.amount)
+        assertEquals("示例便利店", pay(ali, "支付宝", "", "付款成功 ¥12.00，商户名称：示例便利店")!!.merchant)
+        assertEquals(TxType.INCOME, pay(cmb, "", "招商银行", "收入人民币50.00元")!!.type)
+        // 正文与长文本重复时只算一次
+        assertEquals(500L, pay(wx, "微信支付", "已支付¥5.00", "已支付¥5.00")!!.amount)
+    }
+
+    @Test
+    fun chatAndGroupMessagesAreIgnored() {
+        assertTrue(a(wx, "家人群(12)", "张三: 我付款了 ¥50") is PaymentNotificationParser.Outcome.NotPayment)
+        assertTrue(a(wx, "朋友甲", "[3条]朋友甲: 收款了吗 ¥20") is PaymentNotificationParser.Outcome.NotPayment)
+        // 支付宝里朋友发的消息（系统标成聊天）
+        assertTrue(a(ali, "朋友乙", "转你 ¥10 收一下", chat = true) is PaymentNotificationParser.Outcome.NotPayment)
+        assertTrue(a(ali, "示例群(8)", "大家付款了吗") is PaymentNotificationParser.Outcome.NotPayment)
+        assertTrue(a(ali, "朋友丙", "朋友丙：晚上吃什么") is PaymentNotificationParser.Outcome.NotPayment)
+        assertTrue(a("com.example.other", "微信支付", "已支付¥1.00") is PaymentNotificationParser.Outcome.NotPayment)
+        assertTrue(a(cmb, "招商银行", "您的验证码是 123456") is PaymentNotificationParser.Outcome.NotPayment)
+    }
+
+    @Test
+    fun unrecognizedAndMasking() {
+        // 有收付字样但没有金额；有金额但看不出方向
+        assertTrue(a(ali, "支付宝", "付款成功，详情点击查看") is PaymentNotificationParser.Outcome.Unrecognized)
+        assertTrue(a(cmb, "招商银行", "您尾号1234的账户变动 ¥88.00") is PaymentNotificationParser.Outcome.Unrecognized)
+        val shape = PaymentNotificationParser.mask("招商银行", listOf("您尾号1234的账户变动 ¥88.00", "您尾号1234的账户变动 ¥88.00"))
+        assertEquals("招商银行 · 您尾号####的账户变动 ¥##.##", shape)
+        assertTrue(shape.none { it.isDigit() })
+        assertTrue(PaymentNotificationParser.mask("x", listOf("y".repeat(300))).length <= 120)
+    }
 }
