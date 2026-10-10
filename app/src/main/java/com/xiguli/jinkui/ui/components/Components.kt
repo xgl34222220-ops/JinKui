@@ -122,7 +122,7 @@ fun JkTopBar(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (onBack != null) {
-            JkIconButton(Icons.AutoMirrored.Outlined.ArrowBack, "返回", onBack)
+            JkGlassIconButton(Icons.AutoMirrored.Outlined.ArrowBack, "返回", onBack)
         } else {
             Spacer(Modifier.width(Space.x1_5))
         }
@@ -158,6 +158,37 @@ fun JkIconButton(
         contentAlignment = Alignment.Center,
     ) {
         Icon(icon, contentDescription = description, tint = if (enabled) tint else tint.copy(alpha = 0.4f), modifier = Modifier.size(22.dp))
+    }
+}
+
+/**
+ * 玻璃圆钮（1.3）：页头的返回、右上角的操作。48dp 触控区里一颗 40dp 的玻璃泡（与卡包页“+”同一种材质），
+ * 打开“减少透明度”时随 [Jk.surfaces] 换成不透明底。
+ */
+@Composable
+fun JkGlassIconButton(
+    icon: ImageVector,
+    description: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    tint: Color = Jk.colors.textPrimary,
+    enabled: Boolean = true,
+) {
+    Box(
+        modifier = modifier
+            .size(com.xiguli.jinkui.ui.theme.JkSize.touch)
+            .clip(CircleShape)
+            .clickable(enabled = enabled, role = androidx.compose.ui.semantics.Role.Button, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            Modifier
+                .size(com.xiguli.jinkui.ui.theme.JkSize.chip)
+                .jkSurface(Jk.surfaces.chip, CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(icon, contentDescription = description, tint = if (enabled) tint else tint.copy(alpha = 0.4f), modifier = Modifier.size(20.dp))
+        }
     }
 }
 

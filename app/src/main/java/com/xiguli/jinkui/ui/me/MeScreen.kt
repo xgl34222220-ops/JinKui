@@ -1,5 +1,7 @@
 package com.xiguli.jinkui.ui.me
 
+import com.xiguli.jinkui.ui.theme.jkSurface
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -254,8 +256,7 @@ private fun RowGroup(title: String, content: @Composable () -> Unit) {
     Column(
         Modifier
             .fillMaxWidth()
-            .clip(Radius.card)
-            .background(colors.surface)
+            .jkSurface(Jk.surfaces.card, Radius.card)
             .padding(vertical = Space.x1),
     ) {
         Text(

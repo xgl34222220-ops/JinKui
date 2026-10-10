@@ -1,5 +1,7 @@
 package com.xiguli.jinkui.ui.card
 
+import com.xiguli.jinkui.ui.theme.jkSurface
+
 import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -656,17 +658,17 @@ private fun FieldEditor(
     var revealed by remember { mutableStateOf(false) }
     val totpError = if (field.kind == FieldKind.TOTP) remember(field.value) { Totp.errorOf(field.value) } else null
     val softIssue = remember(field.kind, field.value) { FieldCheck.issue(field.kind, field.value) }
+    // 1.3：字段块是一块玻璃卡片；只有格式有问题时才加一圈提示色描边
     val outline = when {
         totpError != null -> colors.danger
         softIssue != null -> colors.expense
-        else -> colors.border
+        else -> null
     }
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(Radius.field)
-            .background(colors.surface)
-            .border(1.dp, outline, Radius.field),
+            .jkSurface(Jk.surfaces.card, Radius.field)
+            .then(if (outline != null) Modifier.border(1.dp, outline, Radius.field) else Modifier),
     ) {
         Row(
             modifier = Modifier.padding(start = Space.x2, end = Space.x05),

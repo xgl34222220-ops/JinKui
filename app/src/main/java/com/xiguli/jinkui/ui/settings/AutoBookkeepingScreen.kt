@@ -264,7 +264,7 @@ fun AutoBookkeepingContent(
                 .weight(1f)
                 .verticalScroll(rememberScrollState())
                 .navigationBarsPadding()
-                .padding(horizontal = Space.x2)
+                .padding(horizontal = Space.x2_5)
                 .padding(top = Space.x05, bottom = Space.x5),
         ) {
             BotanicalCard(Modifier.fillMaxWidth(), layout = BotanicalLayout.SPRIG) {
