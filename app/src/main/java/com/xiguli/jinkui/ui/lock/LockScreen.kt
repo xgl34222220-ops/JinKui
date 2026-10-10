@@ -369,7 +369,9 @@ private fun PadKey(
     val press = rememberJkPress(0.92f)
     val pressed by press.interaction.collectIsPressedAsState()
     // 数字键：浅灰圆底、不画描边；按下时加深一档
-    val fill by animateColorAsState(if (pressed && outlined) colors.border else colors.surfaceAlt, tween(90), label = "padKey")
+    // 1.3：数字键是一颗颗玻璃圆钮，按下时更亮一档
+    val fill by animateColorAsState(if (pressed && outlined) Jk.surfaces.chipSelected.fill else Jk.surfaces.chip.fill, tween(90), label = "padKey")
+    val edge = Jk.surfaces.chip
     Box(
         modifier = Modifier
             .size(64.dp)
@@ -379,6 +381,7 @@ private fun PadKey(
                 if (outlined) {
                     Modifier
                         .background(fill)
+                        .border(1.dp, com.xiguli.jinkui.ui.theme.specularBrush(edge.highlightColor, edge.highlight), CircleShape)
                 } else {
                     Modifier
                 },

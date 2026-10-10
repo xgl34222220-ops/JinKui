@@ -188,7 +188,7 @@ fun OrganizeScreen(onBack: () -> Unit) {
                 contentPadding = PaddingValues(top = Space.x1, bottom = Space.x3),
                 modifier = Modifier.weight(1f),
             ) {
-                itemsIndexed(cards, key = { _, card -> card.id }) { index, card ->
+                itemsIndexed(cards, key = { _, card -> card.id }, contentType = { _, _ -> "organizescreen-row" }) { index, card ->
                     SelectableRow(
                         card = card,
                         checked = card.id in selected,

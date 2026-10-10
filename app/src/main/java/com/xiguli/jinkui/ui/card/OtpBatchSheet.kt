@@ -130,7 +130,7 @@ fun OtpBatchContent(
             .fillMaxWidth()
             .heightIn(max = 360.dp)
             .clip(Radius.field)
-            .background(colors.bg)
+            .background(colors.surfaceAlt)
             .verticalScroll(rememberScrollState()),
     ) {
         batch.entries.forEachIndexed { i, entry ->

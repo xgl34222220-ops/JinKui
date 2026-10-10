@@ -136,7 +136,6 @@ fun MeContent(ui: MeUi, actions: MeActions) {
     Column(
         Modifier
             .fillMaxSize()
-            .background(colors.bg)
             .verticalScroll(rememberScrollState())
             .statusBarsPadding()
             .padding(horizontal = Space.x2)

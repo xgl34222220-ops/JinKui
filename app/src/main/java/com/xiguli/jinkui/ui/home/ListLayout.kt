@@ -19,6 +19,14 @@ object ListLayout {
             .take(RECENT_COUNT)
     }
 
+    const val WALLET_COUNT = 3
+
+    /** 钱包（列表最上面叠成一摞的卡面）：银行卡与 U 卡，置顶的在前，其次最近用过的，最多三张。 */
+    fun wallet(cards: List<Card>): List<Card> = cards
+        .filter { it.type == com.xiguli.jinkui.data.model.CardType.BANK || it.type == com.xiguli.jinkui.data.model.CardType.UKEY }
+        .sortedWith(compareByDescending<Card> { it.pinned }.thenByDescending { it.lastUsedAt })
+        .take(WALLET_COUNT)
+
     /** 点分组标题上的排序按钮时，轮换到下一种排序。 */
     fun nextSort(order: SortOrder): SortOrder = SortOrder.entries[(order.ordinal + 1) % SortOrder.entries.size]
 

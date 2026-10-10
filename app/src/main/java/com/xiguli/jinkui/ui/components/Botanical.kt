@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.dp
 import com.xiguli.jinkui.ui.theme.Jk
 import com.xiguli.jinkui.ui.theme.JkColors
 import com.xiguli.jinkui.ui.theme.Radius
+import com.xiguli.jinkui.ui.theme.jkSurface
 import kotlin.math.cos
 import kotlin.math.sin
 
@@ -45,7 +46,8 @@ fun BotanicalCard(
     content: @Composable BoxScope.() -> Unit,
 ) {
     val colors = Jk.colors
-    Box(modifier.clip(shape)) {
+    // 1.3：头图也是一块玻璃（静态磨砂，不做实时模糊），植物插画淡淡地画在玻璃里
+    Box(modifier.jkSurface(Jk.surfaces.card, shape)) {
         Canvas(
             Modifier
                 .matchParentSize()

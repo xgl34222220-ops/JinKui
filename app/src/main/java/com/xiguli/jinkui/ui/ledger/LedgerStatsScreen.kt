@@ -84,6 +84,9 @@ import com.xiguli.jinkui.ui.theme.JkSize
 import com.xiguli.jinkui.ui.theme.JkType
 import com.xiguli.jinkui.ui.theme.Radius
 import com.xiguli.jinkui.ui.theme.Space
+import com.xiguli.jinkui.ui.theme.jkSurface
+import com.xiguli.jinkui.ui.components.JkSegmented
+import androidx.compose.ui.graphics.Brush
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.ZoneId
@@ -98,7 +101,7 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 
 /** 统计的时间范围：月统计 / 年统计。 */
-enum class StatsMode(val label: String) { MONTH("月统计"), YEAR("年统计") }
+enum class StatsMode(val label: String, val short: String) { MONTH("月统计", "月"), YEAR("年统计", "年") }
 
 /** 柱状图与热力图看的是哪一项。 */
 enum class Measure(val label: String) { EXPENSE("支出"), INCOME("收入"), BALANCE("结余") }
@@ -277,17 +280,25 @@ fun LedgerStatsContent(
             .fillMaxSize()
             .statusBarsPadding(),
     ) {
-        Column(Modifier.background(colors.surface)) {
-            Row(
-                Modifier
+        Column {
+            Text(
+                "统计",
+                style = JkType.pageTitle,
+                color = colors.textPrimary,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                modifier = Modifier
                     .fillMaxWidth()
-                    .padding(start = Space.x2, end = Space.x2, top = Space.x1_5, bottom = Space.x05),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                for (mode in StatsMode.entries) {
-                    ModeTab(mode.label, ui.mode == mode) { onMode(mode) }
-                    Spacer(Modifier.width(Space.x05))
-                }
+                    .padding(top = Space.x1_5)
+                    .semantics { heading() },
+            )
+            // 玻璃“月 / 年”分段：一颗亮玻璃药丸用弹簧滑到选中的一段
+            Box(Modifier.fillMaxWidth().padding(top = Space.x1_5, bottom = Space.x1), contentAlignment = Alignment.Center) {
+                JkSegmented(
+                    options = StatsMode.entries.map { it to it.short },
+                    selected = ui.mode,
+                    onSelect = onMode,
+                    modifier = Modifier.width(220.dp),
+                )
             }
             if (ui.mode == StatsMode.YEAR) {
                 YearChips(ui.years, ui.year, ui.today.year, onYear)
@@ -347,7 +358,7 @@ private fun YearChips(years: List<Int>, selected: Int, thisYear: Int, onYear: (I
         horizontalArrangement = Arrangement.spacedBy(Space.x05),
         modifier = Modifier.padding(bottom = Space.x05),
     ) {
-        items(years, key = { it }) { y ->
+        items(years, key = { it }, contentType = { "ledgerstatsscreen-row" }) { y ->
             val active = y == selected
             val label = when (y) {
                 thisYear -> "今年"
@@ -381,27 +392,30 @@ private fun YearChips(years: List<Int>, selected: Int, thisYear: Int, onYear: (I
     }
 }
 
-/** 薄荷色汇总横幅。 */
+/** 玻璃汇总卡：上面一行大号的“月 / 年支出”，下面支出、收入、结余三格。 */
 @Composable
 private fun SummaryBanner(ui: StatsUi) {
     val colors = Jk.colors
     val prefix = if (ui.mode == StatsMode.YEAR) "年" else "月"
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clip(Radius.card)
-            .background(colors.primary)
-            .padding(vertical = Space.x2_5, horizontal = Space.x1),
-    ) {
-        for ((label, value) in listOf("${prefix}支出" to ui.summary.expense, "${prefix}收入" to ui.summary.income, "${prefix}结余" to ui.summary.balance)) {
-            Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(label, style = JkType.bodyStrong.copy(fontWeight = FontWeight.Bold), color = colors.onPrimary)
-                Spacer(Modifier.height(4.dp))
-                // “万”是中文，用系统字体会比数字大一号：拆出来单独用小字号排在数字后面
-                val wan = abs(value) >= 1_000_000L
-                Row(verticalAlignment = Alignment.Bottom) {
-                    RollingAmount(value, JkType.amount.copy(fontSize = 20.sp, fontWeight = FontWeight.Bold), colors.onPrimary, format = { bannerAmount(it).removeSuffix("万") })
-                    if (wan) Text("万", style = JkType.small.copy(fontWeight = FontWeight.Bold), color = colors.onPrimary, modifier = Modifier.padding(start = 1.dp, bottom = 3.dp))
+    JkCard(Modifier.fillMaxWidth(), padding = PaddingValues(horizontal = Space.x1, vertical = Space.x2_5)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.Bottom) {
+            Text("${prefix}支出", style = JkType.heading, color = colors.textSecondary, modifier = Modifier.padding(bottom = 6.dp))
+            Spacer(Modifier.width(Space.x1_5))
+            RollingAmount(ui.summary.expense, JkType.amountHero, colors.textPrimary, format = { Money.format(it, symbol = false) })
+        }
+        Spacer(Modifier.height(Space.x2))
+        Row(Modifier.fillMaxWidth()) {
+            for ((label, value) in listOf("${prefix}支出" to ui.summary.expense, "${prefix}收入" to ui.summary.income, "${prefix}结余" to ui.summary.balance)) {
+                Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(label, style = JkType.small.copy(fontWeight = FontWeight.Medium), color = colors.textSecondary)
+                    Spacer(Modifier.height(4.dp))
+                    // “万”是中文，用系统字体会比数字大一号：拆出来单独用小字号排在数字后面
+                    val wan = abs(value) >= 1_000_000L
+                    val tone = if (value < 0) colors.danger else colors.textPrimary
+                    Row(verticalAlignment = Alignment.Bottom) {
+                        RollingAmount(value, JkType.amount.copy(fontSize = 20.sp, fontWeight = FontWeight.Bold), tone, format = { bannerAmount(it).removeSuffix("万") })
+                        if (wan) Text("万", style = JkType.small.copy(fontWeight = FontWeight.Bold), color = tone, modifier = Modifier.padding(start = 1.dp, bottom = 3.dp))
+                    }
                 }
             }
         }
@@ -434,14 +448,13 @@ private fun CardTitle(title: String, trailing: @Composable () -> Unit) {
     }
 }
 
-/** 支出 / 收入 / 结余：小号分段，选中段薄荷实底。 */
+/** 支出 / 收入 / 结余：小号玻璃分段，选中段是一颗亮玻璃胶囊、薄荷色字。 */
 @Composable
 fun MeasureSegment(selected: Measure, options: List<Measure> = Measure.entries, onSelect: (Measure) -> Unit) {
     val colors = Jk.colors
     Row(
         Modifier
-            .clip(Radius.control)
-            .background(colors.accentSoft.copy(alpha = if (colors.isDark) 0.7f else 0.6f))
+            .jkSurface(Jk.surfaces.control, Radius.pill)
             .padding(2.dp),
     ) {
         for (m in options) {
@@ -449,13 +462,12 @@ fun MeasureSegment(selected: Measure, options: List<Measure> = Measure.entries, 
             Box(
                 Modifier
                     .heightIn(min = 40.dp)
-                    .clip(Radius.control)
-                    .background(if (active) colors.primary else Color.Transparent)
+                    .then(if (active) Modifier.jkSurface(Jk.surfaces.chipSelected, Radius.pill) else Modifier.clip(Radius.pill))
                     .selectable(selected = active, role = Role.Tab, onClick = { onSelect(m) })
                     .padding(horizontal = Space.x1_5),
                 contentAlignment = Alignment.Center,
             ) {
-                Text(m.label, style = JkType.small.copy(fontWeight = FontWeight.Bold), color = if (active) colors.onPrimary else colors.accent, maxLines = 1)
+                Text(m.label, style = JkType.small.copy(fontWeight = FontWeight.Bold), color = if (active) colors.accent else colors.textSecondary, maxLines = 1)
             }
         }
     }
@@ -481,8 +493,8 @@ fun ValueBars(bars: List<BarPoint>, measure: Measure, modifier: Modifier = Modif
     val labelStyle = JkType.amountCaption.copy(fontSize = 9.5.sp, color = colors.textSecondary)
     val axisStyle = JkType.amountCaption.copy(fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = colors.textSecondary)
     val description = bars.indices.joinToString("；") { "${bars[it].label}${if (bars[it].label.endsWith("月")) "" else "月"} ${measure.label} ${Money.format(values[it])}" }
-    val expense = colors.expense
-    val income = colors.income
+    val mint = colors.chartMint
+    val coral = colors.chartCoral
     val baseline = colors.border
     Canvas(
         modifier
@@ -492,7 +504,7 @@ fun ValueBars(bars: List<BarPoint>, measure: Measure, modifier: Modifier = Modif
     ) {
         val n = bars.size.coerceAtLeast(1)
         val slot = size.width / n
-        val barW = (slot * 0.46f).coerceAtMost(18.dp.toPx())
+        val barW = (slot * 0.52f).coerceAtMost(22.dp.toPx())
         val axisH = 22.dp.toPx()
         val labelH = 16.dp.toPx()
         val hasNeg = values.any { it < 0 }
@@ -506,11 +518,23 @@ fun ValueBars(bars: List<BarPoint>, measure: Measure, modifier: Modifier = Modif
         values.forEachIndexed { i, v ->
             val cx = slot * i + slot / 2
             val h = (chartBottom - chartTop) * (abs(v) / span) * grow.value
-            val color = measureColor(measure, v, expense, income)
+            // 玻璃药丸：薄荷渐变（负数结余用珊瑚），当前月是一颗更亮的白玻璃 + 薄荷描边
+            val color = if (measure == Measure.BALANCE && v < 0) coral else mint
             if (v != 0L) {
-                val minH = h.coerceAtLeast(3.dp.toPx())
+                val minH = h.coerceAtLeast(barW.coerceAtMost(6.dp.toPx()))
                 val top = if (v > 0) zeroY - minH else zeroY
-                drawRoundRect(color.copy(alpha = if (bars[i].current || bars.none { it.current }) 1f else 0.8f), Offset(cx - barW / 2, top), Size(barW, minH), CornerRadius(barW / 2))
+                val current = bars[i].current
+                val brush = if (current) {
+                    Brush.verticalGradient(listOf(Color.White.copy(alpha = if (colors.isDark) 0.55f else 0.95f), color.copy(alpha = 0.75f)), startY = top, endY = top + minH)
+                } else {
+                    Brush.verticalGradient(listOf(color.copy(alpha = 0.95f), color.copy(alpha = 0.45f)), startY = top, endY = top + minH)
+                }
+                drawRoundRect(brush, Offset(cx - barW / 2, top), Size(barW, minH), CornerRadius(barW / 2))
+                drawRoundRect(
+                    if (current) color else Color.White.copy(alpha = if (colors.isDark) 0.18f else 0.6f),
+                    Offset(cx - barW / 2, top), Size(barW, minH), CornerRadius(barW / 2),
+                    style = androidx.compose.ui.graphics.drawscope.Stroke(width = (if (current) 1.6f else 1f) * density),
+                )
                 val text = Money.compact(abs(v)).let { if (v < 0) "-$it" else it }
                 val layout = measurer.measure(text, labelStyle)
                 val ty = if (v > 0) top - layout.size.height - 2.dp.toPx() else top + minH + 2.dp.toPx()

@@ -588,10 +588,10 @@ fun BillPreviewContent(preview: ImportPreview, data: LedgerData, saving: Boolean
             Modifier.weight(1f),
             contentPadding = PaddingValues(start = Space.x2, end = Space.x2, bottom = Space.x2),
         ) {
-            item(key = "summary") {
+            item(key = "summary", contentType = "summary") {
                 PreviewSummary(preview, onAccount = actions.onAccount, accounts = accounts)
             }
-            item(key = "tools") {
+            item(key = "tools", contentType = "tools") {
                 Row(
                     Modifier
                         .fillMaxWidth()
@@ -610,7 +610,7 @@ fun BillPreviewContent(preview: ImportPreview, data: LedgerData, saving: Boolean
                 }
             }
             if (preview.candidates.isEmpty()) {
-                item(key = "empty") {
+                item(key = "empty", contentType = "empty") {
                     com.xiguli.jinkui.ui.components.JkEmpty(
                         title = "没有新的记录",
                         message = if (preview.alreadyImported > 0) "这份账单里的 ${preview.alreadyImported} 笔以前都导入过了。" else "这份账单里没有可以导入的收支。",

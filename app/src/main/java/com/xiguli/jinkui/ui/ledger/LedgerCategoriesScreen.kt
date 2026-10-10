@@ -135,7 +135,7 @@ fun LedgerCategoriesContent(
             contentPadding = PaddingValues(start = Space.x2_5, end = Space.x2_5, top = Space.x2, bottom = Space.x6),
             verticalArrangement = Arrangement.spacedBy(Space.x1_5),
         ) {
-            items(tops.size, key = { tops[it].id }) { index ->
+            items(tops.size, key = { tops[it].id }, contentType = { "ledgercategoriesscreen-row" }) { index ->
                 val top = tops[index]
                 val children = categories.filter { it.parentId == top.id }.sortedWith(compareBy({ it.archived }, { it.position }))
                 JkCard(Modifier.fillMaxWidth(), padding = PaddingValues(vertical = Space.x05)) {
@@ -165,7 +165,7 @@ fun LedgerCategoriesContent(
                     }
                 }
             }
-            item {
+            item(key = "ledgercategoriesscreen-168", contentType = "ledgercategoriesscreen-static") {
                 Text(
                     "分类不会被删除，只能隐藏：隐藏后记账时不再出现，已有流水和统计不受影响。",
                     style = JkType.caption,

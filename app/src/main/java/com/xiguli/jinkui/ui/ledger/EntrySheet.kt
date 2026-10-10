@@ -304,7 +304,7 @@ fun EntrySheet(
                 }
                 if (children.isNotEmpty()) {
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(Space.x1)) {
-                        items(children, key = { it.id }) { child ->
+                        items(children, key = { it.id }, contentType = { "entrysheet-row" }) { child ->
                             JkChip(
                                 text = child.name,
                                 selected = selectedCategory?.id == child.id,

@@ -204,30 +204,30 @@ fun accountIcon(kind: AccountKind): ImageVector = when (kind) {
     AccountKind.OTHER -> Icons.Outlined.AccountBalanceWallet
 }
 
-/** 图表色（1.1 薄荷）：第一色是品牌薄荷，其余是同样柔和、互相分得清的颜色；深色模式整体提亮一档。 */
+/** 图表色（1.3）：薄荷、青、珊瑚、沙四个主色在前，其余是同样柔和、互相分得清的颜色；深色模式整体提亮一档。 */
 private val ChartPalette = listOf(
-    Color(0xFF3AA084), // 薄荷（品牌色，占比最大的一项）
-    Color(0xFFE07A6E), // 珊瑚
-    Color(0xFFE2A94F), // 杏黄
-    Color(0xFF5B8FD1), // 晴蓝
-    Color(0xFF9B7FC6), // 藤紫
-    Color(0xFF2E7F86), // 石青
-    Color(0xFFC98A5B), // 赭石
-    Color(0xFF8DAA4E), // 苔绿
-    Color(0xFFCF7FA0), // 桃粉
-    Color(0xFF8A928E), // 岩灰
+    Color(0xFF5CC6A3), // 薄荷
+    Color(0xFF2E8E99), // 青
+    Color(0xFFEE8A78), // 珊瑚
+    Color(0xFFDDB585), // 沙
+    Color(0xFF8FB8E8), // 雾蓝
+    Color(0xFFB7A6DE), // 藤紫
+    Color(0xFF9CC77A), // 苔绿
+    Color(0xFFE7A3BC), // 桃粉
+    Color(0xFF6FB5B0), // 石青
+    Color(0xFF9AA39F), // 岩灰
 )
 
 private val ChartPaletteDark = listOf(
     Color(0xFF5FC4A6),
-    Color(0xFFF59A8D),
-    Color(0xFFF0C070),
+    Color(0xFF4FB3BF),
+    Color(0xFFF09A8A),
+    Color(0xFFD9B98E),
     Color(0xFF86B2EC),
     Color(0xFFB9A0E2),
-    Color(0xFF63B8BF),
-    Color(0xFFE0A87C),
     Color(0xFFAFCB72),
     Color(0xFFE6A1BE),
+    Color(0xFF7FC8C2),
     Color(0xFFADB5B1),
 )
 

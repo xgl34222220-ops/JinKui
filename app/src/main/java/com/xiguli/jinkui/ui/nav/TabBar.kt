@@ -1,7 +1,7 @@
 package com.xiguli.jinkui.ui.nav
 
 import android.view.HapticFeedbackConstants
-import androidx.compose.animation.Crossfade
+import androidx.compose.animation.togetherWith
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -52,6 +52,12 @@ import com.xiguli.jinkui.ui.components.MintGlyph
 import com.xiguli.jinkui.ui.components.MintIcon
 import com.xiguli.jinkui.ui.theme.Jk
 import com.xiguli.jinkui.ui.theme.jkSurface
+import com.xiguli.jinkui.ui.theme.JkBackdrop
+import com.xiguli.jinkui.ui.theme.jkBackdrop
+import com.xiguli.jinkui.ui.theme.jkBackdropSource
+import com.xiguli.jinkui.ui.theme.rememberJkBackdrop
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.width
 import com.xiguli.jinkui.ui.theme.JkType
 import com.xiguli.jinkui.ui.theme.Radius
 
@@ -70,9 +76,9 @@ object TabBarSpec {
 val LocalTabBarInset = staticCompositionLocalOf { 0.dp }
 
 /**
- * 首页外壳（1.1）：分区内容铺满整屏，底部浮着一条白色胶囊栏——账本 · 日历 · 卡包 · 统计 · 我的。
- * 内容从栏后面滚过，栏的上方有一段渐隐到底色的遮罩，滚到底栏附近的文字会柔和地淡出，而不是被硬切。
- * 两个分区之间 160ms 淡入淡出，离开的分区随即销毁。
+ * 首页外壳（1.3 液态玻璃）：分区内容铺满整屏，底部浮着一条磨砂玻璃胶囊栏——账本 · 日历 · 卡包 · 统计 · 我的。
+ * 内容从栏后面滚过：Android 12+ 上栏里画的是栏后面内容的实时模糊（见 [rememberJkBackdrop]），
+ * 低版本退回更不透明的磨砂填充。两个分区之间 160ms 淡入淡出，离开的分区随即销毁。
  */
 @Composable
 fun HomeTabs(
@@ -80,34 +86,39 @@ fun HomeTabs(
     onSelect: (HomeTab) -> Unit,
     content: @Composable (HomeTab) -> Unit,
 ) {
-    val colors = Jk.colors
     val nav = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     val inset = TabBarSpec.height + TabBarSpec.bottomMargin + nav + 12.dp
+    val backdrop = rememberJkBackdrop()
     Box(Modifier.fillMaxSize()) {
-        CompositionLocalProvider(LocalTabBarInset provides inset) {
-            Crossfade(targetState = selected, animationSpec = tween(160), label = "homeTab", modifier = Modifier.fillMaxSize()) { tab ->
-                Box(Modifier.fillMaxSize()) { content(tab) }
-            }
-        }
-        // 底栏上方的渐隐：内容滚到这里慢慢融进底色
+        // 页面底与分区内容一起录进 backdrop，底栏里模糊的是“栏后面真正的样子”
         Box(
             Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .height(inset + 8.dp)
-                .clearAndSetSemantics { }
-                .background(
-                    Brush.verticalGradient(
-                        0f to colors.bg.copy(alpha = 0f),
-                        0.3f to colors.bg.copy(alpha = 0.78f),
-                        0.6f to colors.bg.copy(alpha = 0.97f),
-                        1f to colors.bg,
-                    ),
-                ),
-        )
+                .fillMaxSize()
+                .jkBackdropSource(backdrop)
+                .jkBackdrop(),
+        ) {
+            CompositionLocalProvider(LocalTabBarInset provides inset) {
+                // 分区切换：弹簧驱动的淡入 + 朝点击方向轻移 24dp（离开的分区淡出后即销毁）
+                androidx.compose.animation.AnimatedContent(
+                    targetState = selected,
+                    transitionSpec = {
+                        val dir = if (targetState.ordinal > initialState.ordinal) 1 else -1
+                        val move = androidx.compose.animation.core.spring<androidx.compose.ui.unit.IntOffset>(dampingRatio = 0.86f, stiffness = 520f)
+                        val fade = androidx.compose.animation.core.spring<Float>(dampingRatio = 1f, stiffness = 900f)
+                        (androidx.compose.animation.fadeIn(fade) + androidx.compose.animation.slideInHorizontally(move) { dir * it / 14 }) togetherWith
+                            (androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(120)) + androidx.compose.animation.slideOutHorizontally(move) { -dir * it / 20 })
+                    },
+                    label = "homeTab",
+                    modifier = Modifier.fillMaxSize(),
+                ) { tab ->
+                    Box(Modifier.fillMaxSize()) { content(tab) }
+                }
+            }
+        }
         HomeTabBar(
             selected = selected,
             onSelect = onSelect,
+            backdrop = backdrop,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .padding(bottom = nav + TabBarSpec.bottomMargin),
@@ -115,44 +126,56 @@ fun HomeTabs(
     }
 }
 
-/** 悬浮胶囊底栏：白底、大圆角、柔和的宽阴影；五个均分的图标 + 文字，选中项薄荷色、图标里铺浅薄荷并轻轻放大。 */
+/**
+ * 悬浮玻璃胶囊底栏：五个均分的线条图标 + 文字。选中项坐在一颗凸起的亮玻璃泡里（薄荷色图标与文字），
+ * 切换时玻璃泡用弹簧滑过去，滑动途中轻微拉长再收回（像液体）。保留触感反馈与 48dp 以上的触控区。
+ */
 @Composable
-fun HomeTabBar(selected: HomeTab, onSelect: (HomeTab) -> Unit, modifier: Modifier = Modifier) {
-    val colors = Jk.colors
-    Row(
+fun HomeTabBar(selected: HomeTab, onSelect: (HomeTab) -> Unit, modifier: Modifier = Modifier, backdrop: JkBackdrop? = null) {
+    val surfaces = Jk.surfaces
+    val position by animateFloatAsState(
+        targetValue = selected.ordinal.toFloat(),
+        animationSpec = spring(dampingRatio = 0.72f, stiffness = 380f),
+        label = "tabBubble",
+    )
+    BoxWithConstraints(
         modifier = modifier
             .padding(horizontal = TabBarSpec.sideMargin)
             .fillMaxWidth()
             .height(TabBarSpec.height)
-            .softShadow(colors.barShadow, if (colors.isDark) 0.05f else 0.012f)
-            // 材质（填充、深色下那圈极淡的亮边）来自 Jk.surfaces.bar
-            .jkSurface(Jk.surfaces.bar, Radius.pill)
-            .padding(horizontal = 6.dp)
-            .selectableGroup(),
-        verticalAlignment = Alignment.CenterVertically,
+            .jkSurface(surfaces.bar, Radius.pill, backdrop),
     ) {
-        for (tab in HomeTab.entries) {
-            TabItem(tab, tab == selected, onSelect, Modifier.weight(1f))
-        }
-    }
-}
-
-/**
- * 柔和的宽阴影：在胶囊外面画十几圈逐渐外扩、几乎透明的圆角矩形，叠起来就是一圈向外渐淡的阴影，
- * 稍微往下偏一点。不依赖系统的硬件阴影，所以截图、低版本系统和深色下都画得一样。
- */
-private fun Modifier.softShadow(color: Color, alphaPerLayer: Float): Modifier = drawBehind {
-    val layers = 14
-    val step = 1.4.dp.toPx()
-    val dy = 4.dp.toPx()
-    for (i in layers downTo 1) {
-        val spread = i * step
-        drawRoundRect(
-            color = color.copy(alpha = alphaPerLayer),
-            topLeft = Offset(-spread, -spread * 0.6f + dy),
-            size = Size(size.width + spread * 2, size.height + spread * 1.6f),
-            cornerRadius = CornerRadius(size.height / 2 + spread),
+        val count = HomeTab.entries.size
+        val inner = maxWidth - 12.dp
+        val slot = inner / count
+        // 滑动中途（position 不是整数）把玻璃泡拉长一点，越接近两格中间越长
+        val frac = position - kotlin.math.floor(position)
+        val stretch = 1f + 0.22f * (1f - kotlin.math.abs(frac - 0.5f) * 2f).let { if (frac == 0f) 0f else it }
+        val bubbleWidth = slot - 6.dp
+        Box(
+            Modifier
+                .padding(start = 6.dp + 3.dp, top = 5.dp, bottom = 5.dp)
+                .fillMaxHeight()
+                .width(bubbleWidth)
+                .graphicsLayer {
+                    translationX = (slot * position).toPx()
+                    scaleX = stretch
+                    scaleY = 1f - (stretch - 1f) * 0.25f
+                }
+                .clearAndSetSemantics { }
+                .jkSurface(surfaces.bubble, Radius.pill),
         )
+        Row(
+            Modifier
+                .fillMaxSize()
+                .padding(horizontal = 6.dp)
+                .selectableGroup(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            for (tab in HomeTab.entries) {
+                TabItem(tab, tab == selected, onSelect, Modifier.weight(1f))
+            }
+        }
     }
 }
 
@@ -204,7 +227,7 @@ private fun TabItem(tab: HomeTab, active: Boolean, onSelect: (HomeTab) -> Unit, 
             size = TabBarSpec.icon,
             tint = tint,
             accent = if (active) colors.primary else colors.iconMuted.copy(alpha = 0.9f),
-            fill = colors.accentSoft.copy(alpha = fillAlpha * (if (colors.isDark) 0.9f else 1f)),
+            fill = colors.accentSoft.copy(alpha = fillAlpha * 0.6f),
             filled = true,
             modifier = Modifier.graphicsLayer {
                 scaleX = scale

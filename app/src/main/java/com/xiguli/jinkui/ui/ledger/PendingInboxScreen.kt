@@ -213,7 +213,7 @@ fun PendingInboxContent(rows: List<PendingRowUi>, enabled: Boolean, actions: Pen
             Modifier.weight(1f),
             contentPadding = PaddingValues(start = Space.x2, end = Space.x2, bottom = Space.x2),
         ) {
-            item(key = "hint") {
+            item(key = "hint", contentType = "hint") {
                 Text(
                     "共 ${rows.size} 笔 · 点“记账”按建议的分类和账户记下，点一行可以先修改",
                     style = JkType.small,
@@ -221,7 +221,7 @@ fun PendingInboxContent(rows: List<PendingRowUi>, enabled: Boolean, actions: Pen
                     modifier = Modifier.padding(start = Space.x05, top = Space.x05, bottom = Space.x1),
                 )
             }
-            items(rows, key = { it.entry.id }) { row ->
+            items(rows, key = { it.entry.id }, contentType = { "pendinginboxscreen-row" }) { row ->
                 val shape = when {
                     rows.size == 1 -> Radius.card
                     row === rows.first() -> androidx.compose.foundation.shape.RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp)

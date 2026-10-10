@@ -303,7 +303,7 @@ internal fun RecurringEditSheet(
 
             JkSectionLabel("重复")
             LazyRow(horizontalArrangement = Arrangement.spacedBy(Space.x1)) {
-                items(RecurFrequency.entries) { f -> JkChip(f.label, frequency == f, { frequency = f }) }
+                items(RecurFrequency.entries, key = { it.name }, contentType = { "ledgerrecurringscreen-option" }) { f -> JkChip(f.label, frequency == f, { frequency = f }) }
             }
             Spacer(Modifier.height(Space.x1))
             PickRow("开始日期", "${start.year}年${start.monthValue}月${start.dayOfMonth}日") { pickStart = true }
@@ -521,7 +521,7 @@ fun LedgerRecurringContent(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(start = Space.x2_5, end = Space.x2_5, bottom = Space.x6),
         ) {
-            item {
+            item(key = "ledgerrecurringscreen-524", contentType = "ledgerrecurringscreen-static") {
                 Text(
                     "房租、工资、会员订阅这类固定收支，设一次就好：每次解锁金匮时，把到期的各期自动记上。不需要后台任务，也不联网。",
                     style = JkType.small,
@@ -530,14 +530,14 @@ fun LedgerRecurringContent(
                 )
             }
             if (rows.isEmpty()) {
-                item {
+                item(key = "ledgerrecurringscreen-533", contentType = "ledgerrecurringscreen-static") {
                     JkEmpty(
                         title = "还没有周期记账",
                         message = "点右上角的 + 添加一条，例如每月 10 日的工资。",
                     )
                 }
             } else {
-                item {
+                item(key = "ledgerrecurringscreen-540", contentType = "ledgerrecurringscreen-static") {
                     JkCard(Modifier.fillMaxWidth(), padding = PaddingValues(vertical = Space.x05)) {
                         rows.forEachIndexed { index, row ->
                             if (index > 0) JkDivider(inset = Space.x6 + Space.x05)

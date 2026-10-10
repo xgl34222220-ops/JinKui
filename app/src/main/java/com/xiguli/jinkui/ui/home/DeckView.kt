@@ -1,5 +1,6 @@
 package com.xiguli.jinkui.ui.home
 
+import com.xiguli.jinkui.ui.nav.transitionOrigin
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -240,6 +241,7 @@ private fun DeckCard(
             aspect = DECK_ASPECT,
             modifier = Modifier
                 .fillMaxWidth()
+                .transitionOrigin()
                 .clip(Radius.card)
                 .pressClickable(press, onClickLabel = clickLabel, onClick = onClick, onLongClick = onLongClick, onLongClickLabel = "快速复制"),
         )
@@ -248,7 +250,7 @@ private fun DeckCard(
                 .matchParentSize()
                 .graphicsLayer { alpha = haze() }
                 .clip(Radius.card)
-                .background(Jk.colors.bg),
+                .background(Jk.colors.surfaceSolid),
         )
     }
 }

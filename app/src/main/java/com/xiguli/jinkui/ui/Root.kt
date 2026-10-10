@@ -29,6 +29,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner
 import com.xiguli.jinkui.AppContainer
@@ -67,6 +69,7 @@ import com.xiguli.jinkui.ui.theme.Jk
 import com.xiguli.jinkui.ui.theme.JkType
 import com.xiguli.jinkui.ui.theme.Radius
 import com.xiguli.jinkui.ui.theme.Space
+import com.xiguli.jinkui.ui.theme.jkBackdrop
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 
@@ -78,7 +81,7 @@ fun JinKuiRoot(container: AppContainer) {
     val state by container.vault.state.collectAsStateWithLifecycle()
     val touch: () -> Unit = remember(container) { { container.lock.touch() } }
 
-    JinKuiTheme(settings.theme, dynamicColor = settings.dynamicColor) {
+    JinKuiTheme(settings.theme, dynamicColor = settings.dynamicColor, reduceTransparency = settings.reduceTransparency) {
         CompositionLocalProvider(
             LocalContainer provides container,
             LocalUserActivity provides touch,
@@ -86,7 +89,7 @@ fun JinKuiRoot(container: AppContainer) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Jk.colors.bg),
+                    .jkBackdrop(),
             ) {
                 // 界面只由保险库状态决定：一旦锁定，下面整棵含明文的界面树立即离开组合。
                 when (state) {
@@ -101,6 +104,7 @@ fun JinKuiRoot(container: AppContainer) {
                     }
                 }
                 MessageHost(container.messages)
+                LaunchVeil()
             }
         }
     }
@@ -132,7 +136,7 @@ private fun MainNavigation() {
     val entry = navigator.current
     CompositionLocalProvider(LocalViewModelStoreOwner provides entry) {
         key(entry.id) {
-            ScreenEnter {
+            ScreenEnter(origin = if (entry.screen is Screen.Detail) remember(entry.id) { com.xiguli.jinkui.ui.nav.TransitionOrigin.take() } else null) {
             when (val screen = entry.screen) {
                 Screen.Home -> HomeTabs(
                     selected = navigator.homeTab,
@@ -222,22 +226,70 @@ private fun MainNavigation() {
     }
 }
 
-/** 进入一页时的轻微淡入上移。只做进入动画：离开的页面连同其中的明文必须立刻销毁。 */
+/** 本进程是否已经播过启动淡出（转屏、换主题时不再播）。 */
+private var launchVeilShown = false
+
+/**
+ * 启动画面的延续：系统启动画面（Android 12+）或启动窗口底（12 以下）在第一帧后消失，
+ * 这里画同样的薄荷渐变 + 图标 + “金匮 / 卡包 · 账本 · 仅存本机”，立刻（不等待、不拖延启动）用 420ms 淡出到玻璃背景。
+ * 不拦截触摸；读屏忽略。
+ */
 @Composable
-private fun ScreenEnter(content: @Composable () -> Unit) {
-    var shown by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) { shown = true }
-    val progress by animateFloatAsState(
-        targetValue = if (shown) 1f else 0f,
-        animationSpec = tween(durationMillis = 200),
-        label = "screenEnter",
-    )
+private fun BoxScope.LaunchVeil() {
+    if (launchVeilShown) return
+    val alpha = remember { androidx.compose.animation.core.Animatable(1f) }
+    LaunchedEffect(Unit) {
+        alpha.animateTo(0f, tween(durationMillis = 420))
+        launchVeilShown = true
+    }
+    if (alpha.value <= 0f) return
+    val colors = Jk.colors
+    androidx.compose.foundation.layout.Column(
+        Modifier
+            .matchParentSize()
+            .graphicsLayer { this.alpha = alpha.value }
+            .background(
+                androidx.compose.ui.graphics.Brush.verticalGradient(
+                    listOf(androidx.compose.ui.res.colorResource(com.xiguli.jinkui.R.color.splash_top), androidx.compose.ui.res.colorResource(com.xiguli.jinkui.R.color.splash_bottom)),
+                ),
+            )
+            .clearAndSetSemantics { },
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center,
+    ) {
+        com.xiguli.jinkui.ui.components.BrandMark(size = 120.dp)
+        androidx.compose.foundation.layout.Spacer(Modifier.padding(top = Space.x3))
+        Text("金匮", style = JkType.brand.copy(fontSize = 40.sp, lineHeight = 48.sp), color = colors.textPrimary)
+        androidx.compose.foundation.layout.Spacer(Modifier.padding(top = Space.x1))
+        Text("卡包 · 账本 · 仅存本机", style = JkType.body, color = colors.textSecondary)
+    }
+}
+
+/**
+ * 进入一页时的动画。只做进入：离开的页面连同其中的明文必须立刻销毁。
+ *  - 有 [origin]（从列表里点开一张卡片）：容器变换——从那一项的矩形用弹簧展开到全屏，圆角收起、内容淡入；
+ *  - 否则：轻微的淡入上移（弹簧）。
+ */
+@Composable
+private fun ScreenEnter(origin: androidx.compose.ui.geometry.Rect? = null, content: @Composable () -> Unit) {
+    val progress = remember { androidx.compose.animation.core.Animatable(0f) }
+    LaunchedEffect(Unit) {
+        progress.animateTo(1f, androidx.compose.animation.core.spring(dampingRatio = 0.9f, stiffness = if (origin != null) 380f else 600f))
+    }
+    val radius = with(androidx.compose.ui.platform.LocalDensity.current) { 22.dp.toPx() }
     Box(
         modifier = Modifier
             .fillMaxSize()
             .graphicsLayer {
-                alpha = progress
-                translationY = (1f - progress) * 24f
+                val p = progress.value
+                if (origin != null) {
+                    clip = p < 1f
+                    shape = com.xiguli.jinkui.ui.nav.RevealShape(origin, p, radius)
+                    alpha = (0.35f + p * 1.3f).coerceAtMost(1f)
+                } else {
+                    alpha = p.coerceIn(0f, 1f)
+                    translationY = (1f - p) * 24f
+                }
             },
     ) {
         content()

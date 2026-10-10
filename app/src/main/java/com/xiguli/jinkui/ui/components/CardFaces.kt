@@ -116,9 +116,22 @@ fun CardFace(
             .aspectRatio(aspect)
             .clip(if (mini) Radius.field else Radius.card)
             .background(Brush.linearGradient(listOf(theme.start, theme.end)))
-            .border(1.dp, ink.copy(alpha = 0.14f), if (mini) Radius.field else Radius.card),
+            .border(1.dp, com.xiguli.jinkui.ui.theme.specularBrush(ink, 0.55f), if (mini) Radius.field else Radius.card),
     ) {
-        Canvas(Modifier.matchParentSize()) { drawCardTexture(type, theme.accent, mini) }
+        Canvas(Modifier.matchParentSize()) {
+            drawCardTexture(type, theme.accent, mini)
+            // 1.3 玻璃卡面：左上一道斜向的光泽带
+            drawRect(
+                Brush.linearGradient(
+                    0f to ink.copy(alpha = 0.22f),
+                    0.38f to ink.copy(alpha = 0.10f),
+                    0.39f to ink.copy(alpha = 0.04f),
+                    1f to ink.copy(alpha = 0f),
+                    start = androidx.compose.ui.geometry.Offset.Zero,
+                    end = androidx.compose.ui.geometry.Offset(size.width, size.height),
+                ),
+            )
+        }
         if (mini) {
             Column(
                 modifier = Modifier

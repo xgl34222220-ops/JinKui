@@ -1,5 +1,11 @@
 package com.xiguli.jinkui.ui.home
 
+import com.xiguli.jinkui.ui.nav.transitionOrigin
+import androidx.compose.ui.zIndex
+import androidx.compose.foundation.layout.offset
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -171,8 +177,8 @@ internal fun ListHome(
                 horizontalArrangement = Arrangement.spacedBy(Space.x1),
                 modifier = Modifier.padding(top = Space.x05),
             ) {
-                item { JkChip("全部", filter == null, { onFilter(null) }) }
-                items(ui.filters, key = { it.first }) { (key, label) ->
+                item(key = "listview-179", contentType = "listview-static") { JkChip("全部", filter == null, { onFilter(null) }) }
+                items(ui.filters, key = { it.first }, contentType = { "listview-row" }) { (key, label) ->
                     JkChip(label, filter == key, { onFilter(if (filter == key) null else key) })
                 }
             }
@@ -185,16 +191,16 @@ internal fun ListHome(
         ) {
             val results = ui.results
             if (results != null) {
-                item(key = "h-results") { GroupHeader(if (showCodes) "两步验证" else "找到", results.size) }
+                item(key = "h-results", contentType = "h-results") { GroupHeader(if (showCodes) "两步验证" else "找到", results.size) }
                 if (results.isEmpty()) {
-                    item(key = "none") {
+                    item(key = "none", contentType = "none") {
                         NoResults(onClear = {
                             onQuery("")
                             onFilter(null)
                         })
                     }
                 }
-                itemsIndexed(results, key = { _, card -> "r-" + card.id }) { index, card ->
+                itemsIndexed(results, key = { _, card -> "r-" + card.id }, contentType = { _, _ -> "listview-row" }) { index, card ->
                     CardRow(
                         card = card,
                         shape = groupShape(index, results.size),
@@ -209,25 +215,29 @@ internal fun ListHome(
                     )
                 }
             } else {
+                val wallet = ListLayout.wallet(ui.all)
+                if (wallet.isNotEmpty()) {
+                    item(key = "wallet", contentType = "wallet") { WalletStack(wallet, onOpen, onLongClick) }
+                }
                 if (ui.issues > 0) {
-                    item(key = "health") { HealthStrip(ui.issues, onHealth) }
+                    item(key = "health", contentType = "health") { HealthStrip(ui.issues, onHealth) }
                 }
                 if (ui.pinned.isNotEmpty()) {
-                    item(key = "h-pinned") { GroupHeader("置顶", ui.pinned.size) }
-                    item(key = "pinned") { PinnedFaces(ui.pinned, onOpen, onLongClick) }
+                    item(key = "h-pinned", contentType = "h-pinned") { GroupHeader("置顶", ui.pinned.size) }
+                    item(key = "pinned", contentType = "pinned") { PinnedFaces(ui.pinned, onOpen, onLongClick) }
                 }
                 val recent = ListLayout.recent(ui.all)
                 if (recent.isNotEmpty()) {
-                    item(key = "h-recent") { GroupHeader("最近使用", recent.size) }
-                    item(key = "recent") { RecentChips(recent, onOpen, onLongClick) }
+                    item(key = "h-recent", contentType = "h-recent") { GroupHeader("最近使用", recent.size) }
+                    item(key = "recent", contentType = "recent") { RecentChips(recent, onOpen, onLongClick) }
                 }
-                item(key = "h-all") {
+                item(key = "h-all", contentType = "h-all") {
                     GroupHeader("全部", ui.all.size) {
                         SortButton(sortOrder, onSort)
                     }
                 }
                 // 排序切换时行平滑挪到新位置（animateItem），不是整表闪一下
-                itemsIndexed(ui.all, key = { _, card -> "a-" + card.id }) { index, card ->
+                itemsIndexed(ui.all, key = { _, card -> "a-" + card.id }, contentType = { _, _ -> "listview-row" }) { index, card ->
                     CardRow(
                         card = card,
                         shape = groupShape(index, ui.all.size),
@@ -241,7 +251,7 @@ internal fun ListHome(
                         modifier = Modifier.animateItem(),
                     )
                 }
-                item(key = "hint") {
+                item(key = "hint", contentType = "hint") {
                     Text(
                         "右滑置顶，左滑复制账号，长按更多操作",
                         style = JkType.caption,
@@ -428,7 +438,7 @@ private fun CardRow(
         if (swipeTarget != null) add(CustomAccessibilityAction("复制${swipeTarget.label}") { onCopy(swipeTarget); true })
     }
     // 不用 clip：圆角只画在底色上（clip 会让触摸命中检测依赖圆角轮廓）
-    Box(modifier.padding(horizontal = Space.x2_5)) {
+    Box(modifier.padding(horizontal = Space.x2_5).transitionOrigin()) {
         SwipeActionsBox(
             start = SwipeAction(if (card.pinned) "取消置顶" else "置顶", Icons.Outlined.PushPin, colors.accentSoft, colors.accent, onTogglePin),
             end = swipeTarget?.let { field -> SwipeAction("复制${field.label}", Icons.Outlined.ContentCopy, colors.primary, colors.onPrimary) { onCopy(field) } },
@@ -544,6 +554,63 @@ private fun InlineTotp(field: CardField, now: Long, copied: Boolean, onCopy: () 
 private fun groupCode(code: String): String =
     if (code.length == 8) code.chunked(4).joinToString(" ") else code.chunked(3).joinToString(" ")
 
+/**
+ * 钱包（1.3）：银行卡叠成一摞，最前面一张完整显示，后面两张只露出上沿、依次变窄。
+ * 点最前面一张进详情、长按快速复制；点后面露出的边把那张换到最前（弹簧动画）。读屏把每张当成一个按钮。
+ */
+@Composable
+private fun WalletStack(cards: List<Card>, onOpen: (Card) -> Unit, onLongClick: (Card) -> Unit) {
+    var front by rememberSaveable { mutableIntStateOf(0) }
+    val order = remember(cards, front) { cards.indices.map { (front + it) % cards.size } }
+    val peek = 16.dp
+    val view = androidx.compose.ui.platform.LocalView.current
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .padding(start = Space.x2_5, end = Space.x2_5, top = Space.x1, bottom = Space.x1)
+            .padding(top = peek * (cards.size - 1)),
+    ) {
+        // 从最后面一张画起
+        for (depth in order.indices.reversed()) {
+            val index = order[depth]
+            val card = cards[index]
+            key(card.id) {
+                val offset by androidx.compose.animation.core.animateDpAsState(-(peek * depth), androidx.compose.animation.core.spring(dampingRatio = 0.78f, stiffness = 420f), label = "walletY")
+                val inset by androidx.compose.animation.core.animateDpAsState(10.dp * depth, androidx.compose.animation.core.spring(dampingRatio = 0.78f, stiffness = 420f), label = "walletX")
+                val face = CardTemplates.face(card)
+                val press = rememberJkPress(0.97f)
+                CardFace(
+                    brand = BankBrand.of(card),
+                    title = card.title,
+                    type = card.type,
+                    colorIndex = card.color,
+                    hint = face.primary,
+                    secondaryLabel = face.secondaryLabel,
+                    secondary = face.secondary,
+                    pinned = card.pinned,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = inset)
+                        .offset(y = offset)
+                        .zIndex((cards.size - depth).toFloat())
+                        .then(if (depth == 0) Modifier.transitionOrigin() else Modifier)
+                        .clip(Radius.card)
+                        .then(
+                            if (depth == 0) {
+                                Modifier.pressClickable(press, onClickLabel = "查看详情", onClick = { onOpen(card) }, onLongClick = { onLongClick(card) }, onLongClickLabel = "更多操作")
+                            } else {
+                                Modifier.clickable(role = Role.Button, onClickLabel = "把${card.title}换到最前") {
+                                    view.performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK)
+                                    front = index
+                                }
+                            },
+                        ),
+                )
+            }
+        }
+    }
+}
+
 /** 置顶：小一号的整张卡面，横向排开（像钱包里最上面的几张卡）。 */
 @Composable
 private fun PinnedFaces(cards: List<Card>, onOpen: (Card) -> Unit, onLongClick: (Card) -> Unit) {
@@ -551,7 +618,7 @@ private fun PinnedFaces(cards: List<Card>, onOpen: (Card) -> Unit, onLongClick: 
         contentPadding = PaddingValues(horizontal = Space.x2_5),
         horizontalArrangement = Arrangement.spacedBy(Space.x1_5),
     ) {
-        items(cards, key = { it.id }) { card ->
+        items(cards, key = { it.id }, contentType = { "listview-row" }) { card ->
             val face = CardTemplates.face(card)
             val press = rememberJkPress(0.97f)
             CardFace(
@@ -566,6 +633,7 @@ private fun PinnedFaces(cards: List<Card>, onOpen: (Card) -> Unit, onLongClick: 
                 // 完整卡面（名称、打码卡号、有效期）而不是只写类型名的小卡面：一眼认得出是哪张卡
                 modifier = Modifier
                     .width(if (cards.size == 1) 260.dp else 216.dp)
+                    .transitionOrigin()
                     .clip(Radius.card)
                     .pressClickable(press, onClickLabel = "查看详情", onClick = { onOpen(card) }, onLongClick = { onLongClick(card) }, onLongClickLabel = "更多操作"),
             )
@@ -581,7 +649,7 @@ private fun RecentChips(cards: List<Card>, onOpen: (Card) -> Unit, onLongClick: 
         contentPadding = PaddingValues(horizontal = Space.x2_5),
         horizontalArrangement = Arrangement.spacedBy(Space.x1),
     ) {
-        items(cards, key = { it.id }) { card ->
+        items(cards, key = { it.id }, contentType = { "listview-row" }) { card ->
             Row(
                 modifier = Modifier
                     .clip(Radius.pill)

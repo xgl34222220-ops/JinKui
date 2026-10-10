@@ -294,8 +294,8 @@ fun HomeScreen(
                         // JkChip 布局高 48dp（触控区），视觉仍是 32dp：上边距相应减 8dp，筛选条看上去位置不变
                         modifier = Modifier.padding(top = Space.x05),
                     ) {
-                        item { JkChip("全部", filter == null, { viewModel.setFilter(null) }) }
-                        items(ui.filters, key = { it.first }) { (key, label) ->
+                        item(key = "homescreen-297", contentType = "homescreen-static") { JkChip("全部", filter == null, { viewModel.setFilter(null) }) }
+                        items(ui.filters, key = { it.first }, contentType = { "homescreen-row" }) { (key, label) ->
                             JkChip(label, filter == key, { viewModel.setFilter(if (filter == key) null else key) })
                         }
                     }

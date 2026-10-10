@@ -1,5 +1,7 @@
 package com.xiguli.jinkui.ui.ledger
 
+import kotlinx.coroutines.launch
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -136,7 +138,7 @@ fun CalendarContent(
             .statusBarsPadding(),
         contentPadding = PaddingValues(bottom = LocalTabBarInset.current + Space.x2),
     ) {
-        item(key = "header") {
+        item(key = "header", contentType = "header") {
           Column {
             Row(
                 Modifier
@@ -181,7 +183,7 @@ fun CalendarContent(
             }
           }
         }
-        item(key = "grid") {
+        item(key = "grid", contentType = "grid") {
             LunarMonthGrid(
                 month = ui.month,
                 days = ui.days,
@@ -192,7 +194,7 @@ fun CalendarContent(
                 modifier = Modifier.padding(horizontal = Space.x1, vertical = Space.x1),
             )
         }
-        item(key = "day-title") {
+        item(key = "day-title", contentType = "day-title") {
             val mark = remember(selected) { ChineseCalendar.mark(selected) }
             Column(Modifier.padding(start = Space.x2, end = Space.x2, top = Space.x1)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -227,7 +229,7 @@ fun CalendarContent(
         if (day != null) {
             dayRows(day, actions)
         } else if (!ui.loading) {
-            item(key = "empty") {
+            item(key = "empty", contentType = "empty") {
                 Column(
                     Modifier
                         .fillMaxWidth()
@@ -296,18 +298,43 @@ fun LunarMonthGrid(
     val marks = remember(month) { (1..month.lengthOfMonth()).map { ChineseCalendar.mark(month.atDay(it)) } }
     val lead = month.atDay(1).dayOfWeek.value % 7 // 周日开头
     val rows = (lead + month.lengthOfMonth() + 6) / 7
-    var drag by remember { mutableStateOf(0f) }
+    // 1.3：月份格子跟手左右滑动，松手超过阈值换月——新月份从同一侧滑入、弹簧归位；不够就弹回
+    val slide = remember { androidx.compose.animation.core.Animatable(0f) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val latestSwipe by androidx.compose.runtime.rememberUpdatedState(onSwipe)
     Column(
         modifier
             .fillMaxWidth()
+            .graphicsLayer {
+                translationX = slide.value
+                alpha = 1f - (kotlin.math.abs(slide.value) / size.width.coerceAtLeast(1f)).coerceIn(0f, 1f) * 0.7f
+            }
             .pointerInput(month) {
+                var drag = 0f
+                val spring = androidx.compose.animation.core.spring<Float>(dampingRatio = 0.82f, stiffness = 420f)
                 detectHorizontalDragGestures(
                     onDragStart = { drag = 0f },
+                    onDragCancel = { scope.launch { slide.animateTo(0f, spring) } },
                     onDragEnd = {
-                        if (drag < -120f) onSwipe(true) else if (drag > 120f) onSwipe(false)
+                        val width = size.width.toFloat()
+                        val forward = drag < 0f
+                        if (kotlin.math.abs(drag) > 120f) {
+                            scope.launch {
+                                slide.snapTo(if (forward) width * 0.35f else -width * 0.35f)
+                                latestSwipe(forward)
+                                slide.animateTo(0f, spring)
+                            }
+                        } else {
+                            scope.launch { slide.animateTo(0f, spring) }
+                        }
                         drag = 0f
                     },
-                    onHorizontalDrag = { _, amount -> drag += amount },
+                    onHorizontalDrag = { change, amount ->
+                        change.consume()
+                        drag += amount
+                        // 跟手但带一点阻力
+                        scope.launch { slide.snapTo(drag * 0.6f) }
+                    },
                 )
             },
     ) {

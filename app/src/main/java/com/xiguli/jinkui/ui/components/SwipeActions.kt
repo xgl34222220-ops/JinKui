@@ -112,7 +112,12 @@ fun SwipeActionsBox(
                 SwipeLabel(action, emphasized = abs(value) >= threshold)
             }
         }
-        Box(Modifier.offset { IntOffset(offset.value.roundToInt(), 0) }) {
+        // 玻璃行是半透明的：滑开时在行下面垫一层不透明底，露出的操作色不会透过来
+        Box(
+            Modifier
+                .offset { IntOffset(offset.value.roundToInt(), 0) }
+                .then(if (value != 0f) Modifier.background(com.xiguli.jinkui.ui.theme.Jk.colors.surfaceSolid, shape) else Modifier),
+        ) {
             content()
         }
     }

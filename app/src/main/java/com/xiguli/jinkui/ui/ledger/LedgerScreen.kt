@@ -1,5 +1,6 @@
 package com.xiguli.jinkui.ui.ledger
 
+import com.xiguli.jinkui.ui.nav.transitionOrigin
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.ReceiptLong
 import androidx.compose.material.icons.outlined.Inbox
@@ -22,7 +23,6 @@ import com.xiguli.jinkui.ui.components.pressScale
 import com.xiguli.jinkui.ui.components.rememberJkPress
 import com.xiguli.jinkui.ui.nav.LocalTabBarInset
 import com.xiguli.jinkui.ui.theme.JkFonts
-import com.xiguli.jinkui.ui.theme.segmentSelected
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
@@ -137,6 +137,7 @@ import com.xiguli.jinkui.ui.theme.JkSize
 import com.xiguli.jinkui.ui.theme.JkType
 import com.xiguli.jinkui.ui.theme.Radius
 import com.xiguli.jinkui.ui.theme.Space
+import com.xiguli.jinkui.ui.theme.jkSurface
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.ZoneId
@@ -501,7 +502,7 @@ fun LedgerHome(
             }
         }
         if (ui.unreadable > 0) {
-            item(key = "unreadable") {
+            item(key = "unreadable", contentType = "unreadable") {
                 Text(
                     "有 ${ui.unreadable} 条记录数据损坏，无法解密，已略过",
                     style = JkType.small,
@@ -520,13 +521,14 @@ fun LedgerHome(
             }
         }
         for (day in ui.days) {
-            stickyHeader(key = "d-${day.date}", contentType = "day") {
+            // 1.3：日期头不再吸顶（玻璃背景下吸顶条会挡住半透明的行），随列表滚动
+            item(key = "d-${day.date}", contentType = "day") {
                 DayHeader(day)
             }
             dayRows(day, actions)
         }
         if (ui.days.isNotEmpty()) {
-            item(key = "hint") {
+            item(key = "hint", contentType = "hint") {
                 Text(
                     "右滑再记一笔，左滑删除，长按更多操作",
                     style = JkType.caption,
@@ -598,9 +600,8 @@ private fun FilterPill(text: String, active: Boolean, onClick: () -> Unit) {
     ) {
         Row(
             Modifier
-                .clip(Radius.pill)
-                .background(if (active) colors.accentSoft else colors.surface)
-                .padding(horizontal = Space.x1_5, vertical = 6.dp),
+                .jkSurface(if (active) Jk.surfaces.chipSelected else Jk.surfaces.chip, Radius.pill)
+                .padding(horizontal = Space.x1_5, vertical = 7.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
@@ -637,7 +638,7 @@ fun PendingBanner(count: Int, onClick: () -> Unit, modifier: Modifier = Modifier
     }
 }
 
-/** 整行的“添加一条新记账”：薄荷色大按钮，按下轻微缩小并有触感。 */
+/** 整行的“添加一条新记账”：宽玻璃按钮、薄荷色的加号与文字，按下轻微缩小（弹簧）并有触感。 */
 @Composable
 fun AddEntryButton(onClick: () -> Unit, modifier: Modifier = Modifier, text: String = "添加一条新记账") {
     val colors = Jk.colors
@@ -648,8 +649,7 @@ fun AddEntryButton(onClick: () -> Unit, modifier: Modifier = Modifier, text: Str
             .fillMaxWidth()
             .heightIn(min = 56.dp)
             .pressScale(press)
-            .clip(Radius.card)
-            .background(colors.primary)
+            .jkSurface(Jk.surfaces.chipSelected, Radius.card)
             .clickable(interactionSource = press.interaction, indication = LocalIndication.current, role = Role.Button) {
                 view.confirmHaptic()
                 onClick()
@@ -658,9 +658,9 @@ fun AddEntryButton(onClick: () -> Unit, modifier: Modifier = Modifier, text: Str
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        MintIcon(MintGlyph.ADD_NOTE, size = 24.dp, tint = colors.onPrimary, accent = colors.onPrimary.copy(alpha = 0.35f))
+        Icon(Icons.Outlined.Add, contentDescription = null, tint = colors.accent, modifier = Modifier.size(26.dp))
         Spacer(Modifier.width(Space.x1_5))
-        Text(text, style = JkType.heading.copy(fontSize = 17.sp, fontWeight = FontWeight.Bold), color = colors.onPrimary)
+        Text(text, style = JkType.heading.copy(fontSize = 17.sp, fontWeight = FontWeight.Bold), color = colors.accent)
     }
 }
 
@@ -680,7 +680,7 @@ internal fun androidx.compose.foundation.lazy.LazyListScope.dayRows(day: DayUi, 
 }
 
 private fun rowShape(index: Int, count: Int): androidx.compose.ui.graphics.Shape {
-    val r = 18.dp
+    val r = 22.dp
     return when {
         count == 1 -> RoundedCornerShape(r)
         index == 0 -> RoundedCornerShape(topStart = r, topEnd = r)
@@ -699,10 +699,10 @@ private fun QuickAddRow(categories: List<LedgerCategory>, onPick: (String) -> Un
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier.padding(top = Space.x05),
     ) {
-        item(key = "label") {
+        item(key = "label", contentType = "label") {
             Text("常用", style = JkType.caption, color = colors.textTertiary, modifier = Modifier.padding(end = Space.x05).semantics { heading() })
         }
-        items(categories, key = { it.id }) { category ->
+        items(categories, key = { it.id }, contentType = { "ledgerscreen-row" }) { category ->
             Box(
                 Modifier
                     .heightIn(min = JkSize.touch)
@@ -712,9 +712,8 @@ private fun QuickAddRow(categories: List<LedgerCategory>, onPick: (String) -> Un
             ) {
                 Row(
                     Modifier
-                        .clip(Radius.pill)
-                        .background(colors.surface)
-                        .padding(start = Space.x1, end = Space.x1_5, top = 5.dp, bottom = 5.dp),
+                        .jkSurface(Jk.surfaces.chip, Radius.pill)
+                        .padding(start = Space.x1, end = Space.x1_5, top = 6.dp, bottom = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Icon(categoryIcon(category.icon), contentDescription = null, tint = colors.accent, modifier = Modifier.size(16.dp))
@@ -802,9 +801,8 @@ internal fun DayHeader(day: DayUi) {
     val colors = Jk.colors
     Row(
         modifier = Modifier
-            .background(colors.bg)
             .fillMaxWidth()
-            .padding(start = Space.x2, end = Space.x2, top = Space.x2, bottom = Space.x1)
+            .padding(start = Space.x2_5, end = Space.x2_5, top = Space.x2, bottom = Space.x1)
             .semantics(mergeDescendants = true) { heading() },
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -839,7 +837,7 @@ internal fun TransactionRow(
     val colors = Jk.colors
     val haptic = LocalHapticFeedback.current
     // 不用 clip：圆角只画在底色上（clip 会让触摸命中检测依赖圆角轮廓）
-    Box(Modifier.padding(horizontal = Space.x2)) {
+    Box(Modifier.padding(horizontal = Space.x2).transitionOrigin()) {
         SwipeActionsBox(
             start = SwipeAction("再记一笔", Icons.Outlined.ContentCopy, colors.accentSoft, colors.accent, onRepeat),
             end = SwipeAction("删除", Icons.Outlined.DeleteOutline, colors.danger, Color.White, onDelete),
@@ -871,8 +869,10 @@ internal fun TransactionRow(
                     Box(
                         Modifier
                             .size(JkSize.chip)
-                            .clip(CircleShape)
-                            .background(if (row.type == TxType.EXPENSE) colors.surfaceAlt else txSoft(row.type)),
+                            .then(
+                                if (row.type == TxType.EXPENSE) Modifier.jkSurface(Jk.surfaces.chipSelected, CircleShape)
+                                else Modifier.clip(CircleShape).background(txSoft(row.type)),
+                            ),
                         contentAlignment = Alignment.Center,
                     ) {
                         Icon(
@@ -963,7 +963,7 @@ fun CategoryPickerSheet(
                             horizontalArrangement = Arrangement.spacedBy(Space.x1),
                             modifier = Modifier.padding(bottom = Space.x1),
                         ) {
-                            items(children, key = { it.id }) { child ->
+                            items(children, key = { it.id }, contentType = { "ledgerscreen-row" }) { child ->
                                 JkChip(child.name, false, { onPick(child.id) })
                             }
                         }

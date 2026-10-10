@@ -172,7 +172,7 @@ private fun AccountEditSheet(
                 .verticalScroll(rememberScrollState()),
         ) {
             LazyRow(horizontalArrangement = Arrangement.spacedBy(Space.x1)) {
-                items(AccountKind.entries) { k ->
+                items(AccountKind.entries, key = { it.name }, contentType = { "ledgeraccountsscreen-option" }) { k ->
                     JkChip(k.label, kind == k, {
                         kind = k
                         if (name.isBlank() || AccountKind.entries.any { it.label == name }) name = k.label
@@ -199,8 +199,8 @@ private fun AccountEditSheet(
                     Text("卡包里还没有银行卡。", style = JkType.small, color = colors.textTertiary)
                 } else {
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(Space.x1)) {
-                        item { JkChip("不关联", cardId == null, { cardId = null }) }
-                        items(bankCards, key = { it.id }) { card ->
+                        item(key = "ledgeraccountsscreen-202", contentType = "ledgeraccountsscreen-static") { JkChip("不关联", cardId == null, { cardId = null }) }
+                        items(bankCards, key = { it.id }, contentType = { "ledgeraccountsscreen-row" }) { card ->
                             JkChip("${card.title} ${card.faceHint}".trim(), cardId == card.id, { cardId = card.id })
                         }
                     }
@@ -274,7 +274,7 @@ fun LedgerAccountsContent(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(start = Space.x2_5, end = Space.x2_5, bottom = Space.x6),
         ) {
-            item {
+            item(key = "ledgeraccountsscreen-277", contentType = "ledgeraccountsscreen-static") {
                 JkCard(Modifier.fillMaxWidth()) {
                     Text("净资产", style = JkType.overline, color = colors.textTertiary)
                     RollingAmount(
@@ -286,7 +286,7 @@ fun LedgerAccountsContent(
                 }
                 Spacer(Modifier.height(Space.x2))
             }
-            item {
+            item(key = "ledgeraccountsscreen-289", contentType = "ledgeraccountsscreen-static") {
                 JkCard(Modifier.fillMaxWidth(), padding = PaddingValues(vertical = Space.x05)) {
                     if (ui.accounts.isEmpty()) {
                         Text("还没有账户，点右上角添加。", style = JkType.small, color = colors.textTertiary, modifier = Modifier.padding(Space.x2))

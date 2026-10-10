@@ -30,6 +30,7 @@ import androidx.compose.material.icons.outlined.FileUpload
 import androidx.compose.material.icons.outlined.Fingerprint
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Palette
+import androidx.compose.material.icons.outlined.Opacity
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Password
 import androidx.compose.material.icons.outlined.Timer
@@ -567,6 +568,18 @@ fun SettingsContent(
                         else -> settings.fontMode.label
                     },
                     onClick = actions.onFonts,
+                )
+                JkDivider(inset = Space.x6 + Space.x05)
+                JkRow(
+                    title = "减少透明度",
+                    subtitle = "玻璃面板改为不透明底色，不做背景模糊，文字更清楚",
+                    icon = Icons.Outlined.Opacity,
+                    trailing = {
+                        JkSwitch(
+                            checked = settings.reduceTransparency,
+                            onCheckedChange = { on -> actions.onUpdate { it.copy(reduceTransparency = on) } },
+                        )
+                    },
                 )
                 if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
                     JkDivider(inset = Space.x6 + Space.x05)
