@@ -97,11 +97,11 @@ data class RecurringRowUi(
     val blocked: String?,
 )
 
-internal fun buildRecurringUi(data: LedgerData): List<RecurringRowUi> {
+internal fun buildRecurringUi(data: LedgerData, today: LocalDate = LocalDate.now()): List<RecurringRowUi> {
     val categories = data.categories.associateBy { it.id }
     val accounts = data.accounts.associateBy { it.id }
     return data.recurring
-        .sortedWith(compareBy<LedgerRecurring> { it.paused }.thenBy { RecurringMath.nextDate(it) ?: LocalDate.MAX })
+        .sortedWith(compareBy<LedgerRecurring> { it.paused }.thenBy { RecurringMath.upcomingDate(it, today) ?: LocalDate.MAX })
         .map { rule ->
             val title = when {
                 rule.note.isNotBlank() -> rule.note
@@ -109,7 +109,7 @@ internal fun buildRecurringUi(data: LedgerData): List<RecurringRowUi> {
                     "${accounts[rule.accountId]?.name ?: "未知账户"} → ${accounts[rule.toAccountId]?.name ?: "未知账户"}"
                 else -> categoryLabel(rule.categoryId, categories)
             }
-            RecurringRowUi(rule, title, RecurringMath.describe(rule), RecurringMath.nextDate(rule), RecurringMath.blockedReason(rule, data.accounts))
+            RecurringRowUi(rule, title, RecurringMath.describe(rule), RecurringMath.upcomingDate(rule, today), RecurringMath.blockedReason(rule, data.accounts))
         }
 }
 
@@ -227,7 +227,7 @@ private fun shortDay(date: LocalDate, today: LocalDate = LocalDate.now()): Strin
 }
 
 @Composable
-private fun RecurringEditSheet(
+internal fun RecurringEditSheet(
     rule: LedgerRecurring,
     data: LedgerData,
     isNew: Boolean,

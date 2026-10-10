@@ -91,6 +91,9 @@ class LedgerRecurringRow(
     val dataEnc: String,
 )
 
+/** 自动记账的一笔待确认（data_enc 是字段级密文）。 */
+class LedgerPendingRow(val id: String, val createdAt: Long, val dataEnc: String)
+
 /** 一次写入的一批账本记录（导入备份、首次预置）。 */
 class LedgerTombstoneRow(val id: String, val kind: String, val deletedAt: Long)
 
@@ -360,6 +363,42 @@ class VaultDatabase(private val context: Context) {
     }
 
     fun saveLedgerTransaction(row: LedgerTxRow) = transaction { db -> writeTransaction(db, row) }
+
+    /**
+     * 账单导入：一个事务里写入（可选的）新账户与全部流水。流水用 INSERT OR IGNORE，
+     * 同一个导入 ID 已经存在时保留本机那一笔（用户可能改过分类）。
+     */
+    fun importLedger(account: LedgerAccountRow?, transactions: List<LedgerTxRow>) = transaction { db ->
+        account?.let { writeAccount(db, it) }
+        transactions.forEach { writeTransaction(db, it, ignoreExisting = true) }
+    }
+
+    // ── 自动记账：待确认 ──────────────────────────────────────────
+
+    fun ledgerPending(): List<LedgerPendingRow> =
+        read("SELECT id,created_at,data_enc FROM ledger_pending ORDER BY created_at") {
+            LedgerPendingRow(it.getString(0), it.getLong(1), it.getString(2))
+        }
+
+    fun insertPending(rows: List<LedgerPendingRow>) = transaction { db ->
+        rows.forEach {
+            db.execSQL(
+                "INSERT OR REPLACE INTO ledger_pending(id,created_at,data_enc) VALUES(?,?,?)",
+                arrayOf<Any?>(it.id, it.createdAt, it.dataEnc),
+            )
+        }
+    }
+
+    fun deletePending(ids: Collection<String>) = transaction { db ->
+        ids.forEach { db.execSQL("DELETE FROM ledger_pending WHERE id = ?", arrayOf<Any?>(it)) }
+    }
+
+    /** 确认待确认：写入流水并删除对应的待确认，在同一个事务里（可选地顺带新建账户）。 */
+    fun confirmPending(account: LedgerAccountRow?, transactions: List<LedgerTxRow>, pendingIds: Collection<String>) = transaction { db ->
+        account?.let { writeAccount(db, it) }
+        transactions.forEach { writeTransaction(db, it) }
+        pendingIds.forEach { db.execSQL("DELETE FROM ledger_pending WHERE id = ?", arrayOf<Any?>(it)) }
+    }
 
     /** 删除流水；[tombstone] 不为空时（周期生成的流水）在同一事务里记下删除标记。 */
     fun deleteLedgerTransaction(id: String, tombstone: LedgerTombstoneRow? = null) = transaction { db ->

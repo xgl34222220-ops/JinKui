@@ -51,6 +51,7 @@ import androidx.compose.ui.unit.sp
 import com.xiguli.jinkui.ui.components.MintGlyph
 import com.xiguli.jinkui.ui.components.MintIcon
 import com.xiguli.jinkui.ui.theme.Jk
+import com.xiguli.jinkui.ui.theme.jkSurface
 import com.xiguli.jinkui.ui.theme.JkType
 import com.xiguli.jinkui.ui.theme.Radius
 
@@ -124,10 +125,8 @@ fun HomeTabBar(selected: HomeTab, onSelect: (HomeTab) -> Unit, modifier: Modifie
             .fillMaxWidth()
             .height(TabBarSpec.height)
             .softShadow(colors.barShadow, if (colors.isDark) 0.05f else 0.012f)
-            .clip(Radius.pill)
-            .background(colors.bar)
-            // 深色下阴影几乎看不见，用一圈极淡的亮边把栏和底色分开
-            .then(if (colors.isDark) Modifier.border(1.dp, Color.White.copy(alpha = 0.07f), Radius.pill) else Modifier)
+            // 材质（填充、深色下那圈极淡的亮边）来自 Jk.surfaces.bar
+            .jkSurface(Jk.surfaces.bar, Radius.pill)
             .padding(horizontal = 6.dp)
             .selectableGroup(),
         verticalAlignment = Alignment.CenterVertically,

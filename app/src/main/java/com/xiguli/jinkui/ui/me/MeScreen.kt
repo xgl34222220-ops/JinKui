@@ -92,6 +92,8 @@ class MeActions(
     val onSettings: () -> Unit = {},
     val onHealth: () -> Unit = {},
     val onGenerator: () -> Unit = {},
+    val onImport: () -> Unit = {},
+    val onAuto: () -> Unit = {},
 )
 
 @Composable
@@ -120,6 +122,8 @@ fun MeScreen(actions: MeActions) {
             onSettings = actions.onSettings,
             onHealth = actions.onHealth,
             onGenerator = { showGenerator = true },
+            onImport = actions.onImport,
+            onAuto = actions.onAuto,
         ),
     )
     if (showGenerator) GeneratorSheet(onDismiss = { showGenerator = false })
@@ -179,6 +183,12 @@ fun MeContent(ui: MeUi, actions: MeActions) {
             MeRow(MintGlyph.KEY, "密码生成器", null, actions.onGenerator)
             JkDivider(inset = 56.dp)
             MeRow(MintGlyph.CARDS, "账户与余额", "现金、银行卡、支付宝、微信、信用卡", actions.onAccounts)
+        }
+        Spacer(Modifier.height(Space.x2))
+        RowGroup("记账助手") {
+            MeRow(MintGlyph.ADD_NOTE, "导入账单", "微信支付、支付宝账单或 CSV 表格", actions.onImport)
+            JkDivider(inset = 56.dp)
+            MeRow(MintGlyph.RECURRING, "自动记账", "收付款通知生成待确认，确认后才记账", actions.onAuto)
         }
         Spacer(Modifier.height(Space.x2))
         RowGroup("其他") {

@@ -7,12 +7,13 @@ package com.xiguli.jinkui.data.db
  *  - 版本 2（0.6.0）：新增账本四张表，旧表不动。
  *  - 版本 3（0.7.0）：新增周期记账规则表，旧表不动。
  *  - 版本 4（0.9.0）：新增账本删除标记表，旧表不动。
+ *  - 版本 5（1.2.0）：新增自动记账的“待确认”表，旧表不动。
  *
  * 新装用户执行 [create]：版本 1 的建表语句加上之后的全部迁移，保证新装与升级得到同一套结构。
  * 迁移只允许“加”，不得丢弃或改写用户已有的数据。
  */
 object VaultSchema {
-    const val VERSION = 4
+    const val VERSION = 5
 
     private val V1 = listOf(
         """CREATE TABLE cards(
@@ -122,7 +123,19 @@ object VaultSchema {
         )""",
     )
 
-    private val MIGRATIONS: Map<Int, List<String>> = mapOf(2 to V2, 3 to V3, 4 to V4)
+    /**
+     * 4 → 5：自动记账的“待确认”。来源、方向、金额、商户与时间整条在 data_enc 里（字段级 AES-GCM），
+     * 明文列只有 ID 与创建时间。不进加密备份。
+     */
+    private val V5 = listOf(
+        """CREATE TABLE ledger_pending(
+            id TEXT PRIMARY KEY NOT NULL,
+            created_at INTEGER NOT NULL,
+            data_enc TEXT NOT NULL
+        )""",
+    )
+
+    private val MIGRATIONS: Map<Int, List<String>> = mapOf(2 to V2, 3 to V3, 4 to V4, 5 to V5)
 
     /** 新装：建出最新结构。 */
     fun create(): List<String> = V1 + upgrade(1, VERSION)

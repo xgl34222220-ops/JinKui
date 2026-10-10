@@ -58,6 +58,10 @@ import com.xiguli.jinkui.core.security.findFragmentActivity
 import com.xiguli.jinkui.data.repo.AppSettings
 import com.xiguli.jinkui.data.repo.SettingsRepository
 import com.xiguli.jinkui.data.repo.ThemeMode
+import com.xiguli.jinkui.data.repo.FontMode
+import androidx.compose.material.icons.outlined.TextFields
+import androidx.compose.material.icons.outlined.ReceiptLong
+import androidx.compose.material.icons.outlined.NotificationsActive
 import com.xiguli.jinkui.ui.LocalContainer
 import com.xiguli.jinkui.ui.card.formatTime
 import com.xiguli.jinkui.ui.components.BrandMark
@@ -215,7 +219,12 @@ private sealed interface SettingsDialog {
 }
 
 @Composable
-fun SettingsScreen(onBack: () -> Unit) {
+fun SettingsScreen(
+    onBack: () -> Unit,
+    onFonts: () -> Unit = {},
+    onBillImport: () -> Unit = {},
+    onAutoBookkeeping: () -> Unit = {},
+) {
     val container = LocalContainer.current
     val context = LocalContext.current
     val viewModel = jkViewModel { SettingsViewModel(container) }
@@ -301,6 +310,9 @@ fun SettingsScreen(onBack: () -> Unit) {
             },
             onLockNow = { container.vault.lock() },
             onWipe = { dialog = SettingsDialog.Wipe },
+            onFonts = onFonts,
+            onBillImport = onBillImport,
+            onAutoBookkeeping = onAutoBookkeeping,
         ),
     )
 
@@ -410,6 +422,9 @@ class SettingsActions(
     val onImportOtp: () -> Unit = {},
     val onLockNow: () -> Unit = {},
     val onWipe: () -> Unit = {},
+    val onFonts: () -> Unit = {},
+    val onBillImport: () -> Unit = {},
+    val onAutoBookkeeping: () -> Unit = {},
 )
 
 /**
@@ -541,9 +556,20 @@ fun SettingsContent(
                 selected = settings.theme,
                 onSelect = { mode -> actions.onUpdate { it.copy(theme = mode) } },
             )
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-                Spacer(Modifier.height(Space.x1))
-                JkCard(Modifier.fillMaxWidth(), padding = PaddingValues(vertical = Space.x05)) {
+            Spacer(Modifier.height(Space.x1))
+            JkCard(Modifier.fillMaxWidth(), padding = PaddingValues(vertical = Space.x05)) {
+                JkRow(
+                    title = "字体",
+                    subtitle = "跟随系统字体、圆润数字，或导入自己的字体文件",
+                    icon = Icons.Outlined.TextFields,
+                    value = when (settings.fontMode) {
+                        FontMode.CUSTOM -> settings.customFontName.ifEmpty { FontMode.CUSTOM.label }
+                        else -> settings.fontMode.label
+                    },
+                    onClick = actions.onFonts,
+                )
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                    JkDivider(inset = Space.x6 + Space.x05)
                     JkRow(
                         title = "跟随壁纸取色",
                         subtitle = "品牌色改用系统的 Material You 配色；关闭时为金匮薄荷绿",
@@ -556,6 +582,24 @@ fun SettingsContent(
                         },
                     )
                 }
+            }
+
+            JkSectionLabel("账单与自动记账")
+            JkCard(Modifier.fillMaxWidth(), padding = PaddingValues(vertical = Space.x05)) {
+                JkRow(
+                    title = "导入账单",
+                    subtitle = "微信支付、支付宝账单或 CSV 表格，预览后导入",
+                    icon = Icons.Outlined.ReceiptLong,
+                    onClick = actions.onBillImport,
+                )
+                JkDivider(inset = Space.x6 + Space.x05)
+                JkRow(
+                    title = "自动记账",
+                    subtitle = "读取收付款通知生成待确认记录（需要通知使用权）",
+                    icon = Icons.Outlined.NotificationsActive,
+                    value = if (settings.autoBookkeeping) "已开启" else "已关闭",
+                    onClick = actions.onAutoBookkeeping,
+                )
             }
 
             JkSectionLabel("加密备份")

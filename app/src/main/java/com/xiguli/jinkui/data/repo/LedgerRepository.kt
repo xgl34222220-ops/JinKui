@@ -8,6 +8,11 @@ import com.xiguli.jinkui.data.db.LedgerBatch
 import com.xiguli.jinkui.data.db.LedgerBudgetRow
 import com.xiguli.jinkui.data.db.LedgerCategoryRow
 import com.xiguli.jinkui.data.db.LedgerRecurringRow
+import com.xiguli.jinkui.data.db.LedgerPendingRow
+import com.xiguli.jinkui.core.auto.CapturedPayment
+import com.xiguli.jinkui.data.ledger.LedgerIds
+import com.xiguli.jinkui.data.ledger.PendingEntry
+import com.xiguli.jinkui.data.ledger.PendingMath
 import com.xiguli.jinkui.data.db.LedgerTombstoneRow
 import com.xiguli.jinkui.data.db.LedgerTxRow
 import com.xiguli.jinkui.data.db.VaultDatabase
@@ -50,6 +55,10 @@ class LedgerRepository(
 ) {
     private val state = MutableStateFlow(LedgerData.EMPTY)
     val data: StateFlow<LedgerData> = state.asStateFlow()
+
+    /** 自动记账的“待确认”（1.2 起）。与账本同一把字段密钥加密；锁定时丢弃；不进备份。 */
+    private val pendingState = MutableStateFlow<List<PendingEntry>>(emptyList())
+    val pending: StateFlow<List<PendingEntry>> = pendingState.asStateFlow()
 
     private fun keys(): SessionKeys = vault.keys ?: throw IllegalStateException("金匮已锁定")
 
@@ -107,7 +116,11 @@ class LedgerRepository(
         val tombstones = database.ledgerTombstones()
             .filter { it.kind in LedgerTombstone.KINDS }
             .map { LedgerTombstone(it.id, it.kind, it.deletedAt) }
+        val pendingEntries = decodeAll(database.ledgerPending()) { row ->
+            PendingMath.read(row.id, row.createdAt, keys.field.decrypt(row.dataEnc, pendingContext(row.id)))
+        }
         publish { LedgerData(accounts, categories, transactions, budgets, recurring, unreadable, tombstones) }
+        publishPending { pendingEntries }
         // 解锁后立刻补记到期的周期记账；失败不影响账本打开
         runCatching { runRecurring() }
     }
@@ -190,9 +203,104 @@ class LedgerRepository(
         if (vault.keys == null) state.value = LedgerData.EMPTY
     }
 
+    private fun publishPending(transform: (List<PendingEntry>) -> List<PendingEntry>) {
+        if (vault.keys == null) return
+        pendingState.value = transform(pendingState.value)
+        if (vault.keys == null) pendingState.value = emptyList()
+    }
+
     /** 锁定时调用：丢弃内存中的全部明文。 */
     fun clear() {
         state.value = LedgerData.EMPTY
+        pendingState.value = emptyList()
+    }
+
+    // ── 账单导入 ──────────────────────────────────────────────────
+
+    /**
+     * 写入导入的流水（以及需要新建的账户），一个事务。已经存在的 ID 跳过，不覆盖。
+     * 返回真正写入的流水。
+     */
+    suspend fun importTransactions(transactions: List<LedgerTransaction>, newAccount: LedgerAccount?): List<LedgerTransaction> =
+        withContext(Dispatchers.IO) {
+            recurringLock.withLock {
+                val keys = keys()
+                val current = state.value
+                val existing = current.transactions.mapTo(HashSet()) { it.id }
+                val account = newAccount?.takeIf { a -> current.accounts.none { it.id == a.id } && transactions.any { it.accountId == a.id } }
+                    ?.let { it.copy(position = (current.accounts.maxOfOrNull { a -> a.position } ?: -1) + 1, updatedAt = System.currentTimeMillis()) }
+                val accounts = current.accounts + listOfNotNull(account)
+                val fresh = transactions.filter { it.id !in existing }.map { it.copy(note = it.note.trim().take(500)) }
+                fresh.forEach { tx -> LedgerMath.validate(tx, accounts)?.let { throw LedgerInputException(it) } }
+                if (fresh.isEmpty()) return@withLock emptyList()
+                database.importLedger(account?.toRow(keys), fresh.map { it.toRow(keys) })
+                publish { data ->
+                    data.copy(
+                        accounts = if (account == null) data.accounts else (data.accounts + account).sortedBy { it.position },
+                        transactions = data.transactions + fresh,
+                    )
+                }
+                fresh
+            }
+        }
+
+    // ── 自动记账 ──────────────────────────────────────────────────
+
+    /**
+     * 收进自动记账识别出的几笔（解锁后从暂存里取出）。默认放进“待确认”；
+     * [autoSave] 为 true（用户打开了“自动入账”）时直接记成流水。重复的（同金额、两分钟内）跳过。
+     * 返回收进的笔数。
+     */
+    suspend fun ingest(captured: List<CapturedPayment>, autoSave: Boolean): Int = withContext(Dispatchers.IO) {
+        if (captured.isEmpty()) return@withContext 0
+        recurringLock.withLock {
+            val keys = keys()
+            val current = state.value
+            val fresh = PendingMath.fresh(captured, pendingState.value, current.transactions)
+            if (fresh.isEmpty()) return@withLock 0
+            val now = System.currentTimeMillis()
+            val entries = fresh.map { PendingEntry(LedgerIds.newId(), it.source, it.type, it.amount, it.merchant, it.postedAt, now) }
+            if (autoSave) {
+                // 没有可用账户等原因记不进去的，仍然放进待确认
+                val pairs = entries.map { e ->
+                    e to PendingMath.suggestion(e, current)?.copy(createdAt = now, updatedAt = now)
+                        ?.takeIf { LedgerMath.validate(it, current.accounts) == null }
+                }
+                val saved = pairs.mapNotNull { it.second }
+                val leftovers = pairs.filter { it.second == null }.map { it.first }
+                if (saved.isNotEmpty()) database.importLedger(null, saved.map { it.toRow(keys) })
+                if (leftovers.isNotEmpty()) database.insertPending(leftovers.map { it.toRow(keys) })
+                publish { data -> data.copy(transactions = data.transactions + saved) }
+                publishPending { list -> list + leftovers }
+            } else {
+                database.insertPending(entries.map { it.toRow(keys) })
+                publishPending { list -> list + entries }
+            }
+            entries.size
+        }
+    }
+
+    /** 确认几笔待确认：写成流水（[transactions] 由界面给出，可能被用户改过），并从待确认里删除。 */
+    suspend fun confirmPending(pendingIds: Collection<String>, transactions: List<LedgerTransaction>) = withContext(Dispatchers.IO) {
+        recurringLock.withLock {
+            val keys = keys()
+            val current = state.value
+            val now = System.currentTimeMillis()
+            val saved = transactions.map { it.copy(note = it.note.trim().take(500), createdAt = now, updatedAt = now) }
+            saved.forEach { tx -> LedgerMath.validate(tx, current.accounts)?.let { throw LedgerInputException(it) } }
+            database.confirmPending(null, saved.map { it.toRow(keys) }, pendingIds)
+            val ids = pendingIds.toSet()
+            publish { data -> data.copy(transactions = data.transactions.filterNot { t -> saved.any { it.id == t.id } } + saved) }
+            publishPending { list -> list.filterNot { it.id in ids } }
+        }
+    }
+
+    /** 忽略（删除）几笔待确认。 */
+    suspend fun ignorePending(pendingIds: Collection<String>) = withContext(Dispatchers.IO) {
+        keys()
+        database.deletePending(pendingIds)
+        val ids = pendingIds.toSet()
+        publishPending { list -> list.filterNot { it.id in ids } }
     }
 
     // ── 流水 ──────────────────────────────────────────────────────
@@ -374,6 +482,11 @@ class LedgerRepository(
         keys.field.encrypt(LedgerJson.budgetPayload(this), budgetContext(id)),
     )
 
+    private fun PendingEntry.toRow(keys: SessionKeys) = LedgerPendingRow(
+        id, createdAt,
+        keys.field.encrypt(PendingMath.payload(this), pendingContext(id)),
+    )
+
     private fun LedgerTombstone.toRow() = LedgerTombstoneRow(id, kind, deletedAt)
 
     private fun LedgerRecurring.toRow(keys: SessionKeys) = LedgerRecurringRow(
@@ -388,5 +501,6 @@ class LedgerRepository(
         fun transactionContext(id: String) = "ledger:tx:$id"
         fun budgetContext(id: String) = "ledger:budget:$id"
         fun recurringContext(id: String) = "ledger:recurring:$id"
+        fun pendingContext(id: String) = "ledger:pending:$id"
     }
 }

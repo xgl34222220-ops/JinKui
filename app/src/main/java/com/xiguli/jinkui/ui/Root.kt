@@ -57,6 +57,10 @@ import com.xiguli.jinkui.ui.nav.Navigator
 import com.xiguli.jinkui.ui.nav.Screen
 import com.xiguli.jinkui.ui.settings.QuickUnlockIntro
 import com.xiguli.jinkui.ui.settings.SettingsScreen
+import com.xiguli.jinkui.ui.settings.FontSettingsScreen
+import com.xiguli.jinkui.ui.settings.AutoBookkeepingScreen
+import com.xiguli.jinkui.ui.ledger.BillImportScreen
+import com.xiguli.jinkui.ui.ledger.PendingInboxScreen
 import com.xiguli.jinkui.ui.setup.SetupScreen
 import com.xiguli.jinkui.ui.theme.JinKuiTheme
 import com.xiguli.jinkui.ui.theme.Jk
@@ -110,6 +114,21 @@ private fun MainNavigation() {
     }
     BackHandler(enabled = navigator.canPop) { navigator.pop() }
 
+    // 桌面快捷方式“记一笔”：回到账本（正在编辑卡片时不打断，先提示）
+    val container = LocalContainer.current
+    val quickRecord by container.quickRecordRequests
+    LaunchedEffect(quickRecord) {
+        if (quickRecord > container.quickRecordHandled) {
+            if (navigator.screens.any { it is Screen.Edit }) {
+                container.quickRecordHandled = quickRecord
+                container.messages.show("正在编辑卡片，保存或返回后再记一笔")
+            } else {
+                navigator.popToHome()
+                navigator.homeTab = HomeTab.LEDGER
+            }
+        }
+    }
+
     val entry = navigator.current
     CompositionLocalProvider(LocalViewModelStoreOwner provides entry) {
         key(entry.id) {
@@ -128,6 +147,8 @@ private fun MainNavigation() {
                             onRecurring = { navigator.push(Screen.LedgerRecurring) },
                             onSettings = { navigator.push(Screen.Settings) },
                             onAssets = { navigator.push(Screen.LedgerAssets) },
+                            onImport = { navigator.push(Screen.BillImport) },
+                            onPending = { navigator.push(Screen.PendingInbox) },
                         )
                         HomeTab.CALENDAR -> CalendarScreen()
                         HomeTab.CARDS -> HomeScreen(
@@ -149,6 +170,8 @@ private fun MainNavigation() {
                                 onBackup = { navigator.push(Screen.Settings) },
                                 onSettings = { navigator.push(Screen.Settings) },
                                 onHealth = { navigator.push(Screen.Health) },
+                                onImport = { navigator.push(Screen.BillImport) },
+                                onAuto = { navigator.push(Screen.AutoBookkeeping) },
                             ),
                         )
                     }
@@ -163,7 +186,22 @@ private fun MainNavigation() {
                     newType = screen.type,
                     onClose = { navigator.pop() },
                 )
-                Screen.Settings -> SettingsScreen(onBack = { navigator.pop() })
+                Screen.Settings -> SettingsScreen(
+                    onBack = { navigator.pop() },
+                    onFonts = { navigator.push(Screen.FontSettings) },
+                    onBillImport = { navigator.push(Screen.BillImport) },
+                    onAutoBookkeeping = { navigator.push(Screen.AutoBookkeeping) },
+                )
+                Screen.FontSettings -> FontSettingsScreen(onBack = { navigator.pop() })
+                Screen.BillImport -> BillImportScreen(onBack = { navigator.pop() })
+                Screen.AutoBookkeeping -> AutoBookkeepingScreen(
+                    onBack = { navigator.pop() },
+                    onInbox = { navigator.push(Screen.PendingInbox) },
+                )
+                Screen.PendingInbox -> PendingInboxScreen(
+                    onBack = { navigator.pop() },
+                    onSettings = { navigator.push(Screen.AutoBookkeeping) },
+                )
                 Screen.Health -> HealthScreen(
                     onBack = { navigator.pop() },
                     onOpen = { navigator.push(Screen.Detail(it)) },

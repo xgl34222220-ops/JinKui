@@ -153,7 +153,7 @@ fun LedgerBudgetScreen(onBack: () -> Unit) {
 }
 
 @Composable
-private fun BudgetDialog(title: String, current: Long, onDismiss: () -> Unit, onSave: (Long) -> Unit) {
+internal fun BudgetDialog(title: String, current: Long, onDismiss: () -> Unit, onSave: (Long) -> Unit) {
     var text by remember { mutableStateOf(if (current > 0) Money.plain(current) else "") }
     var error by remember { mutableStateOf<String?>(null) }
     JkDialog(

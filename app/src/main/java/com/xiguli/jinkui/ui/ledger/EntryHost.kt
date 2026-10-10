@@ -76,6 +76,7 @@ class EntryHostState {
         onRepeat = { create(from = it) },
         onDelete = { confirmDelete = it },
         onRowMenu = { menuFor = it },
+        onPending = base.onPending,
     )
 }
 

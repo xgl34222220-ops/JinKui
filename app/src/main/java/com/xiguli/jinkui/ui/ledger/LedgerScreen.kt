@@ -1,5 +1,8 @@
 package com.xiguli.jinkui.ui.ledger
 
+import androidx.compose.material.icons.outlined.ChevronRight
+import androidx.compose.material.icons.outlined.ReceiptLong
+import androidx.compose.material.icons.outlined.Inbox
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.widthIn
@@ -240,8 +243,11 @@ fun LedgerScreen(
     onSettings: () -> Unit,
     onRecurring: () -> Unit = {},
     onAssets: () -> Unit = {},
+    onImport: () -> Unit = {},
+    onPending: () -> Unit = {},
 ) {
     val container = LocalContainer.current
+    val pending by container.ledger.pending.collectAsStateWithLifecycle()
     val viewModel = jkViewModel { LedgerViewModel(container) }
     val ui by viewModel.ui.collectAsStateWithLifecycle()
     val filter by viewModel.filter.collectAsStateWithLifecycle()
@@ -254,6 +260,14 @@ fun LedgerScreen(
 
     // 每次回到账本页补记到期的周期记账（例如解锁状态下跨过了午夜）。
     LaunchedEffect(Unit) { viewModel.runRecurring() }
+    // 桌面快捷方式“记一笔”：打开记账面板
+    val quickRecord by container.quickRecordRequests
+    LaunchedEffect(quickRecord) {
+        if (quickRecord > container.quickRecordHandled) {
+            container.quickRecordHandled = quickRecord
+            host.create()
+        }
+    }
     // 从后台回来时检查日期：跨了天 / 月就刷新（只有原本在看本月时才跳到新的本月）。
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.onClockTick() }
 
@@ -273,8 +287,10 @@ fun LedgerScreen(
                 onLock = { container.vault.lock() },
                 onMore = { showMore = true },
                 onAssets = onAssets,
+                onPending = onPending,
             ),
         ),
+        pendingCount = pending.size,
     )
 
     EntryHost(host, data, viewModel)
@@ -327,6 +343,8 @@ fun LedgerScreen(
                 Triple("账户与余额", "现金、银行卡、支付宝、微信、信用卡", Icons.Outlined.AccountBalanceWallet) to onAccounts,
                 Triple("预算", "每月总预算与分类预算", Icons.Outlined.BarChart) to onBudget,
                 Triple("周期记账", "房租、工资、订阅等固定收支自动记上", Icons.Outlined.Repeat) to onRecurring,
+                Triple("导入账单", "微信支付、支付宝账单或 CSV 表格", Icons.Outlined.ReceiptLong) to onImport,
+                Triple("待确认" + if (pending.isNotEmpty()) "（${pending.size}）" else "", "自动记账从通知里识别出的收支", Icons.Outlined.Inbox) to onPending,
                 Triple("分类管理", "增加、改名或隐藏分类", Icons.Outlined.Category) to onCategories,
                 Triple("设置", "解锁方式、自动锁定、加密备份", Icons.Outlined.Settings) to onSettings,
                 Triple("立即锁定", "清掉内存里的明文，回到解锁页", Icons.Outlined.Lock) to { container.vault.lock() },
@@ -373,6 +391,8 @@ class LedgerHomeActions(
     val onDelete: (LedgerTransaction) -> Unit = {},
     /** 长按一行：修改 / 再记一笔 / 删除。 */
     val onRowMenu: (LedgerTransaction) -> Unit = {},
+    /** “有 n 笔待确认”提示条。 */
+    val onPending: () -> Unit = {},
 )
 
 /**
@@ -387,6 +407,8 @@ fun LedgerHome(
     listState: LazyListState,
     actions: LedgerHomeActions,
     modifier: Modifier = Modifier,
+    /** 自动记账的待确认笔数；大于 0 时在“添加一条新记账”下面出现一条提示。 */
+    pendingCount: Int = 0,
 ) {
     val colors = Jk.colors
     var showSearch by rememberSaveable { mutableStateOf(false) }
@@ -414,6 +436,11 @@ fun LedgerHome(
         }
         item(key = "add", contentType = "add") {
             AddEntryButton(actions.onCreate, Modifier.padding(start = Space.x2, end = Space.x2, top = Space.x1_5))
+        }
+        if (pendingCount > 0) {
+            item(key = "pending", contentType = "pending") {
+                PendingBanner(pendingCount, actions.onPending, Modifier.padding(start = Space.x2, end = Space.x2, top = Space.x1))
+            }
         }
         if (ui.quickCategories.isNotEmpty() && !ui.filterActive) {
             item(key = "quick", contentType = "quick") {
@@ -586,6 +613,27 @@ private fun FilterPill(text: String, active: Boolean, onClick: () -> Unit) {
             )
             Icon(Icons.Outlined.ExpandMore, contentDescription = null, tint = if (active) colors.accent else colors.textTertiary, modifier = Modifier.size(16.dp))
         }
+    }
+}
+
+/** “自动记账有 n 笔待确认”：浅薄荷的一行，点进待确认。 */
+@Composable
+fun PendingBanner(count: Int, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val colors = Jk.colors
+    Row(
+        modifier
+            .fillMaxWidth()
+            .heightIn(min = JkSize.touch)
+            .clip(Radius.control)
+            .background(colors.accentSoft)
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(horizontal = Space.x2, vertical = Space.x1),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Outlined.Inbox, contentDescription = null, tint = colors.accent, modifier = Modifier.size(20.dp))
+        Spacer(Modifier.width(Space.x1_5))
+        Text("自动记账有 $count 笔待确认", style = JkType.bodyStrong, color = colors.accent, modifier = Modifier.weight(1f))
+        Icon(Icons.Outlined.ChevronRight, contentDescription = null, tint = colors.accent, modifier = Modifier.size(20.dp))
     }
 }
 

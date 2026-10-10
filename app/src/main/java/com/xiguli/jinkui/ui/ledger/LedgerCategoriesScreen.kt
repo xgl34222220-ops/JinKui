@@ -80,11 +80,39 @@ fun LedgerCategoriesScreen(onBack: () -> Unit) {
     val container = LocalContainer.current
     val viewModel = jkViewModel { LedgerCategoriesViewModel(container) }
     val data by container.ledger.data.collectAsStateWithLifecycle()
-    val colors = Jk.colors
     var type by remember { mutableStateOf(TxType.EXPENSE) }
     var editing by remember { mutableStateOf<LedgerCategory?>(null) }
 
-    val tops = data.categories.filter { it.type == type && it.parentId == null }.sortedWith(compareBy({ it.archived }, { it.position }))
+    LedgerCategoriesContent(
+        categories = data.categories,
+        type = type,
+        onType = { type = it },
+        onBack = onBack,
+        onEdit = { editing = it },
+    )
+
+    editing?.let { category ->
+        CategoryEditSheet(
+            category = category,
+            isNew = data.categories.none { it.id == category.id },
+            parentName = category.parentId?.let { id -> data.categories.firstOrNull { it.id == id }?.name },
+            onDismiss = { editing = null },
+            onSave = { viewModel.save(it) { editing = null } },
+        )
+    }
+}
+
+/** 分类管理（无状态）：只读传入的分类，新增 / 修改经 [onEdit] 交给外层（传入新的空分类表示新增）。 */
+@Composable
+fun LedgerCategoriesContent(
+    categories: List<LedgerCategory>,
+    type: TxType,
+    onType: (TxType) -> Unit,
+    onBack: () -> Unit,
+    onEdit: (LedgerCategory) -> Unit,
+) {
+    val colors = Jk.colors
+    val tops = categories.filter { it.type == type && it.parentId == null }.sortedWith(compareBy({ it.archived }, { it.position }))
 
     Column(
         Modifier
@@ -93,13 +121,13 @@ fun LedgerCategoriesScreen(onBack: () -> Unit) {
     ) {
         JkTopBar("分类管理", onBack = onBack) {
             JkIconButton(Icons.Outlined.Add, "添加一级分类", {
-                editing = LedgerCategory(LedgerIds.newId(), "", type, null, "more")
+                onEdit(LedgerCategory(LedgerIds.newId(), "", type, null, "more"))
             })
         }
         JkSegmented(
             options = listOf(TxType.EXPENSE to "支出分类", TxType.INCOME to "收入分类"),
             selected = type,
-            onSelect = { type = it },
+            onSelect = onType,
             modifier = Modifier.padding(horizontal = Space.x2_5),
         )
         LazyColumn(
@@ -109,26 +137,26 @@ fun LedgerCategoriesScreen(onBack: () -> Unit) {
         ) {
             items(tops.size, key = { tops[it].id }) { index ->
                 val top = tops[index]
-                val children = data.categories.filter { it.parentId == top.id }.sortedWith(compareBy({ it.archived }, { it.position }))
+                val children = categories.filter { it.parentId == top.id }.sortedWith(compareBy({ it.archived }, { it.position }))
                 JkCard(Modifier.fillMaxWidth(), padding = PaddingValues(vertical = Space.x05)) {
                     JkRow(
                         title = top.name + if (top.archived) "（已隐藏）" else "",
                         icon = categoryIcon(top.icon),
-                        onClick = { editing = top },
+                        onClick = { onEdit(top) },
                     )
                     for (child in children) {
                         JkDivider(inset = Space.x6 + Space.x05)
                         JkRow(
                             title = child.name + if (child.archived) "（已隐藏）" else "",
                             modifier = Modifier.padding(start = Space.x4),
-                            onClick = { editing = child },
+                            onClick = { onEdit(child) },
                         )
                     }
                     JkDivider(inset = Space.x6 + Space.x05)
                     Row(
                         Modifier
                             .fillMaxWidth()
-                            .clickable { editing = LedgerCategory(LedgerIds.newId(), "", top.type, top.id, top.icon) }
+                            .clickable { onEdit(LedgerCategory(LedgerIds.newId(), "", top.type, top.id, top.icon)) }
                             .padding(start = Space.x6 + Space.x05, top = Space.x1_5, bottom = Space.x1_5),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -147,20 +175,10 @@ fun LedgerCategoriesScreen(onBack: () -> Unit) {
             }
         }
     }
-
-    editing?.let { category ->
-        CategoryEditSheet(
-            category = category,
-            isNew = data.categories.none { it.id == category.id },
-            parentName = category.parentId?.let { id -> data.categories.firstOrNull { it.id == id }?.name },
-            onDismiss = { editing = null },
-            onSave = { viewModel.save(it) { editing = null } },
-        )
-    }
 }
 
 @Composable
-private fun CategoryEditSheet(
+internal fun CategoryEditSheet(
     category: LedgerCategory,
     isNew: Boolean,
     parentName: String?,

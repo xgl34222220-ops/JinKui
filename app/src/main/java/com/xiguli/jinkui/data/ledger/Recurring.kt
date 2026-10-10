@@ -158,6 +158,21 @@ object RecurringMath {
     }
 
     /**
+     * 列表上“下次”显示的日期：还没生成的各次里第一个不早于 [today] 的日期；规则已结束时为 null。
+     *
+     * 1.1 及之前直接显示 [nextDate]，新建的规则在第一次生成之前（或暂停、账户停用时）会显示一个已经过去的开始日期，
+     * 例如“下次 9月1日”。过去的那几次会在下次解锁时补记，真正的“下一次”是今天或以后。
+     */
+    fun upcomingDate(rule: LedgerRecurring, today: LocalDate): LocalDate? {
+        var index = rule.nextIndex.coerceAtLeast(0)
+        if (index >= MAX_INDEX) return null
+        if (dateOf(rule, index) < today) index = maxOf(index, resumeIndex(rule, today.minusDays(1)))
+        if (index >= MAX_INDEX) return null
+        val date = dateOf(rule, index)
+        return if (rule.endDate != null && date > rule.endDate) null else date
+    }
+
+    /**
      * 修改了起始日期或频率之后的 [LedgerRecurring.nextIndex]：
      * 从新的规则里第一个“晚于 [after]”的日期继续，不会把已经过去的日子再补记一遍。
      * [after] 一般是今天之前最后一次已生成的日期；从没生成过时传 null，从起始日期开始。

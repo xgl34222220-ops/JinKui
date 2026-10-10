@@ -21,11 +21,15 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
-import com.xiguli.jinkui.R
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 import com.xiguli.jinkui.data.repo.ThemeMode
@@ -37,7 +41,8 @@ import com.xiguli.jinkui.data.repo.ThemeMode
  *    accent 是深一档的薄荷，用于浅底上的小字与线条图标（对比度 ≥ 4.5:1）；accentSoft / hero 是浅薄荷底。
  *  - 中性色是带一点绿意的浅灰：页面底 #F5F6F5、卡片纯白、无描边；深色模式是深绿灰。
  *  - 插画色（leaf / leafDeep / hill / flower）只给自绘的叶子、远山与小花用。
- *  - 数字与日期用 Oxanium（OFL，圆角方正的“数码”数字，见 [JkFonts]），中文仍是系统黑体。
+ *  - 字体见 [JkFonts]：默认跟随系统字体；可选 Oxanium 圆润数字或导入的字体。
+ *  - 卡片、面板、底栏等“表面”的填充 / 模糊 / 描边集中在 [JkSurfaces]，以后换材质只改这一处。
  *  - 间距 4dp 网格；页面左右 16dp；卡片 18dp 圆角、内边距 16–20dp。
  */
 @Immutable
@@ -158,6 +163,60 @@ val JkColors.segmentSelected: Color
 
 val LocalJkColors = staticCompositionLocalOf { LightColors }
 
+/**
+ * 一种“表面”的材质：填充色、背后模糊半径、描边。1.2 的薄荷设计里所有表面都是不透明填充、
+ * 不模糊、无描边（[blur] 恒为 0dp，[stroke] 透明），看起来与 1.1 完全一样。
+ *
+ * 之所以单独抽出来：卡片、底部面板、对话框、底栏、控件底、遮罩的材质都只从 [JkSurfaces] 取，
+ * 以后要换成半透明 + 背景模糊的“玻璃”质感，只改 [surfacesFor] 一处（再在 [jkSurface] 里接上模糊），
+ * 不用逐个页面去改颜色。
+ */
+@Immutable
+data class JkSurface(
+    val fill: Color,
+    /** 背后内容的模糊半径；0 表示不模糊（当前全部为 0）。 */
+    val blur: Dp = 0.dp,
+    val stroke: Color = Color.Transparent,
+    val strokeWidth: Dp = 0.dp,
+)
+
+@Immutable
+data class JkSurfaces(
+    /** 分组卡片、白色列表块。 */
+    val card: JkSurface,
+    /** 底部面板。 */
+    val sheet: JkSurface,
+    /** 居中对话框。 */
+    val dialog: JkSurface,
+    /** 底部悬浮栏。 */
+    val bar: JkSurface,
+    /** 浅灰控件底（输入框、分段控件轨道、数字键）。 */
+    val control: JkSurface,
+    /** 面板 / 对话框后面的遮罩。 */
+    val scrim: Color,
+)
+
+/** 当前设计（薄荷，不透明）的表面材质。 */
+fun surfacesFor(colors: JkColors): JkSurfaces = JkSurfaces(
+    card = JkSurface(colors.surface),
+    sheet = JkSurface(colors.surface),
+    dialog = JkSurface(colors.surface),
+    // 深色下阴影几乎看不见，用一圈极淡的亮边把栏和底色分开
+    bar = if (colors.isDark) JkSurface(colors.bar, stroke = Color.White.copy(alpha = 0.07f), strokeWidth = 1.dp) else JkSurface(colors.bar),
+    control = JkSurface(colors.surfaceAlt),
+    scrim = Color.Black.copy(alpha = if (colors.isDark) 0.55f else 0.4f),
+)
+
+val LocalJkSurfaces = staticCompositionLocalOf { surfacesFor(LightColors) }
+
+/** 按 [surface] 画出一块表面：裁剪成 [shape]、铺填充色、需要时描边。 */
+fun Modifier.jkSurface(surface: JkSurface, shape: Shape): Modifier {
+    var m = this.clip(shape).background(surface.fill, shape)
+    if (surface.strokeWidth > 0.dp && surface.stroke.alpha > 0f) m = m.border(surface.strokeWidth, surface.stroke, shape)
+    // surface.blur > 0 时在这里接背景模糊（Android 12+ RenderEffect）；当前设计不使用。
+    return m
+}
+
 object Space {
     val x05 = 4.dp
     val x1 = 8.dp
@@ -191,52 +250,91 @@ object Radius {
     val pill = RoundedCornerShape(50)
 }
 
-/** 数字字体：Oxanium（SIL OFL 1.1，见仓库 licenses/Oxanium-OFL.txt）。只放了拉丁字符，中文自动回落到系统字体。 */
-object JkFonts {
-    val numeral = FontFamily(
-        Font(R.font.oxanium_500, FontWeight.Normal),
-        Font(R.font.oxanium_500, FontWeight.Medium),
-        Font(R.font.oxanium_600, FontWeight.SemiBold),
-        Font(R.font.oxanium_700, FontWeight.Bold),
-    )
+/**
+ * 文字样式（1.2 起随字体设置变化）：
+ *  - 跟随系统字体（默认）：中文、正文与数字都用系统默认字体族，MIUI / HyperOS 等系统里换的字体直接生效；
+ *  - 圆润数字：金额、日期等数字用 Oxanium，其余仍是系统字体；
+ *  - 导入的字体：用户自己导入的 .ttf / .otf 用于全部文字（字体里没有的字会自动回落到系统字体）。
+ *
+ * 每个样式是一个属性读取：读到的是当前 [JkFonts.config] 下的样式，读取发生在组合里时，
+ * 换字体会让用到它的界面自动重组。字号一律是 sp，跟随系统字号缩放（含 1.3 倍）。
+ */
+object JkType {
+    private var cachedFor: FontConfig? = null
+    private var cached: JkTypeSet? = null
+
+    private val set: JkTypeSet
+        get() {
+            val config = JkFonts.config
+            val hit = cached
+            if (hit != null && cachedFor === config) return hit
+            return JkTypeSet(config).also {
+                cached = it
+                cachedFor = config
+            }
+        }
+
+    /** 品牌字标与卡面标题用宋体（导入字体时用导入的字体），其余界面文字用系统黑体。 */
+    val brand: TextStyle get() = set.brand
+    val display: TextStyle get() = set.display
+    /** 首页分区的大标题（“卡包”“账本”）：粗一档的黑体，比宋体字标更利落。 */
+    val pageTitle: TextStyle get() = set.pageTitle
+    val title: TextStyle get() = set.title
+    val heading: TextStyle get() = set.heading
+    val body: TextStyle get() = set.body
+    val bodyStrong: TextStyle get() = set.bodyStrong
+    val small: TextStyle get() = set.small
+    val caption: TextStyle get() = set.caption
+    /** 密码明文：等宽，便于分辨 l / 1 / I。不随字体设置变化。 */
+    val mono: TextStyle get() = set.mono
+    val amountHero: TextStyle get() = set.amountHero
+    val amountLarge: TextStyle get() = set.amountLarge
+    val amount: TextStyle get() = set.amount
+    val amountSmall: TextStyle get() = set.amountSmall
+    val amountCaption: TextStyle get() = set.amountCaption
+    /** 日期、时间等小号数字。 */
+    val date: TextStyle get() = set.date
+    /** 卡号、证件号、打码的末四位等“数字串”：数字字体 + 略宽的字距。 */
+    val digits: TextStyle get() = set.digits
+    val digitsSmall: TextStyle get() = set.digitsSmall
+    val digitsLarge: TextStyle get() = set.digitsLarge
+    /** 卡面上的卡号 / 有效期：略加粗、字距更宽，像压印在卡上。 */
+    val cardNumber: TextStyle get() = set.cardNumber
+    /** 分区标题（“收支统计”“信贷账户”）：粗黑体。 */
+    val section: TextStyle get() = set.section
+    /** 小节标题上方的“眉题”（例如“本月支出”）。 */
+    val overline: TextStyle get() = set.overline
 }
 
-object JkType {
-    /** 品牌字标与卡面标题用宋体，其余界面文字用系统黑体。 */
-    val brand = TextStyle(fontSize = 26.sp, lineHeight = 34.sp, fontWeight = FontWeight.SemiBold, fontFamily = FontFamily.Serif, letterSpacing = 2.sp)
-    val display = TextStyle(fontSize = 28.sp, lineHeight = 36.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.4).sp)
-    /** 首页分区的大标题（“卡包”“账本”）：粗一档的黑体，比宋体字标更利落。 */
-    val pageTitle = TextStyle(fontSize = 28.sp, lineHeight = 36.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.2).sp)
-    val title = TextStyle(fontSize = 20.sp, lineHeight = 28.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.2).sp)
-    val heading = TextStyle(fontSize = 16.sp, lineHeight = 24.sp, fontWeight = FontWeight.SemiBold)
-    val body = TextStyle(fontSize = 15.sp, lineHeight = 22.sp, fontWeight = FontWeight.Normal)
-    val bodyStrong = TextStyle(fontSize = 15.sp, lineHeight = 22.sp, fontWeight = FontWeight.Medium)
-    val small = TextStyle(fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.Normal)
-    val caption = TextStyle(fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.Normal)
+/** 某一种字体设置下的全部文字样式。 */
+class JkTypeSet(config: FontConfig) {
+    private val text = config.text
+    private val base = TextStyle(fontFamily = text)
+    val brand = TextStyle(fontSize = 26.sp, lineHeight = 34.sp, fontWeight = FontWeight.SemiBold, fontFamily = config.brand, letterSpacing = 2.sp)
+    val display = base.copy(fontSize = 28.sp, lineHeight = 36.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.4).sp)
+    val pageTitle = base.copy(fontSize = 28.sp, lineHeight = 36.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.2).sp)
+    val title = base.copy(fontSize = 20.sp, lineHeight = 28.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.2).sp)
+    val heading = base.copy(fontSize = 16.sp, lineHeight = 24.sp, fontWeight = FontWeight.SemiBold)
+    val body = base.copy(fontSize = 15.sp, lineHeight = 22.sp, fontWeight = FontWeight.Normal)
+    val bodyStrong = base.copy(fontSize = 15.sp, lineHeight = 22.sp, fontWeight = FontWeight.Medium)
+    val small = base.copy(fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.Normal)
+    val caption = base.copy(fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.Normal)
     val mono = TextStyle(fontSize = 15.sp, lineHeight = 22.sp, fontFamily = FontFamily.Monospace, letterSpacing = 0.5.sp)
 
-    // 金额、日期、卡号一律用 Oxanium：圆角方正的数码数字，本身就是等宽的（tnum 留着无害），上下行对得齐。
-    private const val TABULAR = "tnum"
-    private val num = TextStyle(fontFamily = JkFonts.numeral, fontFeatureSettings = TABULAR)
+    // 金额、日期、卡号：数字字体 + 等宽数字（tnum），上下行对得齐。系统字体多数支持 tnum，不支持时原样显示。
+    private val num = TextStyle(fontFamily = config.numeral, fontFeatureSettings = "tnum")
     val amountHero = num.copy(fontSize = 36.sp, lineHeight = 44.sp, fontWeight = FontWeight.Bold)
     val amountLarge = num.copy(fontSize = 26.sp, lineHeight = 34.sp, fontWeight = FontWeight.Bold)
     val amount = num.copy(fontSize = 17.sp, lineHeight = 24.sp, fontWeight = FontWeight.SemiBold)
     val amountSmall = num.copy(fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.SemiBold)
     val amountCaption = num.copy(fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.Medium)
-    /** 日期、时间等小号数字。 */
     val date = num.copy(fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.Medium)
-    /**
-     * 卡号、证件号、打码的末四位等“数字串”：Oxanium + 略宽的字距。密码明文仍用 [mono]，便于分辨 l / 1 / I。
-     */
     val digits = num.copy(fontSize = 15.sp, lineHeight = 22.sp, fontWeight = FontWeight.Medium, letterSpacing = 0.8.sp)
     val digitsSmall = num.copy(fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.Medium, letterSpacing = 0.6.sp)
     val digitsLarge = num.copy(fontSize = 22.sp, lineHeight = 28.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 1.4.sp)
-    /** 卡面上的卡号 / 有效期：略加粗、字距更宽，像压印在卡上。 */
     val cardNumber = num.copy(fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 1.4.sp)
-    /** 分区标题（“收支统计”“信贷账户”）：粗黑体。 */
-    val section = TextStyle(fontSize = 18.sp, lineHeight = 26.sp, fontWeight = FontWeight.Bold)
-    /** 小节标题上方的“眉题”（例如“本月支出”）。 */
-    val overline = TextStyle(fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.Medium, letterSpacing = 0.6.sp)
+    val section = base.copy(fontSize = 18.sp, lineHeight = 26.sp, fontWeight = FontWeight.Bold)
+    val overline = base.copy(fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.Medium, letterSpacing = 0.6.sp)
 }
 
 object Jk {
@@ -244,6 +342,11 @@ object Jk {
         @Composable
         @ReadOnlyComposable
         get() = LocalJkColors.current
+
+    val surfaces: JkSurfaces
+        @Composable
+        @ReadOnlyComposable
+        get() = LocalJkSurfaces.current
 }
 
 @Composable
@@ -321,7 +424,7 @@ fun JinKuiTheme(mode: ThemeMode, dynamicColor: Boolean = false, content: @Compos
         }
     }
 
-    CompositionLocalProvider(LocalJkColors provides colors) {
+    CompositionLocalProvider(LocalJkColors provides colors, LocalJkSurfaces provides surfacesFor(colors)) {
         MaterialTheme(
             colorScheme = scheme,
             typography = Typography(

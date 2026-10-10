@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_record"
+        android:shortcutId="quick_record"
+        android:shortcutLongLabel="@string/shortcut_record_long"
+        android:shortcutShortLabel="@string/shortcut_record_short">
+        <intent
+            android:action="com.xiguli.jinkui.action.QUICK_RECORD"
+            android:targetClass="com.xiguli.jinkui.MainActivity"
+            android:targetPackage="com.xiguli.jinkui" />
+    </shortcut>
+</shortcuts>

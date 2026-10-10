@@ -26,6 +26,14 @@ sealed interface Screen {
     data object LedgerRecurring : Screen
     /** 资产总览：净资产、负债与信用账户，按现有账户算出。 */
     data object LedgerAssets : Screen
+    /** 设置 → 外观 → 字体（1.2 起）。 */
+    data object FontSettings : Screen
+    /** 导入微信 / 支付宝 / CSV 账单（1.2 起）。 */
+    data object BillImport : Screen
+    /** 自动记账设置（1.2 起）。 */
+    data object AutoBookkeeping : Screen
+    /** 自动记账的“待确认”（1.2 起）。 */
+    data object PendingInbox : Screen
 }
 
 /** 首页底部悬浮栏的五个分区（1.1 起）：账本是首页；卡包保留全部卡片功能。 */
@@ -57,6 +65,14 @@ class Navigator {
 
     fun push(screen: Screen) {
         stack.add(NavEntry(screen))
+    }
+
+    /** 当前打开的页面（从栈底到栈顶）。 */
+    val screens: List<Screen> get() = stack.map { it.screen }
+
+    /** 回到首页（清掉上面所有页面）。 */
+    fun popToHome() {
+        while (stack.size > 1) stack.removeAt(stack.lastIndex).viewModelStore.clear()
     }
 
     fun pop() {

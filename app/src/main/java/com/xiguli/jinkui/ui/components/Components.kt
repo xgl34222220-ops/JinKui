@@ -92,6 +92,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.SecureFlagPolicy
 import com.xiguli.jinkui.ui.theme.Jk
+import com.xiguli.jinkui.ui.theme.jkSurface
 import com.xiguli.jinkui.ui.theme.JkType
 import com.xiguli.jinkui.ui.theme.Radius
 import com.xiguli.jinkui.ui.theme.Space
@@ -169,8 +170,7 @@ fun JkCard(
 ) {
     Column(
         modifier = modifier
-            .clip(Radius.card)
-            .background(Jk.colors.surface)
+            .jkSurface(Jk.surfaces.card, Radius.card)
             .padding(padding),
         content = content,
     )
@@ -578,7 +578,7 @@ fun JkDialog(
     AlertDialog(
         onDismissRequest = { if (!loading) onDismiss() },
         properties = SecureDialog,
-        containerColor = Jk.colors.surface,
+        containerColor = Jk.surfaces.dialog.fill,
         titleContentColor = Jk.colors.textPrimary,
         textContentColor = Jk.colors.textSecondary,
         shape = Radius.card,
@@ -640,8 +640,7 @@ fun JkSheet(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(Radius.sheet)
-                    .background(Jk.colors.surface)
+                    .jkSurface(Jk.surfaces.sheet, Radius.sheet)
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
