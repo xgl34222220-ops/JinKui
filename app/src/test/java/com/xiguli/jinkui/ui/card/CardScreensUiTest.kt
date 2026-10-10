@@ -1,5 +1,6 @@
 package com.xiguli.jinkui.ui.card
 
+import com.xiguli.jinkui.ui.theme.jkBackdrop
 import android.app.Application
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -92,7 +93,7 @@ class CardScreensUiTest {
                 Box(
                     Modifier
                         .fillMaxSize()
-                        .background(Jk.colors.bg),
+                        .then(Modifier.jkBackdrop()),
                 ) { content() }
             }
         }

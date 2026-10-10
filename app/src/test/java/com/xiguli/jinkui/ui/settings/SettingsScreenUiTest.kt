@@ -1,5 +1,6 @@
 package com.xiguli.jinkui.ui.settings
 
+import com.xiguli.jinkui.ui.theme.jkBackdrop
 import android.app.Application
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -64,7 +65,7 @@ class SettingsScreenUiTest {
         val activity = controller.get()
         activity.setContent {
             JinKuiTheme(if (dark) ThemeMode.DARK else ThemeMode.LIGHT) {
-                Box(Modifier.fillMaxSize().background(Jk.colors.bg)) { content() }
+                Box(Modifier.fillMaxSize().then(Modifier.jkBackdrop())) { content() }
             }
         }
         ShadowLooper.idleMainLooper()

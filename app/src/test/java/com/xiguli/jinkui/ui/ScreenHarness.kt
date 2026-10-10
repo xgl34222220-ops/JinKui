@@ -1,5 +1,6 @@
 package com.xiguli.jinkui.ui
 
+import com.xiguli.jinkui.ui.theme.jkBackdrop
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import androidx.activity.ComponentActivity
@@ -49,7 +50,7 @@ class ScreenHarness(private val compose: ComposeTestRule) {
         val c = if (withContainer) container() else null
         activity.setContent {
             JinKuiTheme(if (dark) ThemeMode.DARK else ThemeMode.LIGHT) {
-                Box(Modifier.fillMaxSize().background(Jk.colors.bg)) {
+                Box(Modifier.fillMaxSize().then(Modifier.jkBackdrop())) {
                     if (c != null) {
                         CompositionLocalProvider(LocalContainer provides c) { content() }
                     } else {

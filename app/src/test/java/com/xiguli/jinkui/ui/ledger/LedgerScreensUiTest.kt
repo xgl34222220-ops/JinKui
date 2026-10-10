@@ -1,5 +1,6 @@
 package com.xiguli.jinkui.ui.ledger
 
+import com.xiguli.jinkui.ui.theme.jkBackdrop
 import androidx.compose.ui.test.performScrollToNode
 import android.app.Application
 import android.graphics.Bitmap
@@ -89,7 +90,7 @@ class LedgerScreensUiTest {
                 Box(
                     Modifier
                         .fillMaxSize()
-                        .background(Jk.colors.bg),
+                        .then(Modifier.jkBackdrop()),
                 ) { content() }
             }
         }
