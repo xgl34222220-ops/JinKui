@@ -1,7 +1,10 @@
 package com.xiguli.jinkui.ui.nav
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelStore
@@ -17,6 +20,29 @@ sealed interface Screen {
     data object Settings : Screen
     data object Health : Screen
     data object Organize : Screen
+    data object LedgerAccounts : Screen
+    data object LedgerBudget : Screen
+    data object LedgerCategories : Screen
+    data object LedgerRecurring : Screen
+    /** 资产总览：净资产、负债与信用账户，按现有账户算出。 */
+    data object LedgerAssets : Screen
+    /** 设置 → 外观 → 字体（1.2 起）。 */
+    data object FontSettings : Screen
+    /** 导入微信 / 支付宝 / CSV 账单（1.2 起）。 */
+    data object BillImport : Screen
+    /** 自动记账设置（1.2 起）。 */
+    data object AutoBookkeeping : Screen
+    /** 自动记账的“待确认”（1.2 起）。 */
+    data object PendingInbox : Screen
+}
+
+/** 首页底部悬浮栏的五个分区（1.1 起）：账本是首页；卡包保留全部卡片功能。 */
+enum class HomeTab(val label: String) {
+    LEDGER("账本"),
+    CALENDAR("日历"),
+    CARDS("卡包"),
+    STATS("统计"),
+    ME("我的"),
 }
 
 /**
@@ -32,10 +58,21 @@ class Navigator {
     private val stack = mutableStateListOf(NavEntry(Screen.Home))
 
     val current: NavEntry get() = stack.last()
+
+    /** 首页当前停在哪个分区；进详情再返回时保持不变。 */
+    var homeTab by mutableStateOf(HomeTab.LEDGER)
     val canPop: Boolean get() = stack.size > 1
 
     fun push(screen: Screen) {
         stack.add(NavEntry(screen))
+    }
+
+    /** 当前打开的页面（从栈底到栈顶）。 */
+    val screens: List<Screen> get() = stack.map { it.screen }
+
+    /** 回到首页（清掉上面所有页面）。 */
+    fun popToHome() {
+        while (stack.size > 1) stack.removeAt(stack.lastIndex).viewModelStore.clear()
     }
 
     fun pop() {
@@ -51,8 +88,9 @@ class Navigator {
 
 /** 用给定的构造逻辑在当前页面作用域内取得 ViewModel。 */
 @Composable
-inline fun <reified VM : ViewModel> jkViewModel(crossinline build: () -> VM): VM =
+inline fun <reified VM : ViewModel> jkViewModel(key: String? = null, crossinline build: () -> VM): VM =
     viewModel(
+        key = key,
         factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T = build() as T

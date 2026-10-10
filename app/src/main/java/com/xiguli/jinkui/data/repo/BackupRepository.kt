@@ -20,22 +20,27 @@ import kotlinx.coroutines.withContext
  * 加密备份的导出与导入。金匮不提供任何明文导出：
  * 离开本机的只有经主密码加密、带完整性校验的 .jkbak 文件。
  */
+/** 导出了多少内容。 */
+class ExportSummary(val cards: Int, val transactions: Int)
+
 class BackupRepository(
     private val context: Context,
     private val vault: VaultManager,
     private val repository: VaultRepository,
+    private val ledger: LedgerRepository,
 ) {
     fun suggestedFileName(): String {
         val stamp = SimpleDateFormat("yyyyMMdd-HHmm", Locale.US).format(Date())
         return "金匮备份-$stamp.${BackupCodec.FILE_EXTENSION}"
     }
 
-    /** 导出前必须再次输入主密码；备份文件就用这个主密码加密。返回导出的卡片数。 */
+    /** 导出前必须再次输入主密码；备份文件就用这个主密码加密。卡片与账本一起导出。 */
     @Throws(WrongSecretException::class)
-    suspend fun export(target: Uri, password: String): Int = withContext(Dispatchers.IO) {
+    suspend fun export(target: Uri, password: String): ExportSummary = withContext(Dispatchers.IO) {
         if (!vault.verifyPassword(password)) throw WrongSecretException("主密码不正确")
         val items = repository.snapshot()
-        val payload = BackupJson.encode(items, System.currentTimeMillis())
+        val ledgerData = ledger.snapshot()
+        val payload = BackupJson.encode(items, System.currentTimeMillis(), ledgerData)
         val chars = Kdf.normalize(password)
         val file = try {
             BackupCodec.encode(payload, chars)
@@ -46,7 +51,7 @@ class BackupRepository(
         val stream = context.contentResolver.openOutputStream(target, "wt")
             ?: throw java.io.IOException("无法写入所选位置")
         stream.use { it.write(file) }
-        items.size
+        ExportSummary(items.size, ledgerData.transactions.size)
     }
 
     /** 导入：先校验文件格式与完整性（GCM 认证），全部通过后才写入本机。 */
@@ -59,12 +64,15 @@ class BackupRepository(
         } finally {
             chars.wipe()
         }
-        val items = try {
-            BackupJson.decode(payload)
+        val content = try {
+            BackupJson.decodeAll(payload)
         } finally {
             payload.wipe()
         }
-        repository.restore(items)
+        val cards = repository.restore(content.cards)
+        // 0.6.0 之前的备份没有账本，这一步什么也不写。
+        val ledgerSummary = ledger.restore(content.ledger)
+        ImportSummary(cards.added, cards.updated, cards.skipped, ledgerSummary.added, ledgerSummary.updated, ledgerSummary.suppressed)
     }
 
     private fun readLimited(source: Uri): ByteArray {

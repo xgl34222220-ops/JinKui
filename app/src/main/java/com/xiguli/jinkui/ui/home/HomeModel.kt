@@ -23,7 +23,7 @@ data class HomeUi(
 
 /**
  * 首页要展示的全部内容。纯函数，不碰界面与线程，便于在后台计算和单元测试。
- * [filter] 的键："p:" 置顶，"t:类型" 或 "g:标签"；null 为全部。
+ * [filter] 的键："p:" 置顶，"o:" 两步验证，"t:类型" 或 "g:标签"；null 为全部。
  */
 fun buildHomeUi(
     cards: List<Card>,
@@ -36,6 +36,8 @@ fun buildHomeUi(
     val types = CardType.entries.filter { type -> cards.any { it.type == type } }
     val tags = cards.flatMap { it.tags }.distinct().sorted()
     val filters = (if (cards.any { it.pinned }) listOf("p:" to "置顶") else emptyList()) +
+        // 有两步验证码的卡片时多一个“两步验证”快速筛选：结果行上直接显示实时验证码（参考 Aegis 的验证码列表）
+        (if (cards.any { ListLayout.totpField(it) != null }) listOf("o:" to "两步验证") else emptyList()) +
         (if (types.size > 1) types.map { "t:" + it.key to it.label } else emptyList()) +
         tags.map { "g:$it" to "#$it" }
     val active = filter?.takeIf { key -> filters.any { it.first == key } }
@@ -45,6 +47,7 @@ fun buildHomeUi(
                 val inFilter = when {
                     active == null -> true
                     active == "p:" -> card.pinned
+                    active == "o:" -> ListLayout.totpField(card) != null
                     active.startsWith("t:") -> card.type.key == active.substring(2)
                     else -> active.substring(2) in card.tags
                 }

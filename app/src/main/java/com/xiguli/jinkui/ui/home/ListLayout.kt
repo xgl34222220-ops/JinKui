@@ -25,6 +25,16 @@ object ListLayout {
     /** 行尾复制按钮复制哪个字段：优先敏感字段（密码、卡号），没有就取最要紧的明文字段。 */
     fun copyTarget(card: Card): CardField? = card.quickCopyFields.lastOrNull()
 
+    /**
+     * 行上向左滑复制的字段：有两个快捷字段时取明文的那个（账号、卡号持卡人等），
+     * 行尾按钮复制敏感的那个（密码、卡号）——一行上两种复制各有一个大手势 / 一个按钮。
+     */
+    fun swipeCopyTarget(card: Card): CardField? = card.quickCopyFields.firstOrNull()
+
+    /** 这张卡片的两步验证字段（筛选“两步验证”时在行上直接显示实时验证码）。 */
+    fun totpField(card: Card): CardField? =
+        card.fields.firstOrNull { it.kind == com.xiguli.jinkui.data.model.FieldKind.TOTP && it.value.isNotBlank() }
+
     /** 主信息是不是打了码的编号（用等宽字体显示）。 */
     fun isMasked(text: String): Boolean = text.startsWith("••••")
 }

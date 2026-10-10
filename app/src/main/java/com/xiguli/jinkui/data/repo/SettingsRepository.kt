@@ -16,6 +16,20 @@ enum class ThemeMode(val key: String, val label: String) {
     }
 }
 
+/** 字体设置（1.2 起）。[key] 写入本机偏好，上线后不要改动。 */
+enum class FontMode(val key: String, val label: String) {
+    /** 全部文字（含数字）用系统默认字体，系统里换的字体直接生效。默认。 */
+    SYSTEM("system", "跟随系统字体"),
+    /** 金额、日期等数字用 Oxanium 圆润数字，其余跟随系统。1.1 的样子。 */
+    ROUNDED("rounded", "圆润数字"),
+    /** 用户导入的 .ttf / .otf 字体文件，用于全部文字。 */
+    CUSTOM("custom", "导入的字体");
+
+    companion object {
+        fun of(key: String?): FontMode = entries.firstOrNull { it.key == key } ?: SYSTEM
+    }
+}
+
 data class AppSettings(
     /** 切到后台后多少秒锁定；0 表示立即。前台无操作同样按此时间锁定（最短 30 秒）。 */
     val autoLockSeconds: Int = 60,
@@ -24,12 +38,24 @@ data class AppSettings(
     /** 连续输错达到上限后清空全部数据。默认开启。 */
     val wipeOnFailure: Boolean = true,
     val keepHistory: Boolean = true,
-    /** 首页用牌堆还是列表。纯界面偏好。 */
-    val deckView: Boolean = true,
+    /** 首页用牌堆还是列表。纯界面偏好。1.0 起默认列表（搜索在最上面，找卡更快）；已经选过的保持不变。 */
+    val deckView: Boolean = false,
     /** 上次成功导出加密备份的时间；0 表示还没备份过。 */
     val lastBackupAt: Long = 0L,
     /** 列表与牌堆的排序方式。 */
     val sortOrder: SortOrder = SortOrder.TITLE,
+    /** Android 12 起可选：品牌色跟随系统壁纸取色（Material You）。默认关闭。 */
+    val dynamicColor: Boolean = false,
+    /** 字体（1.2 起）。默认跟随系统字体。只是本机偏好，不进备份。 */
+    val fontMode: FontMode = FontMode.SYSTEM,
+    /** 导入的字体文件的显示名（文件本身在应用私有目录）；空表示没有导入过。 */
+    val customFontName: String = "",
+    /** 每次导入新字体时更新，用来让界面重新加载字体文件。 */
+    val customFontStamp: Long = 0L,
+    /** 自动记账：读取微信 / 支付宝 / 银行通知生成待确认记录。默认关闭，需要用户在系统里授予通知使用权。 */
+    val autoBookkeeping: Boolean = false,
+    /** 自动入账：识别出的通知不经确认直接记账。默认关闭。 */
+    val autoSave: Boolean = false,
 )
 
 /** 非敏感偏好设置。主题等需要在解锁前读取，因此不放进加密库。 */
@@ -51,6 +77,12 @@ class SettingsRepository(context: Context) {
             .putBoolean(KEY_DECK, next.deckView)
             .putLong(KEY_LAST_BACKUP, next.lastBackupAt)
             .putString(KEY_SORT, next.sortOrder.key)
+            .putBoolean(KEY_DYNAMIC, next.dynamicColor)
+            .putString(KEY_FONT, next.fontMode.key)
+            .putString(KEY_FONT_NAME, next.customFontName)
+            .putLong(KEY_FONT_STAMP, next.customFontStamp)
+            .putBoolean(KEY_AUTO, next.autoBookkeeping)
+            .putBoolean(KEY_AUTO_SAVE, next.autoSave)
             .commit()
         state.value = next
     }
@@ -66,6 +98,12 @@ class SettingsRepository(context: Context) {
             deckView = prefs.getBoolean(KEY_DECK, defaults.deckView),
             lastBackupAt = prefs.getLong(KEY_LAST_BACKUP, defaults.lastBackupAt),
             sortOrder = SortOrder.of(prefs.getString(KEY_SORT, null)),
+            dynamicColor = prefs.getBoolean(KEY_DYNAMIC, defaults.dynamicColor),
+            fontMode = FontMode.of(prefs.getString(KEY_FONT, null)),
+            customFontName = prefs.getString(KEY_FONT_NAME, null) ?: "",
+            customFontStamp = prefs.getLong(KEY_FONT_STAMP, 0L),
+            autoBookkeeping = prefs.getBoolean(KEY_AUTO, defaults.autoBookkeeping),
+            autoSave = prefs.getBoolean(KEY_AUTO_SAVE, defaults.autoSave),
         )
     }
 
@@ -78,6 +116,12 @@ class SettingsRepository(context: Context) {
         private const val KEY_DECK = "home_deck_view"
         private const val KEY_LAST_BACKUP = "last_backup_at"
         private const val KEY_SORT = "sort_order"
+        private const val KEY_DYNAMIC = "dynamic_color"
+        private const val KEY_FONT = "font_mode"
+        private const val KEY_FONT_NAME = "custom_font_name"
+        private const val KEY_FONT_STAMP = "custom_font_stamp"
+        private const val KEY_AUTO = "auto_bookkeeping"
+        private const val KEY_AUTO_SAVE = "auto_save"
 
         val AUTO_LOCK_OPTIONS = listOf(0 to "立即", 30 to "30 秒", 60 to "1 分钟", 300 to "5 分钟", 600 to "10 分钟")
         val CLIPBOARD_OPTIONS = listOf(15 to "15 秒", 30 to "30 秒", 60 to "1 分钟", 120 to "2 分钟")

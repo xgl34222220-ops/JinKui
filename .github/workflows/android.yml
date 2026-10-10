@@ -18,18 +18,59 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
-      - name: 单元测试（加密工具类）
+      - name: 单元测试与界面测试（Robolectric）
         run: ./gradlew testDebugUnitTest
+
+      - name: 上传界面截图（卡包与账本，Robolectric 渲染）
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jinkui-ui-screenshots
+          path: app/build/outputs/ui-screenshots/
+          if-no-files-found: ignore
 
       - name: 构建 Debug APK
         run: ./gradlew assembleDebug
 
-      - name: 离线守卫：APK 不得申请任何联网权限
+      - name: 离线与权限守卫：不得联网；申请的权限只能是白名单；只允许通知监听这一项系统绑定权限
         run: |
           AAPT2=$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)aapt2
-          "$AAPT2" dump permissions app/build/outputs/apk/debug/app-debug.apk | tee permissions.txt
-          if grep -E "android\.permission\.(INTERNET|ACCESS_NETWORK_STATE|ACCESS_WIFI_STATE)" permissions.txt; then
+          APK=app/build/outputs/apk/debug/app-debug.apk
+          "$AAPT2" dump permissions "$APK" | tee permissions.txt
+          if grep -E "android\.permission\.(INTERNET|ACCESS_NETWORK_STATE|ACCESS_WIFI_STATE|CHANGE_NETWORK_STATE|CHANGE_WIFI_STATE)" permissions.txt; then
             echo "::error::发现联网相关权限，违反离线要求"
+            exit 1
+          fi
+          # 申请的权限（uses-permission）白名单：生物识别（含库带入的旧指纹权限）与 AndroidX 自带的应用内广播保护权限
+          grep "^uses-permission" permissions.txt | sed -E "s/.*name='([^']+)'.*/\1/" | sort -u > requested.txt
+          printf '%s\n' android.permission.USE_BIOMETRIC android.permission.USE_FINGERPRINT com.xiguli.jinkui.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION | sort -u > allowed.txt
+          if [ -n "$(comm -23 requested.txt allowed.txt)" ]; then
+            echo "::error::出现白名单之外的权限：$(comm -23 requested.txt allowed.txt | tr '\n' ' ')"
+            exit 1
+          fi
+          # 组件上的 android:permission（调用方必须持有，金匮自己并不申请）：
+          # 1.2 新增的只有自动记账通知监听服务的 BIND_NOTIFICATION_LISTENER_SERVICE（只有系统能绑定）；
+          # DUMP 是 AndroidX profileinstaller 自带接收器上一直就有的
+          "$AAPT2" dump xmltree --file AndroidManifest.xml "$APK" > manifest.txt
+          grep -oE ':permission\(0x01010006\)="[^"]+"' manifest.txt | sed -E 's/.*="([^"]+)"/\1/' | sort -u > bound.txt
+          printf '%s\n' android.permission.BIND_NOTIFICATION_LISTENER_SERVICE android.permission.DUMP | sort -u > bound-allowed.txt
+          cat bound.txt
+          if ! diff -u bound-allowed.txt bound.txt; then
+            echo "::error::组件上的绑定权限与白名单不一致（只允许通知监听服务新增 BIND_NOTIFICATION_LISTENER_SERVICE）"
+            exit 1
+          fi
+          grep -q 'PaymentNotificationService' manifest.txt || { echo "::error::找不到自动记账服务"; exit 1; }
+
+      - name: 打印 Debug APK 签名证书 SHA-256（应恒为仓库内 app/debug.jks 的指纹）
+        run: |
+          APKSIGNER=$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)apksigner
+          "$APKSIGNER" verify --print-certs app/build/outputs/apk/debug/app-debug.apk | tee signing.txt
+          SHA=$(grep -m1 "SHA-256 digest" signing.txt | awk '{print $NF}')
+          echo "### Debug APK 签名证书 SHA-256" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`$SHA\`" >> "$GITHUB_STEP_SUMMARY"
+          EXPECTED=d10ec61174544bd85b780d9d0a034f3b127ce59c8d3bf2c059987ed888b9010f
+          if [ "$SHA" != "$EXPECTED" ]; then
+            echo "::error::Debug APK 签名与 app/debug.jks 不一致：$SHA"
             exit 1
           fi
 

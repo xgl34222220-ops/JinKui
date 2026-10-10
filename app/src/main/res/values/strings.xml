@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">金匮</string>
+    <string name="auto_bookkeeping_label">金匮自动记账</string>
+    <string name="shortcut_record_short">记一笔</string>
+    <string name="shortcut_record_long">金匮：记一笔</string>
 </resources>
