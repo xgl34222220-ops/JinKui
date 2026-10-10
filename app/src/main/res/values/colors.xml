@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="window_background">#F5F6F5</color>
+    <color name="window_background">#D6F0E6</color>
+    <color name="splash_top">#E6F6EF</color>
+    <color name="splash_bottom">#BFE6D7</color>
+    <color name="splash_background">#CDEDE1</color>
     <color name="icon_background">#141210</color>
     <color name="icon_gold">#D4A857</color>
 </resources>
