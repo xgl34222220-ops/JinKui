@@ -3,7 +3,12 @@ package com.xiguli.jinkui.ui.ledger
 import android.app.Application
 import androidx.compose.material3.Text
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.assertIsOn
+import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import com.xiguli.jinkui.data.ledger.LedgerDefaults
 import com.xiguli.jinkui.data.ledger.LedgerRecurring
 import com.xiguli.jinkui.data.ledger.RecurFrequency
@@ -52,7 +57,12 @@ class MoreScreensUiTest {
         val activity = h.show(withContainer = true) { SetupScreen() }
         compose.onNodeWithText("设置主密码").assertExists()
         compose.onNodeWithText("我已了解：忘记主密码，数据将无法恢复").assertExists()
+        compose.onNodeWithText("全程离线，不申请联网权限").assertExists()
+        // “创建保险库”在填好两次主密码并勾选之前不可用；勾选行读作复选框，点一下就勾上
+        compose.onNodeWithText("创建保险库").assertIsNotEnabled()
         h.snapshot(activity, "onboarding-light")
+        compose.onNode(isToggleable()).assertIsOff().performClick()
+        compose.onNode(isToggleable()).assertIsOn()
         h.close()
         val dark = h.show(dark = true, withContainer = true) { SetupScreen() }
         h.snapshot(dark, "onboarding-dark")
