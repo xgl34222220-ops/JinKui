@@ -97,7 +97,7 @@ fun JinKuiRoot(container: AppContainer) {
                 when (state) {
                     VaultState.Uninitialized -> SetupScreen()
                     VaultState.Locked -> LockScreen()
-                    VaultState.Unlocked -> {
+                    VaultState.Unlocked -> UnlockEnter {
                         if (container.showQuickUnlockIntro.value) {
                             QuickUnlockIntro(onDone = { container.showQuickUnlockIntro.value = false })
                         } else {
@@ -110,6 +110,30 @@ fun JinKuiRoot(container: AppContainer) {
             }
         }
     }
+}
+
+/**
+ * 解锁后的进入动画（1.4.0-alpha03）：主界面从 96% 轻轻放大并淡入，像锁屏“打开”了一样。
+ * 只做进入：锁定时整棵界面树立即离开组合，不做任何退出动画；系统关闭了动画时直接显示。
+ */
+@Composable
+private fun UnlockEnter(content: @Composable () -> Unit) {
+    val reduceMotion = com.xiguli.jinkui.ui.components.rememberReduceMotion()
+    val progress = remember { androidx.compose.animation.core.Animatable(if (reduceMotion) 1f else 0f) }
+    LaunchedEffect(Unit) {
+        progress.animateTo(1f, androidx.compose.animation.core.spring(dampingRatio = 0.9f, stiffness = 380f))
+    }
+    Box(
+        Modifier
+            .fillMaxSize()
+            .graphicsLayer {
+                val p = progress.value.coerceIn(0f, 1f)
+                alpha = p
+                val k = 0.96f + 0.04f * p
+                scaleX = k
+                scaleY = k
+            },
+    ) { content() }
 }
 
 @Composable
