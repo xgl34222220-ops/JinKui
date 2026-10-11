@@ -34,6 +34,8 @@ enum class MintGlyph {
     LEDGER, CALENDAR, CARDS, STATS, ME,
     RECURRING, BUDGET, ASSETS, CATEGORY, TAG, BACKUP, LOCK, SETTINGS,
     SEARCH, MORE, ADD_NOTE, SHIELD, ORGANIZE, KEY, INFO,
+    /** 1.4：欠款 / 账单（底边起伏的账单 + 右下角的到期小钟）。 */
+    BILL,
 }
 
 @Composable
@@ -72,6 +74,20 @@ private fun DrawScope.dot(x: Float, y: Float, r: Float, color: Color) = drawCirc
 
 private fun DrawScope.drawGlyph(g: MintGlyph, ink: Color, accent: Color, fill: Color) {
     when (g) {
+        MintGlyph.BILL -> {
+            val bill = Path().apply {
+                moveTo(5f, 4.5f); quadraticBezierTo(5f, 3f, 6.5f, 3f); lineTo(17.5f, 3f); quadraticBezierTo(19f, 3f, 19f, 4.5f)
+                lineTo(19f, 20.5f); lineTo(16.8f, 19.2f); lineTo(14.6f, 20.5f); lineTo(12.4f, 19.2f); lineTo(10.2f, 20.5f)
+                lineTo(8f, 19.2f); lineTo(5f, 20.5f); close()
+            }
+            drawPath(bill, fill)
+            drawPath(bill, ink, style = line)
+            seg(8.5f, 8f, 15.5f, 8f, ink)
+            seg(8.5f, 11.5f, 12.5f, 11.5f, ink)
+            dot(16f, 15.2f, 3.4f, accent)
+            seg(16f, 13.6f, 16f, 15.3f, fill)
+            seg(16f, 15.3f, 17.2f, 15.3f, fill)
+        }
         MintGlyph.LEDGER -> {
             rr(5f, 3f, 19f, 21f, 3f, fill, Fill)
             rr(5f, 3f, 19f, 21f, 3f, ink)

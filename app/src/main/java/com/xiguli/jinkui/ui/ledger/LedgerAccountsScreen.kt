@@ -119,7 +119,7 @@ class LedgerAccountsViewModel(private val container: AppContainer) : ViewModel()
 }
 
 @Composable
-fun LedgerAccountsScreen(onBack: () -> Unit) {
+fun LedgerAccountsScreen(onBack: () -> Unit, onDebt: (LedgerAccount) -> Unit = {}) {
     val container = LocalContainer.current
     val viewModel = jkViewModel { LedgerAccountsViewModel(container) }
     val ui by viewModel.ui.collectAsStateWithLifecycle()
@@ -144,6 +144,10 @@ fun LedgerAccountsScreen(onBack: () -> Unit) {
             onDismiss = { editing = null },
             onSave = { viewModel.save(it) { editing = null } },
             onDelete = { viewModel.delete(account) { editing = null } },
+            onDebt = {
+                editing = null
+                onDebt(account)
+            },
         )
     }
 }
@@ -157,6 +161,7 @@ private fun AccountEditSheet(
     onDismiss: () -> Unit,
     onSave: (LedgerAccount) -> Unit,
     onDelete: () -> Unit,
+    onDebt: () -> Unit = {},
 ) {
     val colors = Jk.colors
     var name by remember { mutableStateOf(account.name) }
@@ -206,6 +211,18 @@ private fun AccountEditSheet(
                         }
                     }
                 }
+            }
+            // 1.4：信用账户的账单 / 分期，借贷账户的借贷记录
+            if (!isNew && (account.kind == AccountKind.CREDIT || account.kind == AccountKind.RECEIVABLE || account.kind == AccountKind.PAYABLE)) {
+                Spacer(Modifier.height(Space.x1))
+                JkRow(
+                    title = if (account.kind == AccountKind.CREDIT) "账单、分期与还款" else "借贷记录",
+                    subtitle = if (account.kind == AccountKind.CREDIT) {
+                        account.credit?.let { "账单日每月 ${it.statementDay} 号" + if (it.limit > 0) " · 额度 ${Money.format(it.limit)}" else "" } ?: "设置额度、账单日与还款日"
+                    } else "收款 / 还款、预计还款日与结清",
+                    modifier = Modifier.clip(Radius.control),
+                    onClick = onDebt,
+                )
             }
             if (!isNew) {
                 Spacer(Modifier.height(Space.x1))

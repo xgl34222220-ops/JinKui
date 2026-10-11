@@ -260,6 +260,7 @@ fun LedgerScreen(
     onAssets: () -> Unit = {},
     onImport: () -> Unit = {},
     onPending: () -> Unit = {},
+    onDebts: () -> Unit = {},
 ) {
     val container = LocalContainer.current
     val pending by container.ledger.pending.collectAsStateWithLifecycle()
@@ -267,6 +268,11 @@ fun LedgerScreen(
     val ui by viewModel.ui.collectAsStateWithLifecycle()
     val filter by viewModel.filter.collectAsStateWithLifecycle()
     val data by container.ledger.data.collectAsStateWithLifecycle()
+    // 1.4：3 天内到期或已逾期的信用账单与借贷（首页玻璃提示条）
+    val debtToday = ui.today ?: java.time.LocalDate.now()
+    val debtReminders = remember(data, debtToday) {
+        debtReminders(data, debtToday, java.time.ZoneId.systemDefault())
+    }
 
     val host = rememberEntryHost()
     var showMore by remember { mutableStateOf(false) }
@@ -303,9 +309,12 @@ fun LedgerScreen(
                 onMore = { showMore = true },
                 onAssets = onAssets,
                 onPending = onPending,
+                onDebts = onDebts,
             ),
         ),
         pendingCount = pending.size,
+        debtReminders = debtReminders,
+        today = debtToday,
     )
 
     EntryHost(host, data, viewModel)
@@ -355,6 +364,7 @@ fun LedgerScreen(
         JkSheet(onDismiss = { showMore = false }, title = "账本") {
             val entries = listOf(
                 Triple("资产总览", "净资产、负债与信用账户", Icons.Outlined.Savings) to onAssets,
+                Triple("欠款 / 账单", "信用卡、花呗账单与分期，借出借入", Icons.Outlined.ReceiptLong) to onDebts,
                 Triple("账户与余额", "现金、银行卡、支付宝、微信、信用卡", Icons.Outlined.AccountBalanceWallet) to onAccounts,
                 Triple("预算", "每月总预算与分类预算", Icons.Outlined.BarChart) to onBudget,
                 Triple("周期记账", "房租、工资、订阅等固定收支自动记上", Icons.Outlined.Repeat) to onRecurring,
@@ -408,6 +418,8 @@ class LedgerHomeActions(
     val onRowMenu: (LedgerTransaction) -> Unit = {},
     /** “有 n 笔待确认”提示条。 */
     val onPending: () -> Unit = {},
+    /** 到期提示条（1.4）：打开欠款 / 账单。 */
+    val onDebts: () -> Unit = {},
     /** 多选模式（1.3）：选中的流水 ID；null 表示不在多选模式。长按一行进入。 */
     val selection: Set<String>? = null,
     val onSelectStart: (LedgerTransaction) -> Unit = {},
@@ -432,6 +444,9 @@ fun LedgerHome(
     modifier: Modifier = Modifier,
     /** 自动记账的待确认笔数；大于 0 时在“添加一条新记账”下面出现一条提示。 */
     pendingCount: Int = 0,
+    /** 1.4：3 天内到期或已逾期的欠款 / 账单；不为空时出现一条玻璃提示条。 */
+    debtReminders: List<com.xiguli.jinkui.data.ledger.DueItem> = emptyList(),
+    today: java.time.LocalDate = java.time.LocalDate.now(),
 ) {
     val colors = Jk.colors
     var showSearch by rememberSaveable { mutableStateOf(false) }
@@ -468,6 +483,11 @@ fun LedgerHome(
         if (pendingCount > 0) {
             item(key = "pending", contentType = "pending") {
                 PendingBanner(pendingCount, actions.onPending, Modifier.padding(start = Space.x2, end = Space.x2, top = Space.x1))
+            }
+        }
+        if (debtReminders.isNotEmpty() && selection == null) {
+            item(key = "debts", contentType = "debts") {
+                DebtBanner(debtReminders, today, actions.onDebts, Modifier.padding(start = Space.x2, end = Space.x2, top = Space.x1))
             }
         }
         if (ui.quickCategories.isNotEmpty() && !ui.filterActive) {

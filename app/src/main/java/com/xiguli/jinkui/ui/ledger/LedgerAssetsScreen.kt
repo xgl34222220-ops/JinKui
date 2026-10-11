@@ -118,11 +118,21 @@ fun buildAssetsUi(data: LedgerData): AssetsUi {
 }
 
 @Composable
-fun LedgerAssetsScreen(onBack: () -> Unit, onAccounts: () -> Unit) {
+fun LedgerAssetsScreen(
+    onBack: () -> Unit,
+    onAccounts: () -> Unit,
+    onDebts: () -> Unit = {},
+    onCredit: (String) -> Unit = {},
+    onLoans: () -> Unit = {},
+) {
     val container = LocalContainer.current
     val data by container.ledger.data.collectAsStateWithLifecycle()
     val ui = androidx.compose.runtime.remember(data) { buildAssetsUi(data) }
-    LedgerAssetsContent(ui, onBack, onAccounts)
+    val monthDue = androidx.compose.runtime.remember(data) {
+        val zone = java.time.ZoneId.systemDefault()
+        com.xiguli.jinkui.data.ledger.DebtMath.overview(data, java.time.LocalDate.now(zone), zone).let { it.monthDue to (it.overdue > 0) }
+    }
+    LedgerAssetsContent(ui, onBack, onAccounts, onDebts, onCredit, onLoans, monthDue.first, monthDue.second)
 }
 
 /**
@@ -130,7 +140,17 @@ fun LedgerAssetsScreen(onBack: () -> Unit, onAccounts: () -> Unit) {
  * 三块小卡（储蓄与现金、支付账户、信用欠款），信用账户与欠款占比条，其余账户的余额。
  */
 @Composable
-fun LedgerAssetsContent(ui: AssetsUi, onBack: () -> Unit, onAccounts: () -> Unit) {
+fun LedgerAssetsContent(
+    ui: AssetsUi,
+    onBack: () -> Unit,
+    onAccounts: () -> Unit,
+    onDebts: () -> Unit = {},
+    onCredit: (String) -> Unit = {},
+    onLoans: () -> Unit = {},
+    /** 欠款 / 账单入口上显示的本月待还（1.4）。 */
+    monthDue: Long = 0L,
+    overdue: Boolean = false,
+) {
     val colors = Jk.colors
     var hidden by rememberSaveable { mutableStateOf(false) }
     val show: (Long) -> String = { if (hidden) "****" else Money.format(it, symbol = false) }
@@ -185,6 +205,30 @@ fun LedgerAssetsContent(ui: AssetsUi, onBack: () -> Unit, onAccounts: () -> Unit
                 Tile("支付账户", show(ui.wallets), colors.textPrimary, Modifier.weight(1f))
                 Tile("信用欠款", show(ui.creditDebt), if (ui.creditDebt > 0) colors.expense else colors.textPrimary, Modifier.weight(1f))
             }
+            Spacer(Modifier.height(Space.x1_5))
+            // 1.4：欠款 / 账单入口（信用账单、分期、借贷与到期提醒）
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 56.dp)
+                    .clip(Radius.card)
+                    .background(colors.surface)
+                    .clickable(role = Role.Button, onClick = onDebts)
+                    .padding(horizontal = Space.x2, vertical = Space.x1_5),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                com.xiguli.jinkui.ui.components.MintIcon(com.xiguli.jinkui.ui.components.MintGlyph.BILL, size = 26.dp, tint = colors.textPrimary)
+                Spacer(Modifier.width(Space.x1_5))
+                Column(Modifier.weight(1f)) {
+                    Text("欠款 / 账单", style = JkType.bodyStrong.copy(fontWeight = FontWeight.Bold), color = colors.textPrimary)
+                    Text("信用账单、分期、借贷与到期提醒", style = JkType.caption, color = colors.textTertiary)
+                }
+                Column(horizontalAlignment = Alignment.End) {
+                    Text("本月待还", style = JkType.caption, color = colors.textTertiary)
+                    Text(show(monthDue), style = JkType.amount.copy(fontWeight = FontWeight.Bold), color = if (overdue) colors.expense else colors.textPrimary)
+                }
+                Icon(Icons.Outlined.ChevronRight, contentDescription = null, tint = colors.textTertiary, modifier = Modifier.size(18.dp))
+            }
             if (ui.loans.isNotEmpty()) {
                 Spacer(Modifier.height(Space.x2))
                 JkCard(Modifier.fillMaxWidth(), padding = androidx.compose.foundation.layout.PaddingValues(vertical = Space.x1)) {
@@ -198,7 +242,7 @@ fun LedgerAssetsContent(ui: AssetsUi, onBack: () -> Unit, onAccounts: () -> Unit
                             Modifier
                                 .fillMaxWidth()
                                 .heightIn(min = 56.dp)
-                                .clickable(onClick = onAccounts)
+                                .clickable(onClick = onLoans)
                                 .padding(horizontal = Space.x2, vertical = Space.x1),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
@@ -225,7 +269,9 @@ fun LedgerAssetsContent(ui: AssetsUi, onBack: () -> Unit, onAccounts: () -> Unit
                     }
                     for (row in ui.credit) {
                         Spacer(Modifier.height(Space.x2))
-                        CreditRow(row, ui.liabilities, show)
+                        Box(Modifier.clip(Radius.control).clickable(onClickLabel = "查看账单") { onCredit(row.account.id) }) {
+                            CreditRow(row, ui.liabilities, show)
+                        }
                     }
                 }
             }

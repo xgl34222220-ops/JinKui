@@ -155,6 +155,7 @@ private fun MainNavigation() {
                             onAssets = { navigator.push(Screen.LedgerAssets) },
                             onImport = { navigator.push(Screen.BillImport) },
                             onPending = { navigator.push(Screen.PendingInbox) },
+                            onDebts = { navigator.push(Screen.Debts) },
                         )
                         HomeTab.CALENDAR -> CalendarScreen()
                         HomeTab.CARDS -> HomeScreen(
@@ -179,6 +180,7 @@ private fun MainNavigation() {
                                 onImport = { navigator.push(Screen.BillImport) },
                                 onImportHistory = { navigator.push(Screen.ImportHistory) },
                                 onAuto = { navigator.push(Screen.AutoBookkeeping) },
+                                onDebts = { navigator.push(Screen.Debts) },
                             ),
                         )
                     }
@@ -220,11 +222,27 @@ private fun MainNavigation() {
                     onSettings = { navigator.push(Screen.Settings) },
                 )
                 Screen.Organize -> OrganizeScreen(onBack = { navigator.pop() })
-                Screen.LedgerAccounts -> LedgerAccountsScreen(onBack = { navigator.pop() })
+                Screen.LedgerAccounts -> LedgerAccountsScreen(
+                    onBack = { navigator.pop() },
+                    onDebt = { account ->
+                        navigator.push(if (account.kind == com.xiguli.jinkui.data.ledger.AccountKind.CREDIT) Screen.CreditStatement(account.id) else Screen.Loans)
+                    },
+                )
                 Screen.LedgerAssets -> LedgerAssetsScreen(
                     onBack = { navigator.pop() },
                     onAccounts = { navigator.push(Screen.LedgerAccounts) },
+                    onDebts = { navigator.push(Screen.Debts) },
+                    onCredit = { navigator.push(Screen.CreditStatement(it)) },
+                    onLoans = { navigator.push(Screen.Loans) },
                 )
+                Screen.Debts -> com.xiguli.jinkui.ui.ledger.DebtOverviewScreen(
+                    onBack = { navigator.pop() },
+                    onCredit = { navigator.push(Screen.CreditStatement(it)) },
+                    onLoans = { navigator.push(Screen.Loans) },
+                    onAccounts = { navigator.push(Screen.LedgerAccounts) },
+                )
+                is Screen.CreditStatement -> com.xiguli.jinkui.ui.ledger.CreditStatementScreen(screen.accountId, onBack = { navigator.pop() })
+                Screen.Loans -> com.xiguli.jinkui.ui.ledger.LoanListScreen(onBack = { navigator.pop() })
                 Screen.LedgerBudget -> LedgerBudgetScreen(onBack = { navigator.pop() })
                 Screen.LedgerCategories -> LedgerCategoriesScreen(onBack = { navigator.pop() })
                 Screen.LedgerRecurring -> LedgerRecurringScreen(onBack = { navigator.pop() })

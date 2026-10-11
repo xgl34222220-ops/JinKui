@@ -97,6 +97,8 @@ class MeActions(
     val onImport: () -> Unit = {},
     val onImportHistory: () -> Unit = {},
     val onAuto: () -> Unit = {},
+    /** 欠款 / 账单（1.4 起）。 */
+    val onDebts: () -> Unit = {},
 )
 
 @Composable
@@ -128,6 +130,7 @@ fun MeScreen(actions: MeActions) {
             onImport = actions.onImport,
             onImportHistory = actions.onImportHistory,
             onAuto = actions.onAuto,
+            onDebts = actions.onDebts,
         ),
     )
     if (showGenerator) GeneratorSheet(onDismiss = { showGenerator = false })
@@ -189,6 +192,8 @@ fun MeContent(ui: MeUi, actions: MeActions) {
         }
         Spacer(Modifier.height(Space.x2))
         RowGroup("记账助手") {
+            MeRow(MintGlyph.BILL, "欠款 / 账单", "信用卡、花呗账单与分期，借出借入，到期提醒", actions.onDebts)
+            JkDivider(inset = 56.dp)
             MeRow(MintGlyph.ADD_NOTE, "导入账单", "微信支付、支付宝、记账 App 账单或 CSV 表格", actions.onImport)
             JkDivider(inset = 56.dp)
             MeRow(MintGlyph.RECURRING, "导入记录", "每次导入的时间、来源与笔数，可整批撤销", actions.onImportHistory)

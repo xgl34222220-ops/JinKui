@@ -36,6 +36,12 @@ sealed interface Screen {
     data object AutoBookkeeping : Screen
     /** 自动记账的“待确认”（1.2 起）。 */
     data object PendingInbox : Screen
+    /** 欠款 / 账单总览（1.4 起）：本月待还、即将到期、信用账户、借贷。 */
+    data object Debts : Screen
+    /** 一个信用账户的账单、分期与还款（1.4 起）。 */
+    data class CreditStatement(val accountId: String) : Screen
+    /** 借贷列表（1.4 起）。 */
+    data object Loans : Screen
 }
 
 /** 首页底部悬浮栏的五个分区（1.1 起）：账本是首页；卡包保留全部卡片功能。 */
