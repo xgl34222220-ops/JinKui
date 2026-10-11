@@ -129,6 +129,12 @@ fun EntrySheet(
     initialCategory: String? = null,
     /** “再记一笔”：照这一笔预填类型、金额、分类、账户、备注与标签；ID 与时间是新的。 */
     template: LedgerTransaction? = null,
+    /**
+     * 1.4.0-alpha04：借贷（借出 / 借入 / 收款 / 还款）。为 null 时不显示“借贷”（例如修改已有流水）。
+     */
+    onLoan: ((LoanEntryRequest) -> Unit)? = null,
+    /** 打开时直接进入借贷的某一类（首页“借出 / 借入”快捷入口）。 */
+    initialLoan: LoanAction? = null,
 ) {
     val message: (String) -> Unit = onMessage ?: LocalContainer.current.messages::show
     val touch = LocalUserActivity.current
@@ -161,6 +167,26 @@ fun EntrySheet(
     var note by remember { mutableStateOf(seed?.note ?: "") }
     var tags by remember { mutableStateOf(seed?.tags?.joinToString(" ") ?: "") }
 
+    // 借贷（1.4.0-alpha04）：不为 null 时面板处于“借贷”模式
+    val loanEnabled = onLoan != null && existing == null
+    var loanAction by remember { mutableStateOf(initialLoan?.takeIf { loanEnabled }) }
+    val funds = remember(data.accounts) { fundAccounts(data) }
+    val today = remember { LocalDate.now(zone) }
+    var loanPerson by remember { mutableStateOf("") }
+    var loanTarget by remember { mutableStateOf<LoanTarget?>(null) }
+    var loanDue by remember { mutableStateOf<LocalDate?>(null) }
+    var loanInterest by remember { mutableStateOf("") }
+    val loanTargets = remember(data, loanAction) { loanAction?.let { LoanEntryMath.targets(data, it, today, zone) }.orEmpty() }
+    fun enterLoan(action: LoanAction) {
+        loanAction = action
+        loanTarget = null
+        // 借贷只用资金账户（不是信用、借贷或余额调整账户）
+        if (funds.none { it.id == accountId }) accountId = funds.firstOrNull()?.id
+    }
+    androidx.compose.runtime.LaunchedEffect(loanAction) {
+        if (loanAction != null && funds.none { it.id == accountId } && funds.isNotEmpty()) accountId = funds.first().id
+    }
+
     fun pickCategory(newId: String) {
         categoryId = newId
         if (!accountTouched && type != TxType.TRANSFER) defaultAccount(newId)?.let { accountId = it }
@@ -189,7 +215,43 @@ fun EntrySheet(
         amount = AmountInput.press(amount, key)
     }
 
+    fun submitLoan(action: LoanAction) {
+        val cents = if (amount.isBlank()) 0L else Money.evaluate(amount)
+        val rate = if (loanInterest.isBlank()) 0L else Money.parse(loanInterest)
+        val fund = accountId?.takeIf { id -> funds.any { it.id == id } }
+        if (cents == null || rate == null) {
+            message(if (cents == null) "金额算式不完整" else "利息格式不对")
+            return
+        }
+        if (fund == null) {
+            message("请先在“账户与余额”里添加一个资金账户")
+            return
+        }
+        val target = loanTarget
+        val request = LoanEntryRequest(
+            action = action,
+            person = (target?.person ?: loanPerson).trim(),
+            accountId = target?.accountId,
+            loanId = target?.loanId,
+            amount = cents,
+            fundId = fund,
+            date = Instant.ofEpochMilli(time).atZone(zone).toLocalDate(),
+            due = loanDue.takeIf { action.principal },
+            interest = rate,
+            note = note.trim(),
+        )
+        LoanEntryMath.validate(request, target)?.let {
+            message(it)
+            return
+        }
+        onLoan?.invoke(request)
+    }
+
     fun submit(keepOpen: Boolean) {
+        loanAction?.let {
+            submitLoan(it)
+            return
+        }
         val cents = Money.evaluate(amount)
         if (cents == null || cents <= 0L) {
             message("请输入大于 0 的金额")
@@ -222,10 +284,18 @@ fun EntrySheet(
 
     JkSheet(onDismiss = onDismiss) {
         Row(verticalAlignment = Alignment.CenterVertically) {
+            // 1.4.0-alpha04：第四个分段“借贷”——借出 / 借入 / 收款 / 还款都在这里记
             JkSegmented(
-                options = TxType.entries.map { it to it.label },
-                selected = type,
-                onSelect = { type = it },
+                options = TxType.entries.map { it.key to it.label } + if (loanEnabled) listOf(LOAN_KEY to "借贷") else emptyList(),
+                selected = if (loanAction != null) LOAN_KEY else type.key,
+                onSelect = { key ->
+                    if (key == LOAN_KEY) {
+                        if (loanAction == null) enterLoan(LoanAction.LEND)
+                    } else {
+                        loanAction = null
+                        type = TxType.of(key)
+                    }
+                },
                 modifier = Modifier.weight(1f),
             )
             if (existing != null) {
@@ -239,15 +309,16 @@ fun EntrySheet(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(Radius.control)
-                .background(txSoft(type).copy(alpha = if (colors.isDark) 0.6f else 0.5f))
+                .background(txSoft(loanAction?.tone ?: type).copy(alpha = if (colors.isDark) 0.6f else 0.5f))
                 .animateContentSize(tween(200))
                 .padding(horizontal = Space.x2, vertical = Space.x1_5),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.weight(1f)) {
-                Text(type.label, style = JkType.overline, color = txColor(type))
+                Text(loanAction?.label ?: type.label, style = JkType.overline, color = txColor(loanAction?.tone ?: type))
                 Text(
-                    text = if (type == TxType.TRANSFER) "账户之间" else (selectedCategory?.let { categoryLabel(it.id, byId) } ?: tops.firstOrNull()?.name ?: "未分类"),
+                    text = loanAction?.let { a -> (loanTarget?.person ?: loanPerson.takeIf { a.principal } ?: "").trim().ifEmpty { if (a.principal) "填写对方" else "选择一笔借贷" } }
+                        ?: if (type == TxType.TRANSFER) "账户之间" else (selectedCategory?.let { categoryLabel(it.id, byId) } ?: tops.firstOrNull()?.name ?: "未分类"),
                     style = JkType.small,
                     color = colors.textSecondary,
                     maxLines = 1,
@@ -260,7 +331,7 @@ fun EntrySheet(
                     Text(
                         text = amount.ifEmpty { "0" },
                         style = JkType.amountHero,
-                        color = if (amount.isEmpty()) colors.textTertiary else amountColor(type),
+                        color = if (amount.isEmpty()) colors.textTertiary else amountColor(loanAction?.tone ?: type),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         textAlign = TextAlign.End,
@@ -284,7 +355,36 @@ fun EntrySheet(
                 .heightIn(max = 236.dp)
                 .verticalScroll(rememberScrollState()),
         ) {
-            if (type == TxType.TRANSFER) {
+            val loan = loanAction
+            if (loan != null) {
+                Spacer(Modifier.height(Space.x05))
+                LoanActionChips(loan) { enterLoan(it) }
+                Spacer(Modifier.height(Space.x1))
+                if (loanTargets.isNotEmpty()) {
+                    LoanTargetChips(loanTargets, loanTarget) { t ->
+                        loanTarget = t
+                        // 收款 / 还款：选一笔就把金额填成还剩的，可以再改成只还一部分
+                        if (t != null && !loan.principal) amount = Money.plain(t.remaining)
+                    }
+                    Spacer(Modifier.height(Space.x1))
+                } else if (!loan.principal) {
+                    Text(
+                        if (loan == LoanAction.COLLECT) "没有未结清的借出。先记一笔“借出”。" else "没有未结清的借入。先记一笔“借入”。",
+                        style = JkType.small,
+                        color = colors.textTertiary,
+                    )
+                    Spacer(Modifier.height(Space.x1))
+                }
+                if (loan.principal && loanTarget == null) {
+                    CompactField(loanPerson, { loanPerson = it.take(20) }, "对方（例如：小李）", Modifier.fillMaxWidth())
+                    Spacer(Modifier.height(Space.x1))
+                }
+                if (loan.principal) {
+                    DateField("预计还款日（可选）", loanDue, today, { loanDue = it }, onClear = { loanDue = null })
+                    Spacer(Modifier.height(Space.x1))
+                }
+                CompactField(loanInterest, { loanInterest = it.take(14) }, if (loan.principal) "约定利息（可选）" else "另付利息（可选）", Modifier.fillMaxWidth())
+            } else if (type == TxType.TRANSFER) {
                 Spacer(Modifier.height(Space.x05))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     AccountChip("转出", accountId?.let(accountsById::get), { pickFrom = true }, Modifier.weight(1f))
@@ -322,10 +422,10 @@ fun EntrySheet(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.horizontalScroll(rememberScrollState()),
         ) {
-            if (type != TxType.TRANSFER) {
+            if (type != TxType.TRANSFER || loanAction != null) {
                 InfoChip(
                     icon = accountId?.let(accountsById::get)?.kind?.let(::accountIcon) ?: accountIcon(AccountKind.OTHER),
-                    text = accountId?.let(accountsById::get)?.name ?: "选账户",
+                    text = accountId?.let(accountsById::get)?.name?.let { name -> loanAction?.let { a -> (if (a.tone == TxType.EXPENSE) "从 " else "到 ") + name } ?: name } ?: "选账户",
                     onClick = { pickFrom = true },
                     description = "账户",
                 )
@@ -344,17 +444,17 @@ fun EntrySheet(
         Spacer(Modifier.height(Space.x1_5))
         Keypad(
             onKey = ::press,
-            onAgain = if (existing == null) ({ submit(keepOpen = true) }) else null,
+            onAgain = if (existing == null && loanAction == null) ({ submit(keepOpen = true) }) else null,
             onDone = { submit(keepOpen = false) },
         )
     }
 
     if (pickFrom || pickTo) {
-        val picking = if (pickTo) "转入账户" else if (type == TxType.TRANSFER) "转出账户" else "选择账户"
+        val picking = if (pickTo) "转入账户" else if (loanAction != null) "资金账户" else if (type == TxType.TRANSFER) "转出账户" else "选择账户"
         AccountPickerSheet(
             title = picking,
             // 选转入账户时不列出转出账户本身
-            accounts = if (pickTo) active.filter { it.id != accountId } else active,
+            accounts = if (loanAction != null) funds else if (pickTo) active.filter { it.id != accountId } else active,
             onDismiss = {
                 pickFrom = false
                 pickTo = false
@@ -364,7 +464,7 @@ fun EntrySheet(
                     toAccountId = account.id
                 } else {
                     // 新的转出账户正好是转入账户时，两者对调，而不是留下一个注定保存失败的组合
-                    if (type == TxType.TRANSFER && account.id == toAccountId) toAccountId = accountId
+                    if (loanAction == null && type == TxType.TRANSFER && account.id == toAccountId) toAccountId = accountId
                     accountId = account.id
                     accountTouched = true
                 }
@@ -439,6 +539,8 @@ fun EntrySheet(
         }
     }
 }
+
+private const val LOAN_KEY = "loan"
 
 private fun shortDate(date: LocalDate, today: LocalDate = LocalDate.now()): String = when (date) {
     today -> "今天"

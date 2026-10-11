@@ -4,6 +4,7 @@ import com.xiguli.jinkui.ui.nav.transitionOrigin
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.ReceiptLong
 import androidx.compose.material.icons.outlined.Inbox
+import androidx.compose.material.icons.outlined.Handshake
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.widthIn
@@ -420,6 +421,8 @@ class LedgerHomeActions(
     val onPending: () -> Unit = {},
     /** 到期提示条（1.4）：打开欠款 / 账单。 */
     val onDebts: () -> Unit = {},
+    /** 1.4.0-alpha04：“借出 / 借入”快捷入口，打开记账面板的借贷。 */
+    val onLoan: () -> Unit = {},
     /** 多选模式（1.3）：选中的流水 ID；null 表示不在多选模式。长按一行进入。 */
     val selection: Set<String>? = null,
     val onSelectStart: (LedgerTransaction) -> Unit = {},
@@ -479,6 +482,12 @@ fun LedgerHome(
         }
         item(key = "add", contentType = "add") {
             AddEntryButton(actions.onCreate, Modifier.padding(start = Space.x2, end = Space.x2, top = Space.x1_5))
+        }
+        // 1.4.0-alpha04：借钱给别人 / 欠别人钱 / 信用卡账单，首页一眼就能找到
+        if (selection == null) {
+            item(key = "debt-shortcuts", contentType = "debt-shortcuts") {
+                DebtShortcuts(actions.onLoan, actions.onDebts, Modifier.padding(start = Space.x2, end = Space.x2, top = Space.x1))
+            }
         }
         if (pendingCount > 0) {
             item(key = "pending", contentType = "pending") {
@@ -708,6 +717,37 @@ fun AddEntryButton(onClick: () -> Unit, modifier: Modifier = Modifier, text: Str
         Icon(Icons.Outlined.Add, contentDescription = null, tint = colors.accent, modifier = Modifier.size(26.dp))
         Spacer(Modifier.width(Space.x1_5))
         Text(text, style = JkType.heading.copy(fontSize = 17.sp, fontWeight = FontWeight.Bold), color = colors.accent)
+    }
+}
+
+/** 首页“添加一条新记账”下面的两枚玻璃快捷入口：借出 / 借入（记账面板的借贷）与欠款 / 账单。 */
+@Composable
+fun DebtShortcuts(onLoan: () -> Unit, onDebts: () -> Unit, modifier: Modifier = Modifier) {
+    Row(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.x1)) {
+        ShortcutPill(Icons.Outlined.Handshake, "借出 / 借入", "借钱给别人、欠别人钱", onLoan, Modifier.weight(1f))
+        ShortcutPill(Icons.Outlined.ReceiptLong, "欠款 / 账单", "信用卡、花呗与借贷", onDebts, Modifier.weight(1f))
+    }
+}
+
+@Composable
+private fun ShortcutPill(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, subtitle: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val colors = Jk.colors
+    val press = rememberJkPress(0.97f)
+    Row(
+        modifier
+            .heightIn(min = 56.dp)
+            .pressScale(press)
+            .jkSurface(Jk.surfaces.card, Radius.card)
+            .clickable(interactionSource = press.interaction, indication = LocalIndication.current, role = Role.Button, onClick = onClick)
+            .padding(horizontal = Space.x1_5, vertical = Space.x1),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, contentDescription = null, tint = colors.accent, modifier = Modifier.size(22.dp))
+        Spacer(Modifier.width(Space.x1))
+        Column(Modifier.weight(1f)) {
+            Text(title, style = JkType.bodyStrong.copy(fontWeight = FontWeight.Bold), color = colors.textPrimary, maxLines = 1)
+            Text(subtitle, style = JkType.caption, color = colors.textTertiary, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+        }
     }
 }
 

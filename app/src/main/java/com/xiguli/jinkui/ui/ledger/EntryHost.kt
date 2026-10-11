@@ -28,6 +28,7 @@ import com.xiguli.jinkui.ui.components.JkRow
 import com.xiguli.jinkui.ui.components.JkSheet
 import com.xiguli.jinkui.ui.theme.JkType
 import com.xiguli.jinkui.ui.theme.Radius
+import kotlinx.coroutines.launch
 
 /**
  * “记一笔”面板、长按菜单与删除确认的状态。账本首页与日历分区共用一套，
@@ -40,6 +41,8 @@ class EntryHostState {
     var presetCategory by mutableStateOf<String?>(null)
     var template by mutableStateOf<LedgerTransaction?>(null)
     var initialTime by mutableStateOf<Long?>(null)
+    /** 1.4.0-alpha04：打开时直接进入借贷的某一类。 */
+    var loanAction by mutableStateOf<LoanAction?>(null)
     var confirmDelete by mutableStateOf<LedgerTransaction?>(null)
     var menuFor by mutableStateOf<LedgerTransaction?>(null)
     /** 多选模式（长按一行进入）：选中的流水 ID；null 表示不在多选模式。 */
@@ -58,10 +61,11 @@ class EntryHostState {
         selection = if (on) current + ids else current - ids.toSet()
     }
 
-    fun create(category: String? = null, from: LedgerTransaction? = null, time: Long? = null) {
+    fun create(category: String? = null, from: LedgerTransaction? = null, time: Long? = null, loan: LoanAction? = null) {
         presetCategory = category
         template = from
         initialTime = time
+        loanAction = loan
         creating = true
     }
 
@@ -71,6 +75,7 @@ class EntryHostState {
         presetCategory = null
         template = null
         initialTime = null
+        loanAction = null
     }
 
     /** 首页 / 日历用的那组行操作。 */
@@ -93,6 +98,7 @@ class EntryHostState {
         onDelete = { confirmDelete = it },
         onRowMenu = { menuFor = it },
         onPending = base.onPending,
+        onLoan = { create(loan = LoanAction.LEND) },
         selection = selection.takeIf { multiSelect },
         onSelectStart = { if (multiSelect) selection = setOf(it.id) else menuFor = it },
         onSelectToggle = { toggle(it.id) },
@@ -112,6 +118,7 @@ fun EntryHost(
     viewModel: LedgerViewModel,
 ) {
     val container = LocalContainer.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
     if (state.creating || state.editing != null) {
         EntrySheet(
             data = data,
@@ -133,6 +140,25 @@ fun EntryHost(
             onDelete = { tx ->
                 viewModel.delete(tx)
                 state.editing = null
+            },
+            initialLoan = state.loanAction,
+            onLoan = { r ->
+                scope.launch {
+                    try {
+                        val ledger = container.ledger
+                        if (r.action.principal) {
+                            ledger.createLoan(r.action.direction, r.person, r.accountId, r.amount, r.fundId, r.date, r.due, r.interest, r.note)
+                        } else {
+                            ledger.loanPayment(r.loanId!!, r.accountId!!, r.amount, r.interest, r.fundId, r.date, r.note)
+                        }
+                        state.close()
+                        container.messages.show("已记一笔${r.action.label} ${Money.format(r.amount + if (r.action.principal) 0 else r.interest)}")
+                    } catch (e: com.xiguli.jinkui.data.repo.LedgerInputException) {
+                        container.messages.show(e.message ?: "保存失败")
+                    } catch (e: Exception) {
+                        container.messages.show("保存失败：${e.message ?: "未知错误"}")
+                    }
+                }
             },
         )
     }

@@ -193,7 +193,7 @@ fun MeContent(ui: MeUi, actions: MeActions) {
         }
         Spacer(Modifier.height(Space.x2))
         RowGroup("记账助手") {
-            MeRow(MintGlyph.BILL, "欠款 / 账单", "信用卡、花呗账单与分期，借出借入，到期提醒", actions.onDebts)
+            MeRow(MintGlyph.BILL, "欠款 / 借贷", "借钱给别人、欠别人钱，信用卡与花呗账单、分期，到期提醒", actions.onDebts)
             JkDivider(inset = 56.dp)
             MeRow(MintGlyph.ADD_NOTE, "导入账单", "微信支付、支付宝、记账 App 账单或 CSV 表格", actions.onImport)
             JkDivider(inset = 56.dp)
@@ -222,7 +222,8 @@ private fun FeatureGrid(actions: MeActions) {
         Feature(MintGlyph.CATEGORY, "分类管理", actions.onCategories),
         Feature(MintGlyph.TAG, "标签", actions.onOrganize),
         Feature(MintGlyph.BACKUP, "备份", actions.onBackup),
-        Feature(MintGlyph.LOCK, "安全锁定", actions.onLock),
+        // 1.4.0-alpha04：借钱给别人 / 欠别人钱 / 信用卡账单放进宫格（原来的“安全锁定”在下面“其他 · 立即锁定”里仍然有）
+        Feature(MintGlyph.BILL, "欠款借贷", actions.onDebts),
         Feature(MintGlyph.SETTINGS, "更多设置", actions.onSettings),
     )
     Column(

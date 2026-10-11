@@ -124,6 +124,7 @@ fun LedgerAssetsScreen(
     onDebts: () -> Unit = {},
     onCredit: (String) -> Unit = {},
     onLoans: () -> Unit = {},
+    onNewLoan: (com.xiguli.jinkui.data.ledger.LoanDirection) -> Unit = {},
 ) {
     val container = LocalContainer.current
     val data by container.ledger.data.collectAsStateWithLifecycle()
@@ -132,7 +133,7 @@ fun LedgerAssetsScreen(
         val zone = java.time.ZoneId.systemDefault()
         com.xiguli.jinkui.data.ledger.DebtMath.overview(data, java.time.LocalDate.now(zone), zone).let { it.monthDue to (it.overdue > 0) }
     }
-    LedgerAssetsContent(ui, onBack, onAccounts, onDebts, onCredit, onLoans, monthDue.first, monthDue.second)
+    LedgerAssetsContent(ui, onBack, onAccounts, onDebts, onCredit, onLoans, monthDue.first, monthDue.second, onNewLoan)
 }
 
 /**
@@ -150,6 +151,8 @@ fun LedgerAssetsContent(
     /** 欠款 / 账单入口上显示的本月待还（1.4）。 */
     monthDue: Long = 0L,
     overdue: Boolean = false,
+    /** 1.4.0-alpha04：“记借出 / 记借入”两个按钮。 */
+    onNewLoan: (com.xiguli.jinkui.data.ledger.LoanDirection) -> Unit = {},
 ) {
     val colors = Jk.colors
     var hidden by rememberSaveable { mutableStateOf(false) }
@@ -228,6 +231,18 @@ fun LedgerAssetsContent(
                     Text(show(monthDue), style = JkType.amount.copy(fontWeight = FontWeight.Bold), color = if (overdue) colors.expense else colors.textPrimary)
                 }
                 Icon(Icons.Outlined.ChevronRight, contentDescription = null, tint = colors.textTertiary, modifier = Modifier.size(18.dp))
+            }
+            // 1.4.0-alpha04：借钱给别人 / 向别人借钱，在资产页也能直接记
+            Spacer(Modifier.height(Space.x1))
+            Row(horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(Space.x1)) {
+                com.xiguli.jinkui.ui.components.JkButton(
+                    "记借出（别人欠我）", { onNewLoan(com.xiguli.jinkui.data.ledger.LoanDirection.LEND) },
+                    style = com.xiguli.jinkui.ui.components.ButtonStyle.Secondary, compact = true, modifier = Modifier.weight(1f),
+                )
+                com.xiguli.jinkui.ui.components.JkButton(
+                    "记借入（我欠别人）", { onNewLoan(com.xiguli.jinkui.data.ledger.LoanDirection.BORROW) },
+                    style = com.xiguli.jinkui.ui.components.ButtonStyle.Secondary, compact = true, modifier = Modifier.weight(1f),
+                )
             }
             if (ui.loans.isNotEmpty()) {
                 Spacer(Modifier.height(Space.x2))

@@ -32,6 +32,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -120,13 +121,19 @@ class DebtOverviewActions(
     val onLoans: () -> Unit = {},
     val onItem: (DueItem) -> Unit = {},
     val onAccounts: () -> Unit = {},
+    /** 1.4.0-alpha04：空状态与“借贷”一节里的“记一笔借出 / 借入”。 */
+    val onNewLoan: (LoanDirection) -> Unit = {},
+    /** 1.4.0-alpha04：添加信用卡（打开“添加账户”，种类预选信用卡）。 */
+    val onAddCredit: () -> Unit = {},
 )
 
 @Composable
-fun DebtOverviewScreen(onBack: () -> Unit, onCredit: (String) -> Unit, onLoans: () -> Unit, onAccounts: () -> Unit) {
+fun DebtOverviewScreen(onBack: () -> Unit, onCredit: (String) -> Unit, onLoans: () -> Unit, onAccounts: () -> Unit, onAddCredit: () -> Unit = onAccounts) {
     val container = LocalContainer.current
     val viewModel = jkViewModel { DebtViewModel(container) }
     val ui by viewModel.ui.collectAsStateWithLifecycle()
+    val data by container.ledger.data.collectAsStateWithLifecycle()
+    var newLoan by remember { mutableStateOf<LoanDirection?>(null) }
     DebtOverviewContent(
         ui,
         DebtOverviewActions(
@@ -135,8 +142,46 @@ fun DebtOverviewScreen(onBack: () -> Unit, onCredit: (String) -> Unit, onLoans: 
             onLoans = onLoans,
             onAccounts = onAccounts,
             onItem = { item -> if (item.kind == DueKind.LOAN) onLoans() else onCredit(item.accountId) },
+            onNewLoan = { newLoan = it },
+            onAddCredit = onAddCredit,
         ),
     )
+    newLoan?.let { direction ->
+        NewLoanSheet(
+            people = data.accounts.filter { LoanDirection.of(it.kind) != null },
+            funds = fundAccounts(data),
+            today = ui.today,
+            initialDirection = direction,
+            onDismiss = { newLoan = null },
+        ) { d, person, accountId, amount, fundId, date, due, interest, note ->
+            viewModel.run("已记一笔${d.label} ${Money.format(amount)}", { newLoan = null }) {
+                container.ledger.createLoan(d, person, accountId, amount, fundId, date, due, interest, note)
+            }
+        }
+    }
+}
+
+/** 第一次打开（没有信用账户、也没有任何借贷）：说明这里能记什么，三个按钮直接开始。 */
+@Composable
+fun DebtEmptyState(actions: DebtOverviewActions, modifier: Modifier = Modifier) {
+    val colors = Jk.colors
+    BotanicalCard(modifier.fillMaxWidth(), layout = BotanicalLayout.SPRIG) {
+        Column(Modifier.padding(Space.x2_5)) {
+            Text("还没有欠款与借贷", style = JkType.section, color = colors.textPrimary, modifier = Modifier.semantics { heading() })
+            Spacer(Modifier.height(Space.x05))
+            Text(
+                "借钱给别人、向别人借钱，或者信用卡 / 花呗的账单与分期，都记在这里。到期前会在账本首页提醒；全部只存在本机加密库里。",
+                style = JkType.small,
+                color = colors.textSecondary,
+            )
+            Spacer(Modifier.height(Space.x2))
+            JkButton("记一笔借出", { actions.onNewLoan(LoanDirection.LEND) }, modifier = Modifier.fillMaxWidth())
+            Spacer(Modifier.height(Space.x1))
+            JkButton("记一笔借入", { actions.onNewLoan(LoanDirection.BORROW) }, style = ButtonStyle.Secondary, modifier = Modifier.fillMaxWidth())
+            Spacer(Modifier.height(Space.x1))
+            JkButton("添加信用卡", actions.onAddCredit, style = ButtonStyle.Secondary, modifier = Modifier.fillMaxWidth())
+        }
+    }
 }
 
 /**
@@ -157,6 +202,16 @@ fun DebtOverviewContent(ui: DebtOverview, actions: DebtOverviewActions) {
                 .navigationBarsPadding()
                 .padding(bottom = Space.x4),
         ) {
+            if (ui.credits.isEmpty() && ui.loans.isEmpty()) {
+                DebtEmptyState(actions)
+                Text(
+                    "信用卡、花呗、白条请添加种类为“信用卡”的账户，设好账单日与还款日后，这里会算出每期应还与已还。",
+                    style = JkType.caption,
+                    color = colors.textTertiary,
+                    modifier = Modifier.padding(horizontal = Space.x05, vertical = Space.x2),
+                )
+                return@Column
+            }
             BotanicalCard(Modifier.fillMaxWidth(), layout = BotanicalLayout.SPRIG) {
                 // 1.4.0-alpha02：头图是全部欠款（信用账户欠款 + 借入待还），不只是本月到期的；本月待还 / 逾期 / 待收在下面
                 Column(Modifier.padding(Space.x2_5)) {
@@ -210,7 +265,12 @@ fun DebtOverviewContent(ui: DebtOverview, actions: DebtOverviewActions) {
                 Spacer(Modifier.height(Space.x1_5))
             }
 
-            DebtSection("借贷") { DebtLink("全部借贷", actions.onLoans) }
+            DebtSection("借贷") {
+                Row {
+                    DebtLink("记一笔", { actions.onNewLoan(LoanDirection.LEND) })
+                    DebtLink("全部借贷", actions.onLoans)
+                }
+            }
             JkCard(Modifier.fillMaxWidth(), padding = PaddingValues(vertical = Space.x1)) {
                 Row(Modifier.padding(horizontal = Space.x2, vertical = Space.x1)) {
                     HeroFigure("应收合计", Money.format(ui.receivable), colors.textPrimary, Modifier.weight(1f))
@@ -642,14 +702,14 @@ class LoanActions(
 )
 
 @Composable
-fun LoanListScreen(onBack: () -> Unit) {
+fun LoanListScreen(onBack: () -> Unit, startNew: LoanDirection? = null) {
     val container = LocalContainer.current
     val viewModel = jkViewModel { DebtViewModel(container) }
     val ui by viewModel.ui.collectAsStateWithLifecycle()
     val data by container.ledger.data.collectAsStateWithLifecycle()
     var settled by rememberSaveable { mutableStateOf(false) }
     var opened by remember { mutableStateOf<String?>(null) }
-    var creating by remember { mutableStateOf(false) }
+    var creating by remember { mutableStateOf(startNew != null) }
     var sheet by remember { mutableStateOf<String?>(null) }
     val today = ui.today
     val ledger = container.ledger
@@ -659,6 +719,7 @@ fun LoanListScreen(onBack: () -> Unit) {
             people = data.accounts.filter { LoanDirection.of(it.kind) != null },
             funds = fundAccounts(data),
             today = today,
+            initialDirection = startNew ?: LoanDirection.LEND,
             onDismiss = { creating = false },
         ) { direction, person, accountId, amount, fundId, date, due, interest, note ->
             viewModel.run("已记一笔${direction.label} ${Money.format(amount)}", { creating = false }) {

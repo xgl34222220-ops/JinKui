@@ -14,6 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import com.xiguli.jinkui.data.ledger.LedgerBudget
 import com.xiguli.jinkui.data.ledger.LedgerRecurring
 import com.xiguli.jinkui.data.ledger.RecurFrequency
@@ -99,14 +100,18 @@ class MeScreenUiTest {
     fun meLightDarkAndFontScale() {
         var budget = false
         var locked = false
-        val light = show { MeContent(ui, MeActions(onBudget = { budget = true }, onLock = { locked = true })) }
+        var debts = false
+        val light = show { MeContent(ui, MeActions(onBudget = { budget = true }, onLock = { locked = true }, onDebts = { debts = true })) }
         compose.onNodeWithText("坚持记账的第 ${ui.days} 天").assertExists()
-        for (label in listOf("周期记账", "预算", "账户资产", "分类管理", "标签", "备份", "安全锁定", "更多设置")) {
+        for (label in listOf("周期记账", "预算", "账户资产", "分类管理", "标签", "备份", "欠款借贷", "更多设置")) {
             compose.onNodeWithText(label).assertExists()
         }
         compose.onNodeWithText("预算").performClick()
-        compose.onNodeWithText("安全锁定").performClick()
+        // 1.4.0-alpha04：宫格里的“欠款借贷”打开欠款 / 借贷；锁定在“其他 · 立即锁定”
+        compose.onNodeWithText("欠款借贷").performClick()
+        compose.onNodeWithText("立即锁定").performScrollTo().performClick()
         assertTrue(budget)
+        assertTrue(debts)
         assertTrue(locked)
         snapshot(light, "me-light")
         val dark = show(dark = true) { MeContent(ui, MeActions()) }

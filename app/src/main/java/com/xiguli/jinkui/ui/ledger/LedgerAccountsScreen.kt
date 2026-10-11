@@ -119,13 +119,14 @@ class LedgerAccountsViewModel(private val container: AppContainer) : ViewModel()
 }
 
 @Composable
-fun LedgerAccountsScreen(onBack: () -> Unit, onDebt: (LedgerAccount) -> Unit = {}) {
+fun LedgerAccountsScreen(onBack: () -> Unit, onDebt: (LedgerAccount) -> Unit = {}, startNew: AccountKind? = null) {
     val container = LocalContainer.current
     val viewModel = jkViewModel { LedgerAccountsViewModel(container) }
     val ui by viewModel.ui.collectAsStateWithLifecycle()
     val cards by container.repository.cards.collectAsStateWithLifecycle()
     val colors = Jk.colors
-    var editing by remember { mutableStateOf<LedgerAccount?>(null) }
+    // 1.4.0-alpha04：从“欠款 / 账单”的“添加信用卡”进来时，直接打开“添加账户”，种类预选好
+    var editing by remember { mutableStateOf(startNew?.let { LedgerAccount(LedgerIds.newId(), "", it) }) }
 
     LedgerAccountsContent(
         ui = ui,

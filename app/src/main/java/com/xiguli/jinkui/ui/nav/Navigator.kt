@@ -42,6 +42,10 @@ sealed interface Screen {
     data class CreditStatement(val accountId: String) : Screen
     /** 借贷列表（1.4 起）。 */
     data object Loans : Screen
+    /** 1.4.0-alpha04：借贷列表并直接打开“记一笔借出 / 借入”。 */
+    data class LoansNew(val direction: com.xiguli.jinkui.data.ledger.LoanDirection) : Screen
+    /** 1.4.0-alpha04：账户管理并直接打开“添加账户”（种类预选信用卡）。 */
+    data object LedgerAddCredit : Screen
 }
 
 /** 首页底部悬浮栏的五个分区（1.1 起）：账本是首页；卡包保留全部卡片功能。 */
