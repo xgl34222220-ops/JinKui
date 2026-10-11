@@ -18,15 +18,21 @@
     <!-- 1.4：账单到期提醒的系统通知（默认关闭，打开开关时才向用户申请；Android 13 起需要） -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!--
+        1.4.0-alpha04：图标资源改名为 ic_launcher_b / ic_launcher_b_round（内容就是 B 款）。仓库与 APK 里本来就没有旧“匣子”图标，
+        但部分系统（HyperOS 的指纹解锁弹窗、桌面）按图标资源 ID 缓存应用图标，覆盖安装后仍显示旧图；
+        换成新的资源名会得到新的资源 ID，系统缓存随之失效。应用、主界面、logo 三处都指向同一套 B 款图标。
+    -->
     <application
         android:name=".JinKuiApp"
         android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:enableOnBackInvokedCallback="true"
         android:fullBackupContent="false"
-        android:icon="@mipmap/ic_launcher"
+        android:icon="@mipmap/ic_launcher_b"
         android:label="@string/app_name"
-        android:roundIcon="@mipmap/ic_launcher_round"
+        android:logo="@mipmap/ic_launcher_b"
+        android:roundIcon="@mipmap/ic_launcher_b_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.JinKui"
         tools:targetApi="34">
@@ -35,6 +41,8 @@
             android:name=".MainActivity"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|uiMode|density|fontScale"
             android:exported="true"
+            android:icon="@mipmap/ic_launcher_b"
+            android:roundIcon="@mipmap/ic_launcher_b_round"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

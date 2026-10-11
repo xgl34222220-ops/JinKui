@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
     状态栏小图标（1.4.0-alpha03）：B 款桌面图标的单色剪影——后面一张带账目的账页、前面一张实心卡片、右上一片小叶。
-    状态栏只取透明度，所以全部用白色。由 ic_launcher_monochrome 的同一组图形裁到 66dp 安全区再放大，笔画加粗。金匮原创，手写矢量。
+    状态栏只取透明度，所以全部用白色。由 ic_launcher_b_monochrome 的同一组图形裁到 66dp 安全区再放大，笔画加粗。金匮原创，手写矢量。
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"

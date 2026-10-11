@@ -116,8 +116,8 @@ fun BrandMark(size: Dp = 64.dp, modifier: Modifier = Modifier) {
         contentAlignment = Alignment.Center,
     ) {
         // 自适应图标的 108dp 画布里只有中间 72dp 可见：放大 1.5 倍后裁到形状里
-        Image(painterResource(R.drawable.ic_launcher_background), contentDescription = null, modifier = Modifier.requiredSize(size * 1.5f))
-        Image(painterResource(R.drawable.ic_launcher_foreground), contentDescription = null, modifier = Modifier.requiredSize(size * 1.5f))
+        Image(painterResource(R.drawable.ic_launcher_b_background), contentDescription = null, modifier = Modifier.requiredSize(size * 1.5f))
+        Image(painterResource(R.drawable.ic_launcher_b_foreground), contentDescription = null, modifier = Modifier.requiredSize(size * 1.5f))
     }
 }
 

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- 金匮 1.3 图标（方案 B）：薄荷渐变背景 + 两张磨砂玻璃卡片与小叶子；Android 13 起支持主题图标（monochrome）。 -->
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-    <background android:drawable="@drawable/ic_launcher_background" />
-    <foreground android:drawable="@drawable/ic_launcher_foreground" />
-    <monochrome android:drawable="@drawable/ic_launcher_monochrome" />
+    <background android:drawable="@drawable/ic_launcher_b_background" />
+    <foreground android:drawable="@drawable/ic_launcher_b_foreground" />
+    <monochrome android:drawable="@drawable/ic_launcher_b_monochrome" />
 </adaptive-icon>
