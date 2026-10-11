@@ -158,16 +158,24 @@ fun DebtOverviewContent(ui: DebtOverview, actions: DebtOverviewActions) {
                 .padding(bottom = Space.x4),
         ) {
             BotanicalCard(Modifier.fillMaxWidth(), layout = BotanicalLayout.SPRIG) {
+                // 1.4.0-alpha02：头图是全部欠款（信用账户欠款 + 借入待还），不只是本月到期的；本月待还 / 逾期 / 待收在下面
                 Column(Modifier.padding(Space.x2_5)) {
-                    Text("本月待还(元)", style = JkType.small.copy(fontWeight = FontWeight.Medium), color = colors.textSecondary)
+                    Text("欠款合计(元)", style = JkType.small.copy(fontWeight = FontWeight.Medium), color = colors.textSecondary)
                     Text(
-                        Money.format(ui.monthDue, symbol = false),
+                        Money.format(ui.totalDebt, symbol = false),
                         style = JkType.amountHero.copy(fontSize = 32.sp),
                         color = if (ui.overdue > 0) colors.expense else colors.textPrimary,
                         maxLines = 1,
                     )
+                    Text(
+                        "信用账户 ${Money.format(ui.creditDebt)} · 借入待还 ${Money.format(ui.payable)}",
+                        style = JkType.caption,
+                        color = colors.textTertiary,
+                        maxLines = 1,
+                    )
                     Spacer(Modifier.height(Space.x1))
                     Row(horizontalArrangement = Arrangement.spacedBy(Space.x3)) {
+                        HeroFigure("本月待还", Money.format(ui.monthDue), colors.textPrimary)
                         HeroFigure("其中逾期", Money.format(ui.overdue), if (ui.overdue > 0) colors.expense else colors.textPrimary)
                         HeroFigure("本月待收", Money.format(ui.monthReceivable), colors.textPrimary)
                     }
@@ -178,7 +186,8 @@ fun DebtOverviewContent(ui: DebtOverview, actions: DebtOverviewActions) {
             JkCard(Modifier.fillMaxWidth(), padding = PaddingValues(vertical = Space.x05)) {
                 if (ui.items.isEmpty()) {
                     Text(
-                        "没有待还的账单。给信用账户设好账单日、给借贷填上预计还款日，到期前会在这里列出。",
+                        if (ui.totalDebt > 0 || ui.receivable > 0) "近期没有到期的账单。没填预计还款日的借贷列在下面的“借贷”里；给借贷填上预计还款日、给信用账户设好账单日，到期前会在这里列出。"
+                        else "没有待还的账单。给信用账户设好账单日、给借贷填上预计还款日，到期前会在这里列出。",
                         style = JkType.small,
                         color = colors.textTertiary,
                         modifier = Modifier.padding(Space.x2),
@@ -269,20 +278,43 @@ private fun CreditCard(view: CreditView, today: LocalDate, onClick: () -> Unit) 
                 Text(view.account.name, style = JkType.bodyStrong.copy(fontWeight = FontWeight.Bold), color = colors.textPrimary, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
                     when {
-                        view.settings == null -> "未设置账单日"
+                        view.settings == null -> "设置账单日 ›"
                         latest == null || latest.cleared -> "已还清"
                         else -> dueLabel(latest.dueDate, today)
                     },
                     style = JkType.caption.copy(fontWeight = FontWeight.Bold),
-                    color = if (overdue) colors.expense else colors.textTertiary,
+                    color = when {
+                        overdue -> colors.expense
+                        view.settings == null -> colors.accent
+                        else -> colors.textTertiary
+                    },
                 )
             }
             Spacer(Modifier.height(Space.x1_5))
-            DebtFigures(
-                Triple("本期剩余", Money.format(latest?.remaining ?: 0L), if (overdue) colors.expense else null),
-                Triple("未出账单", Money.format(view.open?.amount ?: 0L), null),
-                Triple(if (view.available != null) "可用额度" else "已用额度", Money.format(view.available ?: view.used), if ((view.available ?: 0L) < 0) colors.expense else null),
-            )
+            if (view.settings == null) {
+                // 没设账单日也照样显示欠款，不让它“消失”
+                DebtFigures(
+                    Triple("当前欠款", Money.format(view.debt), if (view.debt > 0) colors.expense else null),
+                    Triple("账单", "未设置", null),
+                    Triple("可用额度", view.available?.let { Money.format(it) } ?: "—", null),
+                )
+                Spacer(Modifier.height(Space.x05))
+                Text("还没有账单日与还款日：点这里设置后按流水算出每期账单。", style = JkType.caption, color = colors.textTertiary)
+            } else {
+                DebtFigures(
+                    Triple("本期剩余", Money.format(latest?.remaining ?: 0L), if (overdue) colors.expense else null),
+                    Triple("未出账单", Money.format(view.open?.amount ?: 0L), null),
+                    Triple("当前欠款", Money.format(view.debt), null),
+                )
+                if (view.defaulted) {
+                    Spacer(Modifier.height(Space.x05))
+                    Text(
+                        "默认 · 每月 ${view.settings?.statementDay} 号出账、${view.settings?.dueDay} 号还款，可在账单设置里修改",
+                        style = JkType.caption,
+                        color = colors.textTertiary,
+                    )
+                }
+            }
             view.settings?.limit?.takeIf { it > 0 }?.let { limit ->
                 Spacer(Modifier.height(Space.x1_5))
                 DebtBar(view.used.toFloat() / limit, danger = view.used > limit)
@@ -332,7 +364,7 @@ fun CreditStatementScreen(accountId: String, onBack: () -> Unit) {
     )
     val ledger = container.ledger
     when (sheet) {
-        "settings" -> CreditSettingsSheet(view.account, today, { sheet = null }) { settings ->
+        "settings" -> CreditSettingsSheet(view.account, today, { sheet = null }, initial = view.settings) { settings ->
             viewModel.run(if (settings == null) "已清除账单设置" else "已保存账单设置", { sheet = null }) { ledger.saveCreditSettings(accountId, settings) }
         }
         "repay" -> RepaySheet(view.account, view.latest?.remaining ?: 0L, view.used, fundAccounts(data), today, { sheet = null }) { from, amount, date ->
@@ -378,6 +410,15 @@ fun CreditStatementContent(view: CreditView, today: LocalDate, actions: CreditAc
                     Text("设好账单日与还款日后，按流水算出每期账单的应还、已还与到期日；也可以在这里记分期。", style = JkType.small, color = colors.textTertiary)
                     Spacer(Modifier.height(Space.x1_5))
                     JkButton("设置账单日与还款日", actions.onSettings, modifier = Modifier.fillMaxWidth())
+                }
+                Spacer(Modifier.height(Space.x2))
+            } else if (view.defaulted) {
+                JkCard(Modifier.fillMaxWidth()) {
+                    Text("默认账单日：每月 ${view.settings?.statementDay} 号出账、${view.settings?.dueDay} 号还款", style = JkType.bodyStrong, color = colors.textPrimary)
+                    Spacer(Modifier.height(Space.x05))
+                    Text("与一木记账一样按花呗的默认日期算出账单；不对的话改成你自己的账单日与还款日。", style = JkType.small, color = colors.textTertiary)
+                    Spacer(Modifier.height(Space.x1_5))
+                    JkButton("修改账单日", actions.onSettings, style = ButtonStyle.Secondary, modifier = Modifier.fillMaxWidth())
                 }
                 Spacer(Modifier.height(Space.x2))
             }

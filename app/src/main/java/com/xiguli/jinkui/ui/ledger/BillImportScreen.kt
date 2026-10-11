@@ -677,6 +677,16 @@ fun BillPreviewContent(preview: ImportPreview, data: LedgerData, saving: Boolean
                     GroupsCard(groups, actions)
                 }
             }
+            debtLine(preview.creditAccountCount, preview.loanAccountCount)?.let { line ->
+                item(key = "debts", contentType = "debts") {
+                    Text(
+                        line,
+                        style = JkType.small,
+                        color = colors.textSecondary,
+                        modifier = Modifier.padding(start = Space.x05, top = Space.x1_5, end = Space.x05),
+                    )
+                }
+            }
             for (group in groups) {
                 val rows = preview.candidates.filter { it.klass == group.klass }
                 if (grouped) {
@@ -939,6 +949,8 @@ fun BillImportDone(result: ImportResult, onFinish: () -> Unit, onAgain: () -> Un
                     add("支出 ${result.expenseCount} 笔" to Money.format(result.expenseTotal))
                     add("收入 ${result.incomeCount} 笔" to Money.format(result.incomeTotal))
                     if (result.transferCount > 0) add("转账 / 借贷 / 校准（不计收支）" to "${result.transferCount} 笔")
+                    if (result.creditAccounts > 0) add("识别到信用账户" to "${result.creditAccounts} 个")
+                    if (result.loanAccounts > 0) add("识别到借贷对象" to "${result.loanAccounts} 个")
                     if (result.unchecked > 0) add("没有勾选" to "${result.unchecked} 笔")
                     if (result.alreadyImported > 0) add("以前导入过" to "${result.alreadyImported} 笔")
                     for ((reason, n) in result.skipped) add(reason.label to "$n 笔")
@@ -1026,3 +1038,13 @@ private fun Modifier.bottomFade(scroll: androidx.compose.foundation.ScrollState)
             )
         }
     }
+
+/** 预览里“认出了哪些欠款”的一句话；都没有时为 null。 */
+internal fun debtLine(credits: Int, loans: Int): String? {
+    if (credits <= 0 && loans <= 0) return null
+    val parts = listOfNotNull(
+        credits.takeIf { it > 0 }?.let { "$it 个信用账户" },
+        loans.takeIf { it > 0 }?.let { "$it 个借贷对象" },
+    )
+    return "识别到欠款：${parts.joinToString("、")}，导入后在“欠款 / 账单”里查看。"
+}

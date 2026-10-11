@@ -71,9 +71,10 @@ fun CreditSettingsSheet(
     account: LedgerAccount,
     today: LocalDate,
     onDismiss: () -> Unit,
+    /** 预填的设置：默认是账户上存的；花呗没设时传默认值（每月 1 号 / 10 号）。 */
+    initial: CreditSettings? = account.credit,
     onSave: (CreditSettings?) -> Unit,
 ) {
-    val initial = account.credit
     var limit by remember { mutableStateOf(initial?.limit?.takeIf { it > 0 }?.let(Money::plain) ?: "") }
     var statement by remember { mutableStateOf(initial?.statementDay?.toString() ?: "") }
     var mode by remember { mutableStateOf(initial?.dueMode ?: DueMode.DAY_OF_MONTH) }
@@ -109,7 +110,7 @@ fun CreditSettingsSheet(
         }
         Spacer(Modifier.height(Space.x2))
         Row(horizontalArrangement = Arrangement.spacedBy(Space.x1)) {
-            if (initial != null) {
+            if (account.credit != null) {
                 JkButton("清除设置", { onSave(null) }, style = ButtonStyle.Danger, modifier = Modifier.weight(1f))
             }
             JkButton("保存", {
