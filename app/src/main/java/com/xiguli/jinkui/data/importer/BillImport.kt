@@ -34,10 +34,10 @@ enum class CandidateFlag {
  */
 enum class ImportClass(val label: String, val hint: String) {
     NORMAL("收支", "按类别归到金匮的分类，计入统计"),
-    CREDIT("花呗消费", "记到“花呗”信用账户，欠款在资产里看得到"),
+    CREDIT("信用消费", "花呗、信用卡、白条上的消费：记到对应的信用账户，欠款与账单在“欠款 / 账单”里看得到"),
     FEE("手续费", "转账、提现手续费，记为其他支出"),
     INTERNAL("内部转账", "自己账户之间挪钱（余额宝转入、理财、提现），记为转账，不计收支"),
-    LOAN("借贷往来", "借出记到“借出款（应收）”，借入记到“借入款（应付）”，不计收支"),
+    LOAN("借贷往来", "借出、收款记到对方的应收账户，借入、还款记到对方的应付账户，在“欠款 / 账单 · 借贷”里看得到，不计收支"),
     ADJUSTMENT("余额校准", "原 App 的“账户余额补齐”，不是收入或支出。默认不导入；打开即“用作账户余额校准”：只改账户余额，不计收支"),
 }
 
@@ -83,8 +83,22 @@ data class ImportPreview(
     val fileName: String = "",
     /** 记账 App 导出：按原 App 的“类别 / 二级分类”一比一新建的分类（账本里还没有同名的才建）。 */
     val newCategories: List<LedgerCategory> = emptyList(),
+    /** 1.4.0-alpha02：预览用到的全部账户（已有的 + 要新建的）的种类，用来数认出了几个信用账户、几个借贷对象。 */
+    val accountKinds: Map<String, AccountKind> = emptyMap(),
 ) {
     val selected: List<ImportCandidate> get() = candidates.filter { it.checked }
+
+    private fun touched(kinds: Set<AccountKind>): Int {
+        val ids = HashSet<String>()
+        selected.forEach { c -> listOfNotNull(c.accountId, c.toAccountId).filterTo(ids) { accountKinds[it] in kinds } }
+        return ids.size
+    }
+
+    /** 被勾选的流水认出的信用账户（花呗、信用卡、白条）个数。 */
+    val creditAccountCount: Int get() = touched(setOf(AccountKind.CREDIT))
+
+    /** 被勾选的流水认出的借贷对象（应收 / 应付账户）个数。 */
+    val loanAccountCount: Int get() = touched(setOf(AccountKind.RECEIVABLE, AccountKind.PAYABLE))
     val expenseTotal: Long get() = selected.filter { it.txType == TxType.EXPENSE }.sumOf { it.record.amount }
     val incomeTotal: Long get() = selected.filter { it.txType == TxType.INCOME }.sumOf { it.record.amount }
 
@@ -147,6 +161,9 @@ data class ImportResult(
     val balanceChanges: List<BalanceChange> = emptyList(),
     /** 这次导入的批次，用于“撤销本次导入”。 */
     val batchId: String? = null,
+    /** 1.4.0-alpha02：这次导入认出的信用账户与借贷对象个数（“欠款 / 账单”里会列出）。 */
+    val creditAccounts: Int = 0,
+    val loanAccounts: Int = 0,
 )
 
 /** 账单导入的预览与落账计算。纯函数，便于测试。 */
@@ -185,9 +202,9 @@ object BillImport {
         return when {
             "账户余额补齐" in note || "余额补齐" in note -> ImportClass.ADJUSTMENT
             move(r) != null -> ImportClass.INTERNAL
-            sub == "借出" || sub == "借入" -> ImportClass.LOAN
+            sub in LOAN_ITEMS -> ImportClass.LOAN
             "手续费" in note || sub == "手续费" -> ImportClass.FEE
-            "花呗" in r.method -> ImportClass.CREDIT
+            isCredit(r.method) -> ImportClass.CREDIT
             else -> ImportClass.NORMAL
         }
     }
@@ -200,10 +217,24 @@ object BillImport {
             "余额宝-转出" in note || "余额宝-单次转出" in note || "余额宝转出" in note -> Move.FROM_YUEBAO
             sub == "理财支出" -> Move.TO_INVEST
             "提现" in note && "手续费" !in note -> Move.WITHDRAW
-            "还款" in note && ("花呗" in note || "信用卡" in note) -> Move.REPAY_CREDIT
+            "还款" in note && CREDIT_WORDS.any { it in note } -> Move.REPAY_CREDIT
             else -> null
         }
     }
+
+    /** 账户名 / 支付方式里出现这些字就是信用账户（1.4.0-alpha02 起不只花呗）。 */
+    val CREDIT_WORDS = listOf("花呗", "信用卡", "白条", "月付", "信用购")
+
+    fun isCredit(name: String): Boolean = CREDIT_WORDS.any { it in name }
+
+    /**
+     * 一木记账借贷的二级分类：借出 / 借入是本金，收款（收债）/ 还款（还债）是对方还我 / 我还对方。
+     * 只看二级分类，备注里带“还款”的普通支出（例如贷款还款）不算。
+     */
+    private val LOAN_ITEMS = setOf("借出", "借入", "收款", "收债", "还款", "还债")
+
+    /** 借贷这一笔是不是本金（借出 / 借入）；否则是收款 / 还款。 */
+    private fun loanPrincipal(r: BillRecord): Boolean = r.item.trim() == "借出" || r.item.trim() == "借入"
 
     /**
      * 导入要用到的账户：已有的按种类 / 名字找，没有的才新建（只建一次，记在 [created]）。
@@ -240,7 +271,34 @@ object BillImport {
             val name = person?.let { "借入 · $it" } ?: "借入款（应付）"
             return findOrCreate({ it.kind == AccountKind.PAYABLE && it.name == name }) { new(name, AccountKind.PAYABLE) }
         }
+        /**
+         * 收款 / 还款认不出对方时，用备注里出现的已有对方（“小李子还钱” → “借出 · 小李子”）；
+         * 都没有时返回 null（记到“借出款（应收）”/“借入款（应付）”）。
+         */
+        fun knownPerson(note: String, kind: AccountKind, inFile: Collection<String> = emptyList()): String? = (all
+            .filter { it.kind == kind }
+            .map { com.xiguli.jinkui.data.ledger.DebtMath.personOf(it) } + inFile)
+            .filter { it.length >= 2 && it != "借出款（应收）" && it != "借入款（应付）" && it in note }
+            .maxByOrNull { it.length }
+
         fun huabei() = findOrCreate({ "花呗" in it.name && it.kind.countsInAssets }) { new("花呗", AccountKind.CREDIT) }
+
+        /** 信用账户：花呗归“花呗”，其他按名字（“招商银行信用卡”“京东白条”）一张卡一个账户。 */
+        fun credit(name: String): String {
+            if ("花呗" in name) return huabei()
+            val clean = name.trim().take(20).ifEmpty { "信用卡" }
+            return findOrCreate({ it.kind == AccountKind.CREDIT && (it.name == clean || (it.name.length >= 2 && clean.contains(it.name))) }) { new(clean, AccountKind.CREDIT) }
+        }
+
+        /** “还款”备注里还的是哪个信用账户：花呗；名字出现在备注里的已有信用账户；否则唯一的那张信用卡 / 新建“信用卡”。 */
+        fun creditFromNote(note: String): String {
+            if ("花呗" in note) return huabei()
+            all.firstOrNull { it.kind == AccountKind.CREDIT && it.name.length >= 2 && note.contains(it.name) }?.let { return it.id }
+            val others = all.filter { it.kind == AccountKind.CREDIT && !it.archived && "花呗" !in it.name }
+            if (others.size == 1) return others.first().id
+            val word = CREDIT_WORDS.firstOrNull { it in note } ?: "信用卡"
+            return credit(word)
+        }
         fun bank() = findOrCreate({ it.kind == AccountKind.BANK }) { new("银行卡", AccountKind.BANK) }
         fun adjust() = findOrCreate({ it.kind == AccountKind.ADJUST }) { new("余额调整", AccountKind.ADJUST, archived = true) }
 
@@ -248,6 +306,7 @@ object BillImport {
         fun named(name: String): String? {
             if (name.isBlank()) return null
             if ("花呗" in name) return huabei()
+            if (isCredit(name)) return credit(name)
             all.filter { it.kind.countsInAssets && it.name.length >= 2 }.firstOrNull { name.contains(it.name) || it.name.contains(name) }?.let { return it.id }
             return when {
                 "支付宝" in name -> alipay()
@@ -437,6 +496,14 @@ object BillImport {
         val legacyAccounts = data.accounts + listOfNotNull(legacyCreated)
         var already = 0
         val candidates = ArrayList<ImportCandidate>()
+        // 同一份账单里借出 / 借入认出的对方：收款 / 还款可能排在本金前面（一木按时间倒序导出），先收集一遍
+        val lentPeople = HashSet<String>()
+        val borrowedPeople = HashSet<String>()
+        if (app) for (r in parsed.records) {
+            if (classify(r) != ImportClass.LOAN || !loanPrincipal(r)) continue
+            val person = counterparty(r.note) ?: continue
+            if (r.item.trim() == "借出") lentPeople += person else borrowedPeople += person
+        }
         for (r in parsed.records) {
             val id = transactionId(r)
             if (id in existingIds) {
@@ -457,18 +524,27 @@ object BillImport {
             var to: String? = null
             when (klass) {
                 ImportClass.NORMAL, ImportClass.FEE -> Unit
-                ImportClass.CREDIT -> from = pool.huabei()
+                ImportClass.CREDIT -> from = pool.credit(r.method)
                 ImportClass.ADJUSTMENT -> if (r.type == TxType.INCOME) { from = pool.adjust(); to = base } else { to = pool.adjust() }
                 ImportClass.LOAN -> {
-                    val person = counterparty(r.note)
-                    if (r.item.trim() == "借出") { to = pool.lent(person) } else { from = pool.borrowed(person); to = base }
+                    val principal = loanPrincipal(r)
+                    // 本金：支出是借出，收入是借入；收款 / 还款：收入是对方还我（应收减少），支出是我还对方（应付减少）
+                    val lend = if (principal) r.item.trim() == "借出" else r.type == TxType.INCOME
+                    val kind = if (lend) AccountKind.RECEIVABLE else AccountKind.PAYABLE
+                    val person = counterparty(r.note) ?: if (principal) null else pool.knownPerson(r.note, kind, if (lend) lentPeople else borrowedPeople)
+                    when {
+                        principal && lend -> to = pool.lent(person)
+                        principal -> { from = pool.borrowed(person); to = base }
+                        lend -> { from = pool.lent(person); to = base }
+                        else -> to = pool.borrowed(person)
+                    }
                 }
                 ImportClass.INTERNAL -> when (move(r)) {
                     Move.TO_YUEBAO -> { from = pool.alipay(); to = pool.yuebao() }
                     Move.FROM_YUEBAO -> { from = pool.yuebao(); to = pool.alipay() }
                     Move.TO_INVEST -> to = pool.invest()
                     Move.WITHDRAW -> { from = if (base == pool.defaultId) pool.wechat() else base; to = pool.bank() }
-                    Move.REPAY_CREDIT -> to = pool.huabei()
+                    Move.REPAY_CREDIT -> to = pool.creditFromNote(r.note)
                     null -> Unit
                 }
             }
@@ -492,7 +568,8 @@ object BillImport {
             )
         }
         val created = if (app) pool.created.toList() else listOfNotNull(legacyCreated)
-        return ImportPreview(parsed.source, candidates, parsed.skipped, already, created, fallback, fileName, cats.created.toList())
+        val kinds = (data.accounts + created).associate { it.id to it.kind }
+        return ImportPreview(parsed.source, candidates, parsed.skipped, already, created, fallback, fileName, cats.created.toList(), kinds)
     }
 
     /** 勾选的行 → 流水。备注是“交易对方 · 商品”（记账 App 用它自己的备注，借贷的对方也在里面）。 */
@@ -547,7 +624,15 @@ object BillImport {
         transferCount = imported.count { it.type == TxType.TRANSFER },
         balanceChanges = before?.let { balanceChanges(it, imported, preview.newAccounts) }.orEmpty(),
         batchId = batchId,
+        creditAccounts = touchedOf(imported, preview, setOf(AccountKind.CREDIT)),
+        loanAccounts = touchedOf(imported, preview, setOf(AccountKind.RECEIVABLE, AccountKind.PAYABLE)),
     )
+
+    private fun touchedOf(imported: List<LedgerTransaction>, preview: ImportPreview, kinds: Set<AccountKind>): Int {
+        val ids = HashSet<String>()
+        imported.forEach { t -> listOfNotNull(t.accountId, t.toAccountId).filterTo(ids) { preview.accountKinds[it] in kinds } }
+        return ids.size
+    }
 
     const val SIMILAR_WINDOW_MS = 3 * 60 * 1000L
 }

@@ -76,8 +76,16 @@ data class CreditView(
     val freeUntil: LocalDate?,
     /** 最长免息天数（账单日次日消费）。 */
     val maxFreeDays: Int?,
+    /**
+     * 1.4.0-alpha02：[settings] 不是用户设的，而是按账户推出来的默认值（花呗：每月 1 号出账、10 号还款，同一木记账）。
+     * 界面上标“默认”，用户在“账单设置”里改了以后就是 false。
+     */
+    val defaulted: Boolean = false,
 ) {
     val latest: CreditStatement? get() = statements.firstOrNull()
+
+    /** 当前欠款（正数；含还没入账的分期）。没设账单日的信用账户也有。 */
+    val debt: Long get() = used
 }
 
 /** 借贷里的一笔流水（借出 / 借入 / 收款 / 还款 / 利息 / 免除）。 */
@@ -138,7 +146,15 @@ data class DebtOverview(
     val receivable: Long,
     val payable: Long,
     val people: List<PersonTotal>,
+    /** 1.4.0-alpha02：全部信用账户的当前欠款合计（不论有没有设账单日）。 */
+    val creditDebt: Long = 0L,
 ) {
+    /** 欠款合计：信用账户欠款 + 借入待还（全部未结清的负债，不只是本月到期的）。 */
+    val totalDebt: Long get() = creditDebt + payable
+
+    /** 还没设账单日（也没有默认值）的信用账户：只显示欠款，提示去设置。 */
+    val unsetCredits: Int get() = credits.count { it.settings == null }
+
     /** 3 天内到期或已逾期、还没还清的（首页提示条、系统通知）。 */
     val reminders: List<DueItem> get() = items.filter { it.counts && it.amount > 0 && it.dueDate <= today.plusDays(DebtMath.REMIND_DAYS) }
 
@@ -161,6 +177,18 @@ object DebtMath {
     /** 账单历史最多列出的期数。 */
     const val HISTORY = 24
     const val REMIND_DAYS = 3L
+
+    /**
+     * 用户没设账单日时的默认账单设置（1.4.0-alpha02），与一木记账一致：花呗每月 1 号出账、10 号还款。
+     * 其他信用卡、白条各家不一样，不猜，返回 null（界面上照样显示欠款，并提示设置账单日）。
+     */
+    fun defaultSettings(account: LedgerAccount): CreditSettings? =
+        if (account.kind == AccountKind.CREDIT && "花呗" in account.name) HUABEI_DEFAULT else null
+
+    val HUABEI_DEFAULT = CreditSettings(statementDay = 1, dueDay = 10)
+
+    /** 账户实际用的账单设置：用户设的优先，没有时用 [defaultSettings]。 */
+    fun settingsOf(account: LedgerAccount): CreditSettings? = account.credit ?: defaultSettings(account)
 
     /** 合成的“导入的借贷”的 ID：每个对方账户一笔。 */
     fun legacyLoanId(accountId: String): String = ("ln-$accountId").take(64)
@@ -309,7 +337,8 @@ object DebtMath {
         val ledger = Ledger(account, txs, zone)
         val balance = -ledger.debtAt(LocalDate.MAX.minusDays(1))
         val used = (-balance).coerceAtLeast(0L)
-        val settings = account.credit
+        val settings = settingsOf(account)
+        val defaulted = account.credit == null && settings != null
         val limit = settings?.limit?.takeIf { it > 0 }
         val available = limit?.let { it - used }
         if (settings == null) {
@@ -389,6 +418,7 @@ object DebtMath {
             freeDays = ChronoUnit.DAYS.between(today, freeUntil).toInt(),
             freeUntil = freeUntil,
             maxFreeDays = maxFree,
+            defaulted = defaulted,
         )
     }
 
@@ -575,6 +605,7 @@ object DebtMath {
             receivable = open.filter { it.direction == LoanDirection.LEND }.sumOf { it.remaining },
             payable = open.filter { it.direction == LoanDirection.BORROW }.sumOf { it.remaining },
             people = people,
+            creditDebt = credits.sumOf { it.debt },
         )
     }
 
