@@ -115,6 +115,10 @@ sealed interface ImportStage {
 }
 
 class BillImportViewModel(private val container: AppContainer) : ViewModel() {
+    /** 1.4.0-alpha04：预览后套用用户的自动分类规则（解析与预览本身不变）。 */
+    private fun withRules(preview: com.xiguli.jinkui.data.importer.ImportPreview): com.xiguli.jinkui.data.importer.ImportPreview =
+        com.xiguli.jinkui.data.importer.ImportRules.applyToPreview(preview, container.ledger.data.value)
+
     var stage by mutableStateOf<ImportStage>(ImportStage.Intro)
         private set
     var error by mutableStateOf<String?>(null)
@@ -149,7 +153,7 @@ class BillImportViewModel(private val container: AppContainer) : ViewModel() {
                     // 记账 App 导出没有固定的账户来源：和通用表格一样，预览里可以换默认账户
                     parsedCsv = parsed.takeIf { source == BillSource.APP }
                     fileName = name
-                    ImportStage.Preview(withContext(Dispatchers.Default) { BillImport.preview(parsed, container.ledger.data.value, zone, fileName = name) })
+                    ImportStage.Preview(withContext(Dispatchers.Default) { withRules(BillImport.preview(parsed, container.ledger.data.value, zone, fileName = name)) })
                 } else {
                     if (table.rows.size < 2) throw BillFormatException("这个文件里没有可以导入的表格")
                     ImportStage.Mapping(table, BillParser.guessMapping(table), name)
@@ -179,7 +183,7 @@ class BillImportViewModel(private val container: AppContainer) : ViewModel() {
             }
             parsedCsv = parsed
             fileName = current.fileName
-            stage = ImportStage.Preview(BillImport.preview(parsed, container.ledger.data.value, zone, fileName = current.fileName))
+            stage = ImportStage.Preview(withRules(BillImport.preview(parsed, container.ledger.data.value, zone, fileName = current.fileName)))
         } catch (e: BillFormatException) {
             error = e.message
         }
@@ -204,7 +208,7 @@ class BillImportViewModel(private val container: AppContainer) : ViewModel() {
     fun setAccount(accountId: String) {
         val current = stage as? ImportStage.Preview ?: return
         val parsed = parsedCsv ?: return
-        val fresh = BillImport.preview(parsed, container.ledger.data.value, zone, preferredAccount = accountId, fileName = fileName)
+        val fresh = withRules(BillImport.preview(parsed, container.ledger.data.value, zone, preferredAccount = accountId, fileName = fileName))
         val old = current.preview.candidates.associateBy { it.id }
         stage = ImportStage.Preview(
             fresh.copy(candidates = fresh.candidates.map { c -> old[c.id]?.let { o -> c.copy(checked = o.checked, categoryId = o.categoryId) } ?: c }),
@@ -226,7 +230,7 @@ class BillImportViewModel(private val container: AppContainer) : ViewModel() {
                     source = preview.source.label,
                     fileName = preview.fileName.take(80),
                 )
-                val txs = BillImport.transactions(preview, zone, now, batch.id)
+                val txs = com.xiguli.jinkui.data.importer.ImportRules.tag(BillImport.transactions(preview, zone, now, batch.id), preview, container.ledger.data.value)
                 val saved = container.ledger.importTransactions(txs, preview.usedNewAccounts, batch, preview.usedNewCategories)
                 stage = ImportStage.Done(BillImport.result(preview, saved, before, batch.id.takeIf { saved.isNotEmpty() }))
             } catch (e: LedgerInputException) {

@@ -46,6 +46,8 @@ sealed interface Screen {
     data class LoansNew(val direction: com.xiguli.jinkui.data.ledger.LoanDirection) : Screen
     /** 1.4.0-alpha04：账户管理并直接打开“添加账户”（种类预选信用卡）。 */
     data object LedgerAddCredit : Screen
+    /** 1.4.0-alpha04：报销（待报销、已报销）。 */
+    data object Reimburse : Screen
 }
 
 /** 首页底部悬浮栏的五个分区（1.1 起）：账本是首页；卡包保留全部卡片功能。 */

@@ -318,6 +318,8 @@ object LedgerMerge {
             local.recurring.forEach { add(it.id) }
             local.installments.forEach { add(it.id) }
             local.loans.forEach { add(it.id) }
+            local.rules.forEach { add(it.id) }
+            local.templates.forEach { add(it.id) }
         }
         val known = local.tombstones.mapTo(HashSet()) { it.id }
         val newTombstones = incoming.tombstones
@@ -332,6 +334,8 @@ object LedgerMerge {
             tombstones = newTombstones,
             installments = pick(local.installments, incoming.installments, { it.id }, { it.updatedAt }, honorTombstones = true),
             loans = pick(local.loans, incoming.loans, { it.id }, { it.updatedAt }, honorTombstones = true),
+            rules = pick(local.rules, incoming.rules, { it.id }, { it.updatedAt }, honorTombstones = true),
+            templates = pick(local.templates, incoming.templates, { it.id }, { it.updatedAt }, honorTombstones = true),
         )
         return LedgerMergePlan(write, added, updated, skipped, suppressed)
     }

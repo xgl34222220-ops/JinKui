@@ -71,7 +71,7 @@ class VaultSchemaMigrationTest {
         connection.createStatement().use { s ->
             s.executeQuery("SELECT type, name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY name").use { rs ->
                 buildList {
-                    while (rs.next()) add(rs.getString(1) + ":" + rs.getString(2) + ":" + rs.getString(3).replace(Regex("\\s+"), " ").replace("( ", "(").replace(" )", ")"))
+                    while (rs.next()) add(rs.getString(1) + ":" + rs.getString(2) + ":" + rs.getString(3).replace(Regex("\\s+"), " ").replace("( ", "(").replace(" )", ")").replace(" ,", ","))
                 }
             }
         }
@@ -222,6 +222,40 @@ class VaultSchemaMigrationTest {
         exec("INSERT OR REPLACE INTO ledger_debts VALUES('in-1','installment',3,'ENC-INST')")
         assertEquals(1, count("SELECT COUNT(*) FROM ledger_debts WHERE id = 'ln-1' AND updated_at = 2"))
         assertEquals(2, count("SELECT COUNT(*) FROM ledger_debts"))
+    }
+
+    @Test
+    fun upgradeFromV7ToV8AddsTrashColumnAndRulesAndKeepsEverything() {
+        seedV1()
+        migrate(1, 7)
+        exec("INSERT INTO ledger_accounts VALUES('acc-bank',0,0,1,1,'ENC-BANK')")
+        exec("INSERT INTO ledger_transactions VALUES('t-1','expense',200,'acc-bank',NULL,NULL,1,1,'ENC-T1',NULL)")
+        exec("INSERT INTO ledger_debts VALUES('ln-1','loan',1,'ENC-DEBT')")
+        exec("INSERT INTO ledger_tombstones VALUES('t-old','tx',5)")
+        migrate(7, 8)
+        assertEquals(8, count("PRAGMA user_version"))
+        // 卡片、字段、附件、历史一条不少，原有卡片都不在回收站
+        assertEquals(2, count("SELECT COUNT(*) FROM cards"))
+        assertEquals(2, count("SELECT COUNT(*) FROM cards WHERE deleted_at IS NULL"))
+        assertEquals(1, count("SELECT COUNT(*) FROM cards WHERE id = 'c-1' AND note_enc = 'ENC-NOTE' AND last_used_at = 30"))
+        assertEquals(2, count("SELECT COUNT(*) FROM fields"))
+        assertEquals(1, count("SELECT COUNT(*) FROM attachments"))
+        assertEquals(1, count("SELECT COUNT(*) FROM history"))
+        assertEquals(1, count("SELECT COUNT(*) FROM ledger_transactions WHERE id = 't-1' AND data_enc = 'ENC-T1'"))
+        assertEquals(1, count("SELECT COUNT(*) FROM ledger_debts"))
+        assertEquals(1, count("SELECT COUNT(*) FROM ledger_tombstones"))
+        // 放进回收站 / 还原只改这一列
+        exec("UPDATE cards SET deleted_at = 1000 WHERE id = 'c-2'")
+        assertEquals(1, count("SELECT COUNT(*) FROM cards WHERE deleted_at IS NOT NULL"))
+        exec("UPDATE cards SET deleted_at = NULL WHERE id = 'c-2'")
+        assertEquals(0, count("SELECT COUNT(*) FROM cards WHERE deleted_at IS NOT NULL"))
+        // 规则 / 模板新表为空且可写，同一 ID 覆盖
+        assertEquals(0, count("SELECT COUNT(*) FROM ledger_rules"))
+        exec("INSERT OR REPLACE INTO ledger_rules VALUES('r-1','rule',1,'ENC-RULE')")
+        exec("INSERT OR REPLACE INTO ledger_rules VALUES('r-1','rule',2,'ENC-RULE2')")
+        exec("INSERT OR REPLACE INTO ledger_rules VALUES('tp-1','template',3,'ENC-TPL')")
+        assertEquals(1, count("SELECT COUNT(*) FROM ledger_rules WHERE id = 'r-1' AND updated_at = 2"))
+        assertEquals(2, count("SELECT COUNT(*) FROM ledger_rules"))
     }
 
     @Test

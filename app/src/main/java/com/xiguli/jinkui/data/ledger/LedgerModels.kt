@@ -103,6 +103,12 @@ data class LedgerTransaction(
     val importBatch: String? = null,
     /** 1.4 起：这笔流水属于哪一笔分期（[LedgerInstallment.id]）或借贷（[LedgerLoan.id]）；在加密载荷里，随流水进备份。 */
     val debtId: String? = null,
+    /** 1.4.0-alpha04 起：这笔收入是哪一笔支出的退款（[RefundMath]）；在加密载荷里，随流水进备份。 */
+    val refundOf: String? = null,
+    /** 1.4.0-alpha04 起：支出的报销状态。 */
+    val reimburse: Reimburse = Reimburse.NONE,
+    /** 1.4.0-alpha04 起：这笔收入是哪几笔支出的报销到账。 */
+    val reimburseOf: List<String> = emptyList(),
 )
 
 /**
@@ -156,10 +162,14 @@ data class LedgerData(
     val installments: List<LedgerInstallment> = emptyList(),
     /** 借贷（1.4 起）。 */
     val loans: List<LedgerLoan> = emptyList(),
+    /** 自动分类规则（1.4.0-alpha04 起，数据库版本 8、备份 schema 6）。 */
+    val rules: List<LedgerRule> = emptyList(),
+    /** 记账模板（1.4.0-alpha04 起）。 */
+    val templates: List<LedgerTemplate> = emptyList(),
 ) {
     val isEmpty: Boolean
         get() = accounts.isEmpty() && categories.isEmpty() && transactions.isEmpty() && budgets.isEmpty() && recurring.isEmpty() &&
-            installments.isEmpty() && loans.isEmpty()
+            installments.isEmpty() && loans.isEmpty() && rules.isEmpty() && templates.isEmpty()
 
     companion object {
         val EMPTY = LedgerData()
@@ -179,7 +189,9 @@ data class LedgerTombstone(val id: String, val kind: String, val deletedAt: Long
         const val KIND_TX = "tx"
         const val KIND_RECURRING = "recurring"
         const val KIND_DEBT = "debt"
-        val KINDS = setOf(KIND_TX, KIND_RECURRING, KIND_DEBT)
+        /** 1.4.0-alpha04 起：删掉的自动分类规则与记账模板。 */
+        const val KIND_RULE = "rule"
+        val KINDS = setOf(KIND_TX, KIND_RECURRING, KIND_DEBT, KIND_RULE)
     }
 }
 

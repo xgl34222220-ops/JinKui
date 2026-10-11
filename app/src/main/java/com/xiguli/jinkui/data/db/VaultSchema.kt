@@ -10,12 +10,13 @@ package com.xiguli.jinkui.data.db
  *  - 版本 5（1.2.0）：新增自动记账的“待确认”表，旧表不动。
  *  - 版本 6（1.3.0）：流水加一列导入批次 import_batch，新增导入批次表；已导入的流水按导入时间补上批次。
  *  - 版本 7（1.4.0）：新增欠款表 ledger_debts（信用账户的分期、借贷），旧表不动。
+ *  - 版本 8（1.4.0-alpha04）：卡片加一列 deleted_at（回收站），新增规则 / 模板表 ledger_rules，旧数据不动。
  *
  * 新装用户执行 [create]：版本 1 的建表语句加上之后的全部迁移，保证新装与升级得到同一套结构。
  * 迁移只允许“加”，不得丢弃或改写用户已有的数据。
  */
 object VaultSchema {
-    const val VERSION = 7
+    const val VERSION = 8
 
     private val V1 = listOf(
         """CREATE TABLE cards(
@@ -174,7 +175,23 @@ object VaultSchema {
         )""",
     )
 
-    private val MIGRATIONS: Map<Int, List<String>> = mapOf(2 to V2, 3 to V3, 4 to V4, 5 to V5, 6 to V6, 7 to V7)
+    /**
+     * 7 → 8（1.4.0-alpha04）：
+     *  - cards 加一列 deleted_at（明文，只是删除时间）：不为 NULL 的卡片在回收站里，仍然在加密数据库里，
+     *    字段、附件、历史原样保留，30 天后自动彻底删除；已有卡片全部为 NULL（不在回收站）；
+     *  - ledger_rules：自动分类规则（kind = rule）与记账模板（kind = template），关键词、分类、金额等全部在 data_enc 里。
+     */
+    private val V8 = listOf(
+        "ALTER TABLE cards ADD COLUMN deleted_at INTEGER",
+        """CREATE TABLE ledger_rules(
+            id TEXT PRIMARY KEY NOT NULL,
+            kind TEXT NOT NULL,
+            updated_at INTEGER NOT NULL,
+            data_enc TEXT NOT NULL
+        )""",
+    )
+
+    private val MIGRATIONS: Map<Int, List<String>> = mapOf(2 to V2, 3 to V3, 4 to V4, 5 to V5, 6 to V6, 7 to V7, 8 to V8)
 
     /** 新装：建出最新结构。 */
     fun create(): List<String> = V1 + upgrade(1, VERSION)

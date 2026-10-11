@@ -71,6 +71,8 @@ data class Card(
     val createdAt: Long = 0L,
     val updatedAt: Long = 0L,
     val lastUsedAt: Long = 0L,
+    /** 1.4.0-alpha04 起：放进回收站的时间；null 表示不在回收站。不进备份。 */
+    val deletedAt: Long? = null,
 ) {
     /** 列表副标题：第一个非敏感且有内容的字段。 */
     val subtitle: String

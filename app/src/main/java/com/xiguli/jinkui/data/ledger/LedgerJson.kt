@@ -152,15 +152,34 @@ object LedgerJson {
         .put("note", tx.note)
         .put("tags", JSONArray(tx.tags))
         .also { json -> tx.debtId?.let { json.put("debt", it) } }
+        .also { json -> putRefund(json, tx) }
         .toString()
 
-    class TransactionPayload(val amount: Long, val note: String, val tags: List<String>, val debtId: String? = null)
+    /** 退款 / 报销（1.4.0-alpha04 起）：没有时不写，旧载荷读出来就是“没有”。 */
+    private fun putRefund(json: JSONObject, tx: LedgerTransaction) {
+        tx.refundOf?.let { json.put("refundOf", it) }
+        if (tx.reimburse != Reimburse.NONE) json.put("reimburse", tx.reimburse.key)
+        if (tx.reimburseOf.isNotEmpty()) json.put("reimburseOf", JSONArray(tx.reimburseOf))
+    }
+
+    class TransactionPayload(
+        val amount: Long,
+        val note: String,
+        val tags: List<String>,
+        val debtId: String? = null,
+        val refundOf: String? = null,
+        val reimburse: Reimburse = Reimburse.NONE,
+        val reimburseOf: List<String> = emptyList(),
+    )
 
     fun readTransactionPayload(text: String): TransactionPayload {
         val json = JSONObject(text)
         return TransactionPayload(
             json.getLong("amount"), json.optString("note", ""), json.optStringList("tags"),
             json.optNullableString("debt")?.takeIf { ID_PATTERN.matches(it) },
+            json.optNullableString("refundOf")?.takeIf { ID_PATTERN.matches(it) },
+            Reimburse.of(json.optString("reimburse")),
+            json.optStringList("reimburseOf").filter { ID_PATTERN.matches(it) },
         )
     }
 
@@ -296,7 +315,8 @@ object LedgerJson {
                     .put("tags", JSONArray(t.tags))
                     .put("debtId", t.debtId ?: JSONObject.NULL)
                     .put("createdAt", t.createdAt)
-                    .put("updatedAt", t.updatedAt),
+                    .put("updatedAt", t.updatedAt)
+                    .also { putRefund(it, t) },
             )
         }
         val budgets = JSONArray()
@@ -322,7 +342,14 @@ object LedgerJson {
         for (p in data.installments) installments.put(installmentJson(p).put("id", p.id).put("updatedAt", p.updatedAt))
         val loans = JSONArray()
         for (l in data.loans) loans.put(loanJson(l).put("id", l.id).put("updatedAt", l.updatedAt))
+        // 1.4.0-alpha04 起（备份 schema 6）：自动分类规则与记账模板
+        val rules = JSONArray()
+        for (r in data.rules) rules.put(RuleMath.ruleJson(r).put("id", r.id).put("updatedAt", r.updatedAt))
+        val templates = JSONArray()
+        for (t in data.templates) templates.put(RuleMath.templateJson(t).put("id", t.id).put("updatedAt", t.updatedAt))
         return JSONObject()
+            .put("rules", rules)
+            .put("templates", templates)
             .put("installments", installments)
             .put("loans", loans)
             .put("tombstones", tombstones)
@@ -377,6 +404,9 @@ object LedgerJson {
                 createdAt = t.optLong("createdAt", 0L),
                 updatedAt = t.optLong("updatedAt", 0L),
                 debtId = t.optNullableString("debtId")?.also(::requireId),
+                refundOf = t.optNullableString("refundOf")?.also(::requireId),
+                reimburse = Reimburse.of(t.optString("reimburse")),
+                reimburseOf = t.optStringList("reimburseOf").onEach(::requireId),
             )
         }
         val budgets = json.optJSONArray("budgets").objects().map { b ->
@@ -408,8 +438,19 @@ object LedgerJson {
         val loans = json.optJSONArray("loans").objects().map { l ->
             readLoan(l.getString("id").also(::requireId), l.optLong("updatedAt", 0L), l)
         }
+        // schema 6 之前的备份没有规则与模板，按空处理
+        val rules = json.optJSONArray("rules").objects().map { r ->
+            RuleMath.readRule(r.getString("id").also(::requireId), r.optLong("updatedAt", 0L), r)
+        }
+        val templates = json.optJSONArray("templates").objects().map { t ->
+            RuleMath.readTemplate(t.getString("id").also(::requireId), t.optLong("updatedAt", 0L), t)
+        }
+        require(rules.size <= RuleMath.MAX_RULES && templates.size <= RuleMath.MAX_TEMPLATES * 5) { "规则数量异常" }
         require(accounts.size + categories.size + transactions.size + budgets.size + recurring.size + tombstones.size + installments.size + loans.size <= MAX_RECORDS) { "账本记录数量异常" }
-        return LedgerData(accounts, categories, transactions, budgets, recurring, tombstones = tombstones, installments = installments, loans = loans)
+        return LedgerData(
+            accounts, categories, transactions, budgets, recurring, tombstones = tombstones, installments = installments, loans = loans,
+            rules = rules, templates = templates,
+        )
     }
 
     private fun requireId(id: String) {

@@ -42,7 +42,7 @@ class DebtBackupTest {
     fun schemaFiveRoundTripsDebts() {
         val bytes = BackupJson.encode(emptyList(), 1L, data)
         val root = JSONObject(String(bytes, Charsets.UTF_8))
-        assertEquals(5, root.getInt("schema"))
+        assertEquals(6, root.getInt("schema"))
         assertEquals(1, root.getJSONObject("ledger").getJSONArray("installments").length())
         val back = BackupJson.decodeAll(bytes).ledger
         assertEquals(data, back)
@@ -77,7 +77,7 @@ class DebtBackupTest {
         assertTrue(ledger.installments.isEmpty())
         assertTrue(ledger.loans.isEmpty())
         // 更新版本的备份明确拒绝
-        assertThrows(BackupFormatException::class.java) { BackupJson.decodeAll("""{"app":"jinkui","schema":6,"cards":[]}""".toByteArray()) }
+        assertThrows(BackupFormatException::class.java) { BackupJson.decodeAll("""{"app":"jinkui","schema":${BackupJson.SCHEMA + 1},"cards":[]}""".toByteArray()) }
     }
 
     @Test

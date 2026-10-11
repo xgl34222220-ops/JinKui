@@ -180,6 +180,7 @@ private fun MainNavigation() {
                             onImport = { navigator.push(Screen.BillImport) },
                             onPending = { navigator.push(Screen.PendingInbox) },
                             onDebts = { navigator.push(Screen.Debts) },
+                            onReimburse = { navigator.push(Screen.Reimburse) },
                         )
                         HomeTab.CALENDAR -> CalendarScreen()
                         HomeTab.CARDS -> HomeScreen(
@@ -205,6 +206,7 @@ private fun MainNavigation() {
                                 onImportHistory = { navigator.push(Screen.ImportHistory) },
                                 onAuto = { navigator.push(Screen.AutoBookkeeping) },
                                 onDebts = { navigator.push(Screen.Debts) },
+                                onReimburse = { navigator.push(Screen.Reimburse) },
                             ),
                         )
                     }
@@ -276,6 +278,7 @@ private fun MainNavigation() {
                 is Screen.CreditStatement -> com.xiguli.jinkui.ui.ledger.CreditStatementScreen(screen.accountId, onBack = { navigator.pop() })
                 Screen.Loans -> com.xiguli.jinkui.ui.ledger.LoanListScreen(onBack = { navigator.pop() })
                 Screen.LedgerBudget -> LedgerBudgetScreen(onBack = { navigator.pop() })
+                Screen.Reimburse -> com.xiguli.jinkui.ui.ledger.ReimburseScreen(onBack = { navigator.pop() })
                 Screen.LedgerCategories -> LedgerCategoriesScreen(onBack = { navigator.pop() })
                 Screen.LedgerRecurring -> LedgerRecurringScreen(onBack = { navigator.pop() })
             }

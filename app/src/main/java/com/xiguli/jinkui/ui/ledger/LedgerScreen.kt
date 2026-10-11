@@ -5,6 +5,7 @@ import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.ReceiptLong
 import androidx.compose.material.icons.outlined.Inbox
 import androidx.compose.material.icons.outlined.Handshake
+import androidx.compose.material.icons.outlined.RequestQuote
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.widthIn
@@ -262,6 +263,7 @@ fun LedgerScreen(
     onImport: () -> Unit = {},
     onPending: () -> Unit = {},
     onDebts: () -> Unit = {},
+    onReimburse: () -> Unit = {},
 ) {
     val container = LocalContainer.current
     val pending by container.ledger.pending.collectAsStateWithLifecycle()
@@ -366,6 +368,7 @@ fun LedgerScreen(
             val entries = listOf(
                 Triple("资产总览", "净资产、负债与信用账户", Icons.Outlined.Savings) to onAssets,
                 Triple("欠款 / 账单", "信用卡、花呗账单与分期，借出借入", Icons.Outlined.ReceiptLong) to onDebts,
+                Triple("报销", "待报销与已报销；退款在长按一笔支出里", Icons.Outlined.RequestQuote) to onReimburse,
                 Triple("账户与余额", "现金、银行卡、支付宝、微信、信用卡", Icons.Outlined.AccountBalanceWallet) to onAccounts,
                 Triple("预算", "每月总预算与分类预算", Icons.Outlined.BarChart) to onBudget,
                 Triple("周期记账", "房租、工资、订阅等固定收支自动记上", Icons.Outlined.Repeat) to onRecurring,

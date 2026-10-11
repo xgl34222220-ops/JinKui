@@ -74,7 +74,8 @@ data class BudgetUi(
 )
 
 internal fun buildBudgetUi(data: LedgerData, month: YearMonth, zone: ZoneId): BudgetUi {
-    val inMonth = LedgerMath.inMonth(data.transactions, month, zone)
+    // 1.4.0-alpha04：预算按退款后的实际支出算，报销的支出不占预算
+    val inMonth = LedgerMath.inMonth(com.xiguli.jinkui.data.ledger.RefundMath.forStats(data.transactions), month, zone)
     val progress = LedgerMath.budgetProgress(data.budgets, inMonth, data.categories)
     return BudgetUi(
         month = month,

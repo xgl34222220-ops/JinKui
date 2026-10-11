@@ -72,7 +72,7 @@ object PendingMath {
     fun suggestion(entry: PendingEntry, data: LedgerData, zone: ZoneId = ZoneId.systemDefault()): LedgerTransaction? {
         val account = accountFor(entry.source, data.accounts) ?: return null
         val time = Instant.ofEpochMilli(entry.occurredAt).atZone(zone).toLocalTime()
-        return LedgerTransaction(
+        val guess = LedgerTransaction(
             id = LedgerIds.newId(),
             type = entry.type,
             amount = entry.amount,
@@ -81,5 +81,8 @@ object PendingMath {
             categoryId = BillCategorizer.categorize(entry.type, listOf(entry.merchant), data.categories, time),
             note = entry.merchant,
         )
+        // 1.4.0-alpha04：用户的自动分类规则优先于内置的猜测（按商户与金额匹配）
+        val hit = RuleMath.match(data.rules, entry.type, listOf(entry.merchant), entry.amount, data.categories, data.accounts)
+        return if (hit == null) guess else RuleMath.apply(guess, hit)
     }
 }

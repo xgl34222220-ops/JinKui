@@ -179,10 +179,12 @@ fun buildStatsUi(
 ): StatsUi {
     val years = (data.transactions.map { LedgerMath.monthOf(it.occurredAt, zone).year } + today.year).distinct().sortedDescending()
     val byId = data.categories.associateBy { it.id }
+    // 1.4.0-alpha04：退款冲减原支出、报销的支出与报销到账不计收支
+    val stats = com.xiguli.jinkui.data.ledger.RefundMath.forStats(data.transactions)
     return when (mode) {
         StatsMode.MONTH -> {
-            val inMonth = LedgerMath.inMonth(data.transactions, month, zone)
-            val trend = LedgerMath.trend(data.transactions, month, TREND_MONTHS, zone)
+            val inMonth = LedgerMath.inMonth(stats, month, zone)
+            val trend = LedgerMath.trend(stats, month, TREND_MONTHS, zone)
             StatsUi(
                 mode = mode,
                 year = month.year,
@@ -200,11 +202,11 @@ fun buildStatsUi(
         }
         StatsMode.YEAR -> {
             val months = (1..12).map { YearMonth.of(year, it) }
-            val perMonth = months.map { LedgerMath.inMonth(data.transactions, it, zone) }
+            val perMonth = months.map { LedgerMath.inMonth(stats, it, zone) }
             val all = perMonth.flatten()
             val sums = dailySums(all, zone)
             val last = months.last()
-            val lastYear = LedgerMath.trend(data.transactions, YearMonth.of(year - 1, 12), 12, zone)
+            val lastYear = LedgerMath.trend(stats, YearMonth.of(year - 1, 12), 12, zone)
             StatsUi(
                 mode = mode,
                 year = year,

@@ -21,6 +21,10 @@ import androidx.compose.ui.unit.dp
 import com.xiguli.jinkui.data.ledger.LedgerData
 import com.xiguli.jinkui.data.ledger.LedgerTransaction
 import com.xiguli.jinkui.data.ledger.Money
+import com.xiguli.jinkui.data.ledger.RefundMath
+import com.xiguli.jinkui.data.ledger.Reimburse
+import androidx.compose.material.icons.automirrored.outlined.Undo
+import androidx.compose.material.icons.outlined.RequestQuote
 import com.xiguli.jinkui.data.ledger.TxType
 import com.xiguli.jinkui.ui.LocalContainer
 import com.xiguli.jinkui.ui.components.JkDialog
@@ -44,6 +48,8 @@ class EntryHostState {
     /** 1.4.0-alpha04：打开时直接进入借贷的某一类。 */
     var loanAction by mutableStateOf<LoanAction?>(null)
     var confirmDelete by mutableStateOf<LedgerTransaction?>(null)
+    /** 1.4.0-alpha04：给这笔支出记退款。 */
+    var refundFor by mutableStateOf<LedgerTransaction?>(null)
     var menuFor by mutableStateOf<LedgerTransaction?>(null)
     /** 多选模式（长按一行进入）：选中的流水 ID；null 表示不在多选模式。 */
     var selection by mutableStateOf<Set<String>?>(null)
@@ -119,6 +125,18 @@ fun EntryHost(
 ) {
     val container = LocalContainer.current
     val scope = androidx.compose.runtime.rememberCoroutineScope()
+    fun reimburse(ids: List<String>, to: Reimburse, done: String) {
+        scope.launch {
+            try {
+                container.ledger.setReimburse(ids, to)
+                container.messages.show(done)
+            } catch (e: com.xiguli.jinkui.data.repo.LedgerInputException) {
+                container.messages.show(e.message ?: "保存失败")
+            } catch (e: Exception) {
+                container.messages.show("保存失败：${e.message ?: "未知错误"}")
+            }
+        }
+    }
     if (state.creating || state.editing != null) {
         EntrySheet(
             data = data,
@@ -177,10 +195,69 @@ fun EntryHost(
                     state.menuFor = null
                     state.create(from = tx)
                 })
+                // 1.4.0-alpha04：退款与报销（只对普通支出；分期、借贷的流水不行）
+                if (tx.type == TxType.EXPENSE && tx.debtId == null) {
+                    val refund = RefundMath.status(tx, data.transactions)
+                    if (tx.reimburse == Reimburse.NONE && refund.remaining > 0) {
+                        JkRow(
+                            title = "退款",
+                            subtitle = if (refund.refunded > 0) "已退 ${Money.format(refund.refunded)}，还能退 ${Money.format(refund.remaining)}" else "全额或部分退款，统计里冲减这笔支出",
+                            icon = Icons.AutoMirrored.Outlined.Undo, modifier = Modifier.clip(Radius.control), trailing = {},
+                            onClick = {
+                                state.menuFor = null
+                                state.refundFor = tx
+                            },
+                        )
+                    }
+                    if (refund.refunds.isEmpty()) {
+                        when (tx.reimburse) {
+                            Reimburse.NONE -> JkRow(
+                                title = "标记待报销", subtitle = "替单位或别人垫付的钱，不算你的支出",
+                                icon = Icons.Outlined.RequestQuote, modifier = Modifier.clip(Radius.control), trailing = {},
+                                onClick = {
+                                    state.menuFor = null
+                                    reimburse(listOf(tx.id), Reimburse.PENDING, "已标记待报销，可在“我的 · 报销”里查看")
+                                },
+                            )
+                            Reimburse.PENDING -> JkRow(
+                                title = "取消待报销", subtitle = "重新算作你的支出",
+                                icon = Icons.Outlined.RequestQuote, modifier = Modifier.clip(Radius.control), trailing = {},
+                                onClick = {
+                                    state.menuFor = null
+                                    reimburse(listOf(tx.id), Reimburse.NONE, "已取消报销标记")
+                                },
+                            )
+                            Reimburse.DONE -> Unit
+                        }
+                    }
+                }
                 JkRow(title = "删除", icon = Icons.Outlined.DeleteOutline, danger = true, modifier = Modifier.clip(Radius.control), onClick = {
                     state.menuFor = null
                     state.confirmDelete = tx
                 })
+            }
+        }
+    }
+
+    state.refundFor?.let { tx ->
+        val status = RefundMath.status(tx, data.transactions)
+        RefundSheet(
+            status = status,
+            category = categoryLabel(tx.categoryId, data.categories.associateBy { it.id }),
+            accounts = refundAccounts(data),
+            today = java.time.LocalDate.now(),
+            onDismiss = { state.refundFor = null },
+        ) { amount, accountId, date, note ->
+            state.refundFor = null
+            scope.launch {
+                try {
+                    container.ledger.refund(tx.id, amount, accountId, date, note)
+                    container.messages.show(if (amount >= status.remaining) "已记全额退款 ${Money.format(amount)}" else "已记退款 ${Money.format(amount)}")
+                } catch (e: com.xiguli.jinkui.data.repo.LedgerInputException) {
+                    container.messages.show(e.message ?: "保存失败")
+                } catch (e: Exception) {
+                    container.messages.show("保存失败：${e.message ?: "未知错误"}")
+                }
             }
         }
     }

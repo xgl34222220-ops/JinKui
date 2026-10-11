@@ -17,6 +17,12 @@ import com.xiguli.jinkui.data.db.LedgerTombstoneRow
 import com.xiguli.jinkui.data.db.LedgerTxRow
 import com.xiguli.jinkui.data.db.LedgerImportBatchRow
 import com.xiguli.jinkui.data.db.LedgerDebtRow
+import com.xiguli.jinkui.data.db.LedgerRuleRow
+import com.xiguli.jinkui.data.ledger.LedgerRule
+import com.xiguli.jinkui.data.ledger.LedgerTemplate
+import com.xiguli.jinkui.data.ledger.Reimburse
+import com.xiguli.jinkui.data.ledger.RefundMath
+import com.xiguli.jinkui.data.ledger.RuleMath
 import com.xiguli.jinkui.data.ledger.CreditSettings
 import com.xiguli.jinkui.data.ledger.DebtMath
 import com.xiguli.jinkui.data.ledger.LedgerInstallment
@@ -115,6 +121,7 @@ class LedgerRepository(
             LedgerTransaction(
                 row.id, TxType.of(row.type), p.amount, row.occurredAt, row.accountId, row.toAccountId,
                 row.categoryId, p.note, p.tags, row.createdAt, row.updatedAt, row.importBatch, p.debtId,
+                p.refundOf, p.reimburse, p.reimburseOf,
             )
         }
         val batchCounts = transactions.groupingBy { it.importBatch }.eachCount()
@@ -144,10 +151,18 @@ class LedgerRepository(
         val loans = decodeAll(debtRows.filter { it.kind == LedgerJson.DEBT_LOAN }) { row ->
             LedgerJson.readLoan(row.id, row.updatedAt, org.json.JSONObject(keys.field.decrypt(row.dataEnc, debtContext(row.id))))
         }
+        // 自动分类规则与记账模板（1.4.0-alpha04 起）；不认识的种类原样留在库里
+        val ruleRows = database.ledgerRules()
+        val rules = decodeAll(ruleRows.filter { it.kind == RuleMath.KIND_RULE }) { row ->
+            RuleMath.readRule(row.id, row.updatedAt, org.json.JSONObject(keys.field.decrypt(row.dataEnc, ruleContext(row.id))))
+        }.sortedBy { it.position }
+        val templates = decodeAll(ruleRows.filter { it.kind == RuleMath.KIND_TEMPLATE }) { row ->
+            RuleMath.readTemplate(row.id, row.updatedAt, org.json.JSONObject(keys.field.decrypt(row.dataEnc, ruleContext(row.id))))
+        }.sortedBy { it.position }
         val pendingEntries = decodeAll(database.ledgerPending()) { row ->
             PendingMath.read(row.id, row.createdAt, keys.field.decrypt(row.dataEnc, pendingContext(row.id)))
         }
-        publish { LedgerData(accounts, categories, transactions, budgets, recurring, unreadable, tombstones, importBatches, installments, loans) }
+        publish { LedgerData(accounts, categories, transactions, budgets, recurring, unreadable, tombstones, importBatches, installments, loans, rules, templates) }
         publishPending { pendingEntries }
         // 解锁后立刻补记到期的周期记账；失败不影响账本打开
         runCatching { runRecurring() }
@@ -363,7 +378,12 @@ class LedgerRepository(
         }
     }
 
-    private fun needsTombstone(id: String): Boolean = RecurringMath.isGeneratedId(id) || BillImport.isImportedId(id)
+    /**
+     * 1.4.0-alpha04 起每一笔删掉的流水都记删除标记（以前只记周期生成与账单导入的）：
+     * 手动记的流水删掉后，导入一份旧备份也不会再回来。标记只有 ID 与时间。
+     */
+    @Suppress("UNUSED_PARAMETER")
+    private fun needsTombstone(id: String): Boolean = true
 
     // ── 自动记账 ──────────────────────────────────────────────────
 
@@ -444,6 +464,11 @@ class LedgerRepository(
             updatedAt = now,
             importBatch = normalized.importBatch ?: previous?.importBatch,
             debtId = normalized.debtId ?: previous?.debtId,
+            // 退款 / 报销的关联同样沿用；改成别的类型时去掉（只有支出能报销、只有收入能是退款）
+            refundOf = (normalized.refundOf ?: previous?.refundOf).takeIf { normalized.type == TxType.INCOME },
+            reimburse = (if (normalized.reimburse != Reimburse.NONE) normalized.reimburse else previous?.reimburse ?: Reimburse.NONE)
+                .takeIf { normalized.type == TxType.EXPENSE } ?: Reimburse.NONE,
+            reimburseOf = normalized.reimburseOf.ifEmpty { previous?.reimburseOf.orEmpty() }.takeIf { normalized.type == TxType.INCOME }.orEmpty(),
         )
         database.saveLedgerTransaction(saved.toRow(keys))
         publish { data -> data.copy(transactions = data.transactions.filterNot { it.id == saved.id } + saved) }
@@ -469,6 +494,204 @@ class LedgerRepository(
                     tombstones = if (tombstone == null) data.tombstones else data.tombstones.filterNot { it.id == id } + tombstone,
                 )
             }
+        }
+    }
+
+    // ── 退款与报销（1.4.0-alpha04 起）────────────────────────────────
+
+    /**
+     * 给一笔支出记一笔退款（全额或部分）：退回 [accountId] 的一笔收入，分类“退款”，关联原支出。
+     * 统计里原支出按退款后的金额算，退款不算收入（[RefundMath.forStats]）。
+     */
+    suspend fun refund(
+        expenseId: String,
+        amount: Long,
+        accountId: String,
+        date: LocalDate,
+        note: String = "",
+        zone: ZoneId = ZoneId.systemDefault(),
+    ): LedgerTransaction = withContext(Dispatchers.IO) {
+        recurringLock.withLock {
+            val keys = keys()
+            val data = state.value
+            val expense = data.transactions.firstOrNull { it.id == expenseId }
+            RefundMath.validateRefund(expense, amount, data.transactions)?.let { throw LedgerInputException(it) }
+            expense!!
+            val now = System.currentTimeMillis()
+            val label = note.trim().ifEmpty { "退款 · " + expense.note.ifBlank { categoryName(data, expense.categoryId) } }
+            val tx = LedgerTransaction(
+                id = LedgerIds.newId(), type = TxType.INCOME, amount = amount,
+                occurredAt = timeOn(date, zone, now).coerceAtLeast(expense.occurredAt), accountId = accountId,
+                categoryId = categoryOr(data, "cat-refund", "cat-other-income"),
+                note = label.take(500), createdAt = now, updatedAt = now, refundOf = expense.id,
+            )
+            LedgerMath.validate(tx, data.accounts)?.let { throw LedgerInputException(it) }
+            database.writeTransactions(listOf(tx.toRow(keys)))
+            publish { d -> d.copy(transactions = d.transactions + tx) }
+            tx
+        }
+    }
+
+    private fun categoryName(data: LedgerData, id: String?): String =
+        id?.let { cid -> data.categories.firstOrNull { it.id == cid }?.name } ?: "支出"
+
+    /** 标记 / 取消“待报销”（[state] 只能是 PENDING 或 NONE）。已报销的不受影响。 */
+    suspend fun setReimburse(ids: Collection<String>, state: Reimburse) = withContext(Dispatchers.IO) {
+        require(state != Reimburse.DONE) { "请用“标记已报销”" }
+        recurringLock.withLock {
+            val keys = keys()
+            val data = this@LedgerRepository.state.value
+            if (state == Reimburse.PENDING) RefundMath.validateReimburse(ids, data.transactions)?.let { throw LedgerInputException(it) }
+            val wanted = ids.toHashSet()
+            val now = System.currentTimeMillis()
+            val changed = data.transactions
+                .filter { it.id in wanted && it.type == TxType.EXPENSE && it.reimburse != Reimburse.DONE && it.reimburse != state }
+                .map { it.copy(reimburse = state, updatedAt = now) }
+            if (changed.isEmpty()) return@withLock
+            database.writeTransactions(changed.map { it.toRow(keys) })
+            val byId = changed.associateBy { it.id }
+            publish { d -> d.copy(transactions = d.transactions.map { byId[it.id] ?: it }) }
+        }
+    }
+
+    /**
+     * 标记已报销。[accountId] 不为空时记一笔报销到账的收入（金额是这几笔的合计，关联这几笔支出，不算收入）；
+     * 为空时只标记（冲抵：钱没有单独入账，或已经在别处记过）。返回到账的那笔收入（只标记时为 null）。
+     */
+    suspend fun markReimbursed(
+        ids: Collection<String>,
+        accountId: String?,
+        date: LocalDate,
+        zone: ZoneId = ZoneId.systemDefault(),
+    ): LedgerTransaction? = withContext(Dispatchers.IO) {
+        recurringLock.withLock {
+            val keys = keys()
+            val data = state.value
+            RefundMath.validateReimburse(ids, data.transactions)?.let { throw LedgerInputException(it) }
+            val wanted = ids.toHashSet()
+            val now = System.currentTimeMillis()
+            val expenses = data.transactions.filter { it.id in wanted && it.reimburse != Reimburse.DONE }
+            if (expenses.isEmpty()) throw LedgerInputException("请选择要报销的支出")
+            val changed = expenses.map { it.copy(reimburse = Reimburse.DONE, updatedAt = now) }
+            val income = accountId?.let { acc ->
+                LedgerTransaction(
+                    id = LedgerIds.newId(), type = TxType.INCOME, amount = expenses.sumOf { it.amount },
+                    occurredAt = timeOn(date, zone, now), accountId = acc,
+                    categoryId = categoryOr(data, "cat-other-income"),
+                    note = if (expenses.size == 1) "报销 · " + expenses[0].note.ifBlank { categoryName(data, expenses[0].categoryId) } else "报销 · ${expenses.size} 笔",
+                    createdAt = now, updatedAt = now, reimburseOf = expenses.map { it.id },
+                )
+            }
+            income?.let { tx -> LedgerMath.validate(tx, data.accounts)?.let { throw LedgerInputException(it) } }
+            database.writeTransactions((changed + listOfNotNull(income)).map { it.toRow(keys) })
+            val byId = changed.associateBy { it.id }
+            publish { d -> d.copy(transactions = d.transactions.map { byId[it.id] ?: it } + listOfNotNull(income)) }
+            income
+        }
+    }
+
+    /**
+     * 撤回报销：这几笔回到“待报销”；关联的报销到账收入删掉（记删除标记），
+     * 同一笔到账收入关联的其他支出也一起回到待报销，金额不会对不上。返回回到待报销的笔数。
+     */
+    suspend fun revertReimbursed(ids: Collection<String>): Int = withContext(Dispatchers.IO) {
+        recurringLock.withLock {
+            val keys = keys()
+            val data = state.value
+            val incomes = RefundMath.reimbursementIncomes(ids, data.transactions)
+            val all = (ids + incomes.flatMap { it.reimburseOf }).toHashSet()
+            val now = System.currentTimeMillis()
+            val changed = data.transactions.filter { it.id in all && it.reimburse == Reimburse.DONE }.map { it.copy(reimburse = Reimburse.PENDING, updatedAt = now) }
+            val tombstones = incomes.map { LedgerTombstone(it.id, LedgerTombstone.KIND_TX, now) }
+            database.writeTransactions(changed.map { it.toRow(keys) }, incomes.map { it.id }, tombstones.map { it.toRow() })
+            val byId = changed.associateBy { it.id }
+            val gone = incomes.mapTo(HashSet()) { it.id }
+            publish { d ->
+                d.copy(
+                    transactions = d.transactions.filterNot { it.id in gone }.map { byId[it.id] ?: it },
+                    tombstones = d.tombstones.filterNot { it.id in gone } + tombstones,
+                )
+            }
+            changed.size
+        }
+    }
+
+    // ── 自动分类规则与记账模板（1.4.0-alpha04 起）────────────────────
+
+    suspend fun saveRule(rule: LedgerRule): LedgerRule = withContext(Dispatchers.IO) {
+        recurringLock.withLock {
+            val keys = keys()
+            val data = state.value
+            val normalized = rule.copy(
+                keywords = rule.keywords.map { it.trim() }.filter { it.isNotEmpty() }.distinct().take(20),
+                tags = rule.tags.map { it.trim() }.filter { it.isNotEmpty() }.distinct().take(12),
+                categoryId = rule.categoryId?.takeIf { id -> data.categories.any { it.id == id } },
+                accountId = rule.accountId?.takeIf { id -> data.accounts.any { it.id == id } },
+            )
+            normalized.problem()?.let { throw LedgerInputException(it) }
+            val previous = data.rules.firstOrNull { it.id == rule.id }
+            if (previous == null && data.rules.size >= RuleMath.MAX_RULES) throw LedgerInputException("规则太多了")
+            val saved = normalized.copy(
+                position = previous?.position ?: ((data.rules.maxOfOrNull { it.position } ?: -1) + 1),
+                updatedAt = System.currentTimeMillis(),
+            )
+            database.saveLedgerRules(listOf(saved.toRow(keys)))
+            publish { d -> d.copy(rules = (d.rules.filterNot { it.id == saved.id } + saved).sortedBy { it.position }) }
+            saved
+        }
+    }
+
+    /** 调整规则顺序（上面的先生效）：[ids] 是新的顺序。 */
+    suspend fun reorderRules(ids: List<String>) = withContext(Dispatchers.IO) {
+        recurringLock.withLock {
+            val keys = keys()
+            val now = System.currentTimeMillis()
+            val byId = state.value.rules.associateBy { it.id }
+            val changed = ids.mapIndexedNotNull { index, id -> byId[id]?.takeIf { it.position != index }?.copy(position = index, updatedAt = now) }
+            if (changed.isEmpty()) return@withLock
+            database.saveLedgerRules(changed.map { it.toRow(keys) })
+            val map = changed.associateBy { it.id }
+            publish { d -> d.copy(rules = d.rules.map { map[it.id] ?: it }.sortedBy { it.position }) }
+        }
+    }
+
+    suspend fun deleteRule(id: String) = withContext(Dispatchers.IO) {
+        recurringLock.withLock {
+            keys()
+            val tombstone = LedgerTombstone(id, LedgerTombstone.KIND_RULE, System.currentTimeMillis())
+            database.deleteLedgerRule(id, tombstone.toRow())
+            publish { d ->
+                d.copy(
+                    rules = d.rules.filterNot { it.id == id },
+                    templates = d.templates.filterNot { it.id == id },
+                    tombstones = d.tombstones.filterNot { it.id == id } + tombstone,
+                )
+            }
+        }
+    }
+
+    suspend fun saveTemplate(template: LedgerTemplate): LedgerTemplate = withContext(Dispatchers.IO) {
+        recurringLock.withLock {
+            val keys = keys()
+            val data = state.value
+            val normalized = template.copy(
+                name = template.name.trim(),
+                note = template.note.trim(),
+                tags = template.tags.map { it.trim() }.filter { it.isNotEmpty() }.distinct().take(12),
+                toAccountId = template.toAccountId.takeIf { template.type == TxType.TRANSFER },
+                categoryId = template.categoryId.takeIf { template.type != TxType.TRANSFER }?.takeIf { id -> data.categories.any { it.id == id } },
+                accountId = template.accountId?.takeIf { id -> data.accounts.any { it.id == id } },
+            )
+            normalized.problem()?.let { throw LedgerInputException(it) }
+            val previous = data.templates.firstOrNull { it.id == template.id }
+            if (previous == null && data.templates.size >= RuleMath.MAX_TEMPLATES) throw LedgerInputException("模板最多 ${RuleMath.MAX_TEMPLATES} 个")
+            val saved = normalized.copy(
+                position = previous?.position ?: ((data.templates.maxOfOrNull { it.position } ?: -1) + 1),
+                updatedAt = System.currentTimeMillis(),
+            )
+            database.saveLedgerRules(listOf(saved.toRow(keys)))
+            publish { d -> d.copy(templates = (d.templates.filterNot { it.id == saved.id } + saved).sortedBy { it.position }) }
+            saved
         }
     }
 
@@ -919,6 +1142,7 @@ class LedgerRepository(
                         recurring = write.recurring.map { it.toRow(keys) },
                         tombstones = write.tombstones.map { it.toRow() },
                         debts = write.installments.map { it.toRow(keys) } + write.loans.map { it.toRow(keys) },
+                        rules = write.rules.map { it.toRow(keys) } + write.templates.map { it.toRow(keys) },
                     ),
                 )
             }
@@ -970,6 +1194,14 @@ class LedgerRepository(
         id, LedgerJson.DEBT_LOAN, updatedAt, keys.field.encrypt(LedgerJson.debtPayload(this), debtContext(id)),
     )
 
+    private fun LedgerRule.toRow(keys: SessionKeys) = LedgerRuleRow(
+        id, RuleMath.KIND_RULE, updatedAt, keys.field.encrypt(RuleMath.ruleJson(this).toString(), ruleContext(id)),
+    )
+
+    private fun LedgerTemplate.toRow(keys: SessionKeys) = LedgerRuleRow(
+        id, RuleMath.KIND_TEMPLATE, updatedAt, keys.field.encrypt(RuleMath.templateJson(this).toString(), ruleContext(id)),
+    )
+
     private fun LedgerRecurring.toRow(keys: SessionKeys) = LedgerRecurringRow(
         id, updatedAt,
         keys.field.encrypt(LedgerJson.recurringPayload(this), recurringContext(id)),
@@ -985,5 +1217,6 @@ class LedgerRepository(
         fun pendingContext(id: String) = "ledger:pending:$id"
         fun batchContext(id: String) = "ledger:batch:$id"
         fun debtContext(id: String) = "ledger:debt:$id"
+        fun ruleContext(id: String) = "ledger:rule:$id"
     }
 }

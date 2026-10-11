@@ -10,6 +10,8 @@ import com.xiguli.jinkui.data.ledger.LedgerData
 import com.xiguli.jinkui.data.ledger.LedgerMath
 import com.xiguli.jinkui.data.ledger.LedgerTransaction
 import com.xiguli.jinkui.data.ledger.Money
+import com.xiguli.jinkui.data.ledger.RefundMath
+import com.xiguli.jinkui.data.ledger.Reimburse
 import com.xiguli.jinkui.data.ledger.Summary
 import com.xiguli.jinkui.data.ledger.TxFilter
 import com.xiguli.jinkui.data.ledger.TxType
@@ -105,24 +107,34 @@ fun buildLedgerUi(
     val filtered = LedgerMath.filter(inMonth, filter, data.categories)
     val accountsById = data.accounts.associateBy { it.id }
     val categoriesById = data.categories.associateBy { it.id }
+    // 1.4.0-alpha04：收支汇总、每天的收 / 支与预算用统计口径（退款冲减原支出，报销的支出与报销到账不计）；
+    // 列表里每一笔仍然显示原始金额
+    val statsMonth = LedgerMath.filter(LedgerMath.inMonth(RefundMath.forStats(data.transactions), month, zone), filter, data.categories)
     // 汇总跟随筛选：筛了某个分类，就看这个分类的收支
-    val summary = LedgerMath.summary(filtered)
+    val summary = LedgerMath.summary(statsMonth)
+    val dayStats = statsMonth.groupBy { LedgerMath.dateOf(it.occurredAt, zone) }.mapValues { LedgerMath.summary(it.value) }
+    val refunds = RefundMath.refundTotals(data.transactions)
     val days = LedgerMath.groupByDay(filtered, zone).map { day ->
+        val sum = dayStats[day.date] ?: Summary.ZERO
         DayUi(
             date = day.date,
             label = shortDayLabel(day.date, today),
             weekday = weekdayLabel(day.date),
-            totals = dayTotals(day.summary),
-            rows = day.items.map { txRow(it, accountsById, categoriesById, zone) },
-            expense = day.summary.expense,
-            income = day.summary.income,
+            totals = dayTotals(sum),
+            rows = day.items.map { txRow(it, accountsById, categoriesById, zone, refunds[it.id] ?: 0L) },
+            expense = sum.expense,
+            income = sum.income,
         )
     }
     return LedgerUi(
         month = month,
         summary = summary,
         days = days,
-        totalBudget = LedgerMath.budgetProgress(data.budgets.filter { it.categoryId == null }, inMonth, data.categories).firstOrNull(),
+        totalBudget = LedgerMath.budgetProgress(
+            data.budgets.filter { it.categoryId == null },
+            LedgerMath.inMonth(RefundMath.forStats(data.transactions), month, zone),
+            data.categories,
+        ).firstOrNull(),
         accounts = data.accounts,
         accountsById = accountsById,
         categoriesById = categoriesById,
@@ -151,6 +163,8 @@ fun txRow(
     accountsById: Map<String, LedgerAccount>,
     categoriesById: Map<String, LedgerCategory>,
     zone: ZoneId,
+    /** 1.4.0-alpha04：这笔支出已经退了多少。 */
+    refunded: Long = 0L,
 ): TxRowUi {
     val account = accountsById[tx.accountId]
     val title: String
@@ -167,7 +181,17 @@ fun txRow(
         where = account?.name ?: "未知账户"
         iconKey = category?.icon ?: category?.parentId?.let { categoriesById[it]?.icon }
     }
-    val detail = listOf(tx.note, tx.tags.joinToString(" ") { "#$it" }).filter { it.isNotBlank() }.joinToString("　")
+    // 1.4.0-alpha04：退款 / 报销的标记放在备注前面
+    val mark = when {
+        tx.type == TxType.EXPENSE && refunded >= tx.amount && refunded > 0 -> "已全额退款"
+        tx.type == TxType.EXPENSE && refunded > 0 -> "已退 ${Money.format(refunded)}"
+        tx.reimburse == Reimburse.PENDING -> "待报销"
+        tx.reimburse == Reimburse.DONE -> "已报销"
+        tx.refundOf != null -> "退款"
+        tx.reimburseOf.isNotEmpty() -> "报销到账"
+        else -> ""
+    }
+    val detail = listOf(mark, tx.note, tx.tags.joinToString(" ") { "#$it" }).filter { it.isNotBlank() }.joinToString("　")
     val time = Instant.ofEpochMilli(tx.occurredAt).atZone(zone).toLocalTime()
     val subtitle = "%02d:%02d　%s".format(time.hour, time.minute, where) + if (detail.isNotEmpty()) "　$detail" else ""
     val amountText = when (tx.type) {
