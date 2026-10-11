@@ -161,12 +161,26 @@ class DebtMathTest {
 
     @Test
     fun withoutSettingsOnlyBalanceIsKnown() {
-        val plain = huabei.copy(credit = null)
+        // 不是花呗的信用账户没设账单日：只知道欠款（1.4.0-alpha02 起花呗有默认账单日，见下一个测试）
+        val plain = huabei.copy(name = "示例白条", credit = null)
         val view = DebtMath.credit(plain, huabeiTxs(), emptyList(), d(2026, 10, 8), zone)
         assertNull(view.open)
+        assertNull(view.settings)
         assertTrue(view.statements.isEmpty())
         assertEquals(1_100_00L, view.used)
+        assertEquals(1_100_00L, view.debt)
         assertNull(view.available)
+    }
+
+    @Test
+    fun huabeiWithoutSettingsUsesDefaultStatementAndDueDay() {
+        val plain = huabei.copy(credit = null)
+        val view = DebtMath.credit(plain, huabeiTxs(), emptyList(), d(2026, 10, 8), zone)
+        assertTrue(view.defaulted)
+        assertEquals(CreditSettings(1, 10), view.settings)
+        assertEquals(d(2026, 10, 1), view.latest!!.statementDate)
+        assertEquals(d(2026, 10, 10), view.latest!!.dueDate)
+        assertEquals(1_100_00L, view.debt)
     }
 
     // ── 分期 ──────────────────────────────────────────────────────

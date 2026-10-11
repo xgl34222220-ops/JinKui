@@ -116,7 +116,8 @@ class DebtScreensUiTest {
         assertEquals(900_00L + 2_000_00L + overview.items.filter { it.title == "示例信用卡" && it.counts }.sumOf { it.amount }, overview.monthDue)
         var opened: String? = null
         val activity = h.show { DebtOverviewContent(overview, DebtOverviewActions(onCredit = { opened = it })) }
-        compose.onNodeWithText("本月待还(元)").assertExists()
+        compose.onNodeWithText("欠款合计(元)").assertExists()
+        compose.onNodeWithText("本月待还").assertExists()
         compose.onAllNodesWithText("已逾期 1 天").onFirst().assertExists()
         compose.onAllNodesWithText("花呗").onFirst().assertExists()
         h.snapshot(activity, "debts-overview-light")
@@ -126,6 +127,37 @@ class DebtScreensUiTest {
         h.close()
         val dark = h.show(dark = true) { DebtOverviewContent(overview, DebtOverviewActions()) }
         h.snapshot(dark, "debts-overview-dark")
+    }
+
+    /** 1.4.0-alpha02：导入一木账单（合成样例）后，总览里能看到欠款合计、默认账单日的花呗、没设账单日的信用卡与借贷。 */
+    @Test
+    fun importedDebtsShowInOverview() {
+        val table = com.xiguli.jinkui.data.importer.TableReader.read(
+            com.xiguli.jinkui.data.importer.XlsFixture.xls(com.xiguli.jinkui.data.importer.XlsFixture.debtSample()), "一木账单.xls",
+        )
+        val parsed = com.xiguli.jinkui.data.importer.BillParser.parse(table, com.xiguli.jinkui.data.importer.BillSource.APP)
+        val base = LedgerData(categories = LedgerDefaults.categories())
+        val preview = com.xiguli.jinkui.data.importer.BillImport.preview(parsed, base, zone, now = 1L)
+        val imported = base.copy(
+            accounts = preview.usedNewAccounts.mapIndexed { i, a -> a.copy(position = i) },
+            categories = base.categories + preview.usedNewCategories,
+            transactions = com.xiguli.jinkui.data.importer.BillImport.transactions(preview, zone, 2L, "batch"),
+        )
+        val o = DebtMath.overview(imported, LocalDate.of(2026, 10, 5), zone)
+        assertEquals(950_00L, o.totalDebt)
+        val activity = h.show { DebtOverviewContent(o, DebtOverviewActions()) }
+        compose.onNodeWithText("欠款合计(元)").assertExists()
+        compose.onNodeWithText("950.00").assertExists()
+        compose.onNodeWithText("设置账单日 ›").performScrollTo().assertExists()
+        compose.onNodeWithText("默认 · 每月 1 号出账、10 号还款，可在账单设置里修改").performScrollTo().assertExists()
+        compose.onNodeWithText("老王").performScrollTo().assertExists()
+        h.snapshot(activity, "debts-overview-imported-light")
+        h.close()
+        val hb = o.credits.first { it.account.name == "花呗" }
+        val detail = h.show { CreditStatementContent(hb, LocalDate.of(2026, 10, 5), CreditActions()) }
+        compose.onNodeWithText("默认账单日：每月 1 号出账、10 号还款").assertExists()
+        compose.onNodeWithText("2026年9月账单").performScrollTo().assertExists()
+        h.snapshot(detail, "credit-statement-default-light")
     }
 
     @Test
