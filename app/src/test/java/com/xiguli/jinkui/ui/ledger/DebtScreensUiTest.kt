@@ -251,4 +251,34 @@ class DebtScreensUiTest {
         assertEquals(1, opened)
         h.snapshot(activity, "ledger-debt-banner-light")
     }
+    /** 回归（587b7ae）：首页经过 EntryHost.actions() 之后，“欠款 / 账单”快捷入口与到期提示条都要打开欠款页。 */
+    @Test
+    fun debtEntriesWorkThroughEntryHostActions() {
+        val reminders = debtReminders(data, today, zone)
+        var opened = 0
+        val ui = buildLedgerUi(data, YearMonth.of(2026, 10), TxFilter(), zone, today)
+        val actions = EntryHostState().actions(LedgerHomeActions(onDebts = { opened++ }))
+        h.show { LedgerHome(ui, TxFilter(), LazyListState(), actions, debtReminders = reminders, today = today) }
+        compose.onNodeWithText("${reminders.size} 笔欠款 / 账单待处理，其中 ${reminders.count { it.overdue }} 笔已逾期").assertExists().performClick()
+        assertEquals(1, opened)
+        compose.onAllNodesWithText("欠款 / 账单").onFirst().performSemanticsAction(SemanticsActions.OnClick)
+        compose.waitForIdle()
+        assertEquals(2, opened)
+    }
+
+    /** EntryHost.actions() 要把页面传进来的每一个导航回调原样转交（只有记账面板、菜单与多选由它自己接管）。 */
+    @Test
+    fun entryHostActionsForwardEveryBaseCallback() {
+        val hits = mutableListOf<String>()
+        val base = LedgerHomeActions(
+            onMonth = { hits += "month" }, onQuery = { hits += "query" }, onPickAccount = { hits += "account" },
+            onPickCategory = { hits += "category" }, onClearFilters = { hits += "clear" }, onStats = { hits += "stats" },
+            onBudget = { hits += "budget" }, onLock = { hits += "lock" }, onMore = { hits += "more" },
+            onAssets = { hits += "assets" }, onPending = { hits += "pending" }, onDebts = { hits += "debts" },
+        )
+        val a = EntryHostState().actions(base)
+        a.onMonth(YearMonth.of(2026, 10)); a.onQuery("x"); a.onPickAccount(); a.onPickCategory(); a.onClearFilters()
+        a.onStats(); a.onBudget(); a.onLock(); a.onMore(); a.onAssets(); a.onPending(); a.onDebts()
+        assertEquals(listOf("month", "query", "account", "category", "clear", "stats", "budget", "lock", "more", "assets", "pending", "debts"), hits)
+    }
 }
