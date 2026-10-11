@@ -303,7 +303,7 @@ class SmartScreensUiTest {
         val activity = h.show { MeContent(ui, MeActions(onImport = { imports++ })) }
         compose.onNodeWithText("记账助手").performScrollTo()
         h.snapshot(activity, "me-assistant-light")
-        compose.onNodeWithText("导入账单").performClick()
+        compose.onNodeWithText("导入账单").performScrollTo().performClick()
         assertEquals(1, imports)
     }
 }
