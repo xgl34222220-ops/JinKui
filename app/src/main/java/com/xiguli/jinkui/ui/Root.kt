@@ -209,6 +209,7 @@ private fun MainNavigation() {
                                 onDebts = { navigator.push(Screen.Debts) },
                                 onReimburse = { navigator.push(Screen.Reimburse) },
                                 onRules = { navigator.push(Screen.LedgerRules) },
+                                onTrash = { navigator.push(Screen.CardTrash) },
                             ),
                         )
                     }
@@ -282,6 +283,7 @@ private fun MainNavigation() {
                 Screen.LedgerBudget -> LedgerBudgetScreen(onBack = { navigator.pop() })
                 Screen.Reimburse -> com.xiguli.jinkui.ui.ledger.ReimburseScreen(onBack = { navigator.pop() })
                 Screen.LedgerRules -> com.xiguli.jinkui.ui.ledger.LedgerRulesScreen(onBack = { navigator.pop() })
+                Screen.CardTrash -> com.xiguli.jinkui.ui.card.CardTrashScreen(onBack = { navigator.pop() })
                 Screen.LedgerCategories -> LedgerCategoriesScreen(onBack = { navigator.pop() })
                 Screen.LedgerRecurring -> LedgerRecurringScreen(onBack = { navigator.pop() })
             }

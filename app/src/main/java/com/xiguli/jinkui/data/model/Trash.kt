@@ -10,9 +10,11 @@ object TrashMath {
     const val DAY_MS = 24L * 60 * 60 * 1000
     const val RETENTION_MS = RETENTION_DAYS * DAY_MS
 
+    /** 放进回收站满 30 天、该彻底删除了（[deletedAt] 为 null 表示不在回收站）。 */
+    fun isExpired(deletedAt: Long?, now: Long): Boolean = deletedAt != null && now - deletedAt >= RETENTION_MS
+
     /** 到期该彻底删除的卡片（放进回收站满 30 天）。 */
-    fun expired(cards: List<Card>, now: Long): List<Card> =
-        cards.filter { val at = it.deletedAt; at != null && now - at >= RETENTION_MS }
+    fun expired(cards: List<Card>, now: Long): List<Card> = cards.filter { isExpired(it.deletedAt, now) }
 
     /** 还剩几天自动删除（至少 0）。 */
     fun daysLeft(card: Card, now: Long): Int {

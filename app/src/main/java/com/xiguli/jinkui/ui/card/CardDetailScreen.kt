@@ -193,7 +193,14 @@ class CardDetailViewModel(private val container: AppContainer, private val cardI
         viewModelScope.launch {
             runCatching { repository.delete(cardId) }
                 .onSuccess {
-                    container.messages.show("已删除")
+                    // 1.4.0-alpha04：删除 = 移到回收站，消息条上可以直接撤销
+                    container.messages.show(DELETED_MESSAGE, "撤销") {
+                        container.scope.launch {
+                            runCatching { repository.restoreFromTrash(cardId) }
+                                .onSuccess { container.messages.show("已还原") }
+                                .onFailure { container.messages.show("还原失败：${it.message.orEmpty()}") }
+                        }
+                    }
                     onDeleted()
                 }
                 .onFailure { container.messages.show("删除失败：${it.message.orEmpty()}") }
@@ -287,18 +294,14 @@ fun CardDetailScreen(cardId: String, onBack: () -> Unit, onEdit: () -> Unit) {
     }
 
     if (confirmDelete && current != null) {
-        JkDialog(
-            title = "删除「${current.title.ifBlank { "未命名" }}」？",
+        DeleteCardDialog(
+            title = current.title,
             onDismiss = { confirmDelete = false },
-            confirmText = "删除",
-            danger = true,
             onConfirm = {
                 confirmDelete = false
                 viewModel.delete(onBack)
             },
-        ) {
-            Text("卡片、附件照片和历史密码会一起删除，无法恢复。", style = JkType.body, color = colors.textSecondary)
-        }
+        )
     }
 
     if (showHistory) {
@@ -840,5 +843,23 @@ private fun HistorySheet(
         ) {
             Text("这张卡片保存的 ${entries?.size ?: 0} 条旧值会被永久删除，无法恢复。", style = JkType.body, color = colors.textSecondary)
         }
+    }
+}
+
+/** 1.4.0-alpha04：删除卡片的说明与提示（卡片详情与批量整理共用）。 */
+const val DELETE_EXPLAIN = "卡片会移到回收站，30 天内可以在“我的 · 回收站”里还原，之后自动彻底删除。"
+const val DELETED_MESSAGE = "已移到回收站，30 天内可以还原"
+
+/** 删除确认（1.4.0-alpha04）：删除 = 移到回收站。 */
+@Composable
+fun DeleteCardDialog(title: String, onDismiss: () -> Unit, onConfirm: () -> Unit) {
+    JkDialog(
+        title = "删除「${title.ifBlank { "未命名" }}」？",
+        onDismiss = onDismiss,
+        confirmText = "移到回收站",
+        danger = true,
+        onConfirm = onConfirm,
+    ) {
+        Text(DELETE_EXPLAIN, style = JkType.body, color = Jk.colors.textSecondary)
     }
 }

@@ -59,7 +59,7 @@ class VaultRepository(
         val keys = keys()
         // 回收站里满 30 天的卡片：先彻底删除（连同附件文件），再载入
         val rows = database.cards()
-        val expired = rows.filter { val at = it.deletedAt; at != null && now - at >= TrashMath.RETENTION_MS }.map { it.id }.toSet()
+        val expired = rows.filter { TrashMath.isExpired(it.deletedAt, now) }.map { it.id }.toSet()
         if (expired.isNotEmpty()) {
             val doomedFiles = database.attachments().filter { it.cardId in expired }.map { it.id }
             database.deleteCards(expired)

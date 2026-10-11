@@ -74,6 +74,8 @@ data class MeUi(
     val cards: Int,
     val issues: Int = 0,
     val version: String = "",
+    /** 回收站里的卡片数（1.4.0-alpha04 起）。 */
+    val trash: Int = 0,
 )
 
 fun buildMeUi(data: LedgerData, cards: Int, today: LocalDate, zone: ZoneId, version: String = ""): MeUi {
@@ -103,6 +105,8 @@ class MeActions(
     val onReimburse: () -> Unit = {},
     /** 规则与模板（1.4.0-alpha04 起）。 */
     val onRules: () -> Unit = {},
+    /** 卡包回收站（1.4.0-alpha04 起）。 */
+    val onTrash: () -> Unit = {},
 )
 
 @Composable
@@ -110,12 +114,13 @@ fun MeScreen(actions: MeActions) {
     val container = LocalContainer.current
     val data by container.ledger.data.collectAsStateWithLifecycle()
     val cards by container.repository.cards.collectAsStateWithLifecycle()
+    val trash by container.repository.trash.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val version = remember {
         runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull() ?: ""
     }
     val zone = ZoneId.systemDefault()
-    val ui = remember(data, cards.size) { buildMeUi(data, cards.size, LocalDate.now(zone), zone, version) }
+    val ui = remember(data, cards.size, trash.size) { buildMeUi(data, cards.size, LocalDate.now(zone), zone, version).copy(trash = trash.size) }
     var showGenerator by remember { mutableStateOf(false) }
     MeContent(
         ui,
@@ -137,6 +142,7 @@ fun MeScreen(actions: MeActions) {
             onDebts = actions.onDebts,
             onReimburse = actions.onReimburse,
             onRules = actions.onRules,
+            onTrash = actions.onTrash,
         ),
     )
     if (showGenerator) GeneratorSheet(onDismiss = { showGenerator = false })
@@ -194,6 +200,8 @@ fun MeContent(ui: MeUi, actions: MeActions) {
             MeRow(MintGlyph.SHIELD, "安全体检", "弱密码、重复密码与到期提醒", actions.onHealth)
             JkDivider(inset = 56.dp)
             MeRow(MintGlyph.KEY, "密码生成器", null, actions.onGenerator)
+            JkDivider(inset = 56.dp)
+            MeRow(MintGlyph.CARDS, "回收站", if (ui.trash > 0) "${ui.trash} 张删除的卡片，30 天内可以还原" else "删除的卡片保留 30 天，可以还原", actions.onTrash)
             JkDivider(inset = 56.dp)
             MeRow(MintGlyph.CARDS, "账户与余额", "现金、银行卡、支付宝、微信、信用卡", actions.onAccounts)
         }
