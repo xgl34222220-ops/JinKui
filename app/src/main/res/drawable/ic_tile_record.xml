@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 快捷设置磁贴“记一笔”：单色小票与加号（系统按磁贴状态着色）。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:pathData="M6,3.5h12a1,1 0 0 1 1,1v16l-2.33,-1.5 -2.33,1.5 -2.34,-1.5 -2.33,1.5 -2.34,-1.5 -2.33,1.5v-16a1,1 0 0 1 1,-1z"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.8"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M12,8v6M9,11h6"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.8"
+        android:strokeLineCap="round" />
+</vector>

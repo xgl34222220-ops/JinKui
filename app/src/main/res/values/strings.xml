@@ -8,4 +8,6 @@
     <string name="debt_channel_description">信用账单、借贷到期前 3 天提醒（不显示金额）</string>
     <string name="debt_notify_title">账单或欠款快到期了</string>
     <string name="debt_notify_text">打开金匮解锁后查看待还与待收</string>
+    <string name="widget_record_hint">解锁后记账</string>
+    <string name="widget_record_description">一键打开金匮记一笔；不显示任何金额</string>
 </resources>

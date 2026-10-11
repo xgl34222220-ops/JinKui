@@ -76,5 +76,39 @@
         <receiver
             android:name=".core.debt.DebtReminderReceiver"
             android:exported="false" />
+
+        <!--
+            1.4.0-alpha04 快捷设置磁贴“记一笔”：android:permission 表示只有系统能绑定（金匮并不申请这个权限）。
+            点一下打开金匮（照常要求解锁），解锁后直接打开记账面板；磁贴不读取、不显示任何数据。
+        -->
+        <service
+            android:name=".core.quick.QuickRecordTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_tile_record"
+            android:label="@string/shortcut_record_short"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.service.quicksettings.ACTIVE_TILE"
+                android:value="false" />
+        </service>
+
+        <!--
+            1.4.0-alpha04 桌面小部件“记一笔”：只有图标与文字，不显示金额或任何记录，锁定与否都一样；
+            点一下打开金匮，解锁后直接打开记账面板。不导出（系统给小部件的广播是显式的）。
+        -->
+        <receiver
+            android:name=".core.quick.QuickRecordWidget"
+            android:exported="false"
+            android:label="@string/shortcut_record_short">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_quick_record" />
+        </receiver>
     </application>
 </manifest>
