@@ -48,6 +48,8 @@ sealed interface Screen {
     data object LedgerAddCredit : Screen
     /** 1.4.0-alpha04：报销（待报销、已报销）。 */
     data object Reimburse : Screen
+    /** 1.4.0-alpha04：自动分类规则与记账模板。 */
+    data object LedgerRules : Screen
 }
 
 /** 首页底部悬浮栏的五个分区（1.1 起）：账本是首页；卡包保留全部卡片功能。 */

@@ -101,6 +101,8 @@ class MeActions(
     val onDebts: () -> Unit = {},
     /** 报销（1.4.0-alpha04 起）。 */
     val onReimburse: () -> Unit = {},
+    /** 规则与模板（1.4.0-alpha04 起）。 */
+    val onRules: () -> Unit = {},
 )
 
 @Composable
@@ -134,6 +136,7 @@ fun MeScreen(actions: MeActions) {
             onAuto = actions.onAuto,
             onDebts = actions.onDebts,
             onReimburse = actions.onReimburse,
+            onRules = actions.onRules,
         ),
     )
     if (showGenerator) GeneratorSheet(onDismiss = { showGenerator = false })
@@ -199,6 +202,8 @@ fun MeContent(ui: MeUi, actions: MeActions) {
             MeRow(MintGlyph.BILL, "欠款 / 借贷", "借钱给别人、欠别人钱，信用卡与花呗账单、分期，到期提醒", actions.onDebts)
             JkDivider(inset = 56.dp)
             MeRow(MintGlyph.BILL, "报销", "替单位垫付的待报销、已报销；退款在账本里长按那笔支出", actions.onReimburse)
+            JkDivider(inset = 56.dp)
+            MeRow(MintGlyph.ADD_NOTE, "规则与模板", "按关键词自动分类，导入账单也套用；常记的一笔一点就记", actions.onRules)
             JkDivider(inset = 56.dp)
             MeRow(MintGlyph.ADD_NOTE, "导入账单", "微信支付、支付宝、记账 App 账单或 CSV 表格", actions.onImport)
             JkDivider(inset = 56.dp)

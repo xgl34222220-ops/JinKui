@@ -192,6 +192,48 @@ fun EntrySheet(
         if (!accountTouched && type != TxType.TRANSFER) defaultAccount(newId)?.let { accountId = it }
     }
 
+    // 1.4.0-alpha04：记账模板。带金额的点一下直接记下；不带金额的填好分类 / 账户 / 备注，再输金额
+    val showTemplates = existing == null && loanAction == null && data.templates.isNotEmpty()
+    fun useTemplate(t: com.xiguli.jinkui.data.ledger.LedgerTemplate) {
+        touch()
+        if (t.amount != null) {
+            val tx = t.toTransaction(id, time, data.accounts, accountId?.takeIf { a -> active.any { it.id == a } } ?: active.firstOrNull()?.id)
+            when {
+                tx == null -> message("请先在“账户与余额”里添加一个账户")
+                tx.type == TxType.TRANSFER && (tx.toAccountId == null || tx.toAccountId == tx.accountId) -> message("模板里的转入账户不可用，请在“规则与模板”里改一下")
+                else -> onSave(if (tx.type != TxType.TRANSFER && tx.categoryId == null) tx.copy(categoryId = firstTop(tx.type)) else tx, false) {}
+            }
+            return
+        }
+        type = t.type
+        if (t.type != TxType.TRANSFER) t.categoryId?.let { categoryId = it }
+        t.accountId?.takeIf { a -> active.any { it.id == a } }?.let {
+            accountId = it
+            accountTouched = true
+        }
+        if (t.type == TxType.TRANSFER) t.toAccountId?.takeIf { a -> active.any { it.id == a } }?.let { toAccountId = it }
+        if (t.note.isNotBlank()) note = t.note
+        if (t.tags.isNotEmpty()) tags = t.tags.joinToString(" ")
+        message("已按模板“${t.name}”填好，输入金额即可")
+    }
+
+    // 1.4.0-alpha04：自动分类规则——按备注给出建议（有金额时也看金额范围），点一下套用
+    val ruleHit = if (loanAction == null && type != TxType.TRANSFER && note.isNotBlank() && data.rules.isNotEmpty()) {
+        com.xiguli.jinkui.data.ledger.RuleMath.match(
+            data.rules, type, listOf(note), Money.evaluate(amount)?.takeIf { it > 0 }, data.categories, active,
+        )
+    } else {
+        null
+    }
+    fun applyRule(hit: com.xiguli.jinkui.data.ledger.RuleHit) {
+        hit.categoryId?.let { categoryId = it }
+        hit.accountId?.let {
+            accountId = it
+            accountTouched = true
+        }
+        if (hit.tags.isNotEmpty()) tags = (LedgerMath.parseTags(tags) + hit.tags).distinct().take(12).joinToString(" ")
+    }
+
     var showDate by remember { mutableStateOf(false) }
     var showTime by remember { mutableStateOf(false) }
     var pickFrom by remember { mutableStateOf(false) }
@@ -301,6 +343,11 @@ fun EntrySheet(
             if (existing != null) {
                 JkIconButton(Icons.Outlined.DeleteOutline, "删除这笔", { confirmDelete = true }, tint = colors.danger)
             }
+        }
+
+        if (showTemplates) {
+            Spacer(Modifier.height(Space.x1))
+            TemplateChips(data.templates, onPick = ::useTemplate)
         }
 
         // 金额：整块最显眼。左边是这笔的类型与分类，右边等宽数字的大号金额（颜色随类型）
@@ -438,6 +485,23 @@ fun EntrySheet(
         Row(horizontalArrangement = Arrangement.spacedBy(Space.x1)) {
             CompactField(note, { note = it.take(500) }, "添加备注", Modifier.weight(3f))
             CompactField(tags, { tags = it.take(120) }, "#标签", Modifier.weight(2f))
+        }
+        ruleHit?.let { hit ->
+            val catNow = selectedCategory?.id ?: tops.firstOrNull()?.id
+            val pendingCategory = hit.categoryId?.takeIf { it != catNow }
+            val pendingAccount = hit.accountId?.takeIf { it != accountId }
+            val pendingTags = hit.tags.filterNot { it in LedgerMath.parseTags(tags) }
+            if (pendingCategory != null || pendingAccount != null || pendingTags.isNotEmpty()) {
+                RuleSuggestion(
+                    text = listOfNotNull(
+                        pendingCategory?.let { categoryLabel(it, byId) },
+                        pendingAccount?.let(accountsById::get)?.name,
+                        pendingTags.takeIf { it.isNotEmpty() }?.joinToString(" ") { "#$it" },
+                    ).joinToString(" · "),
+                    keyword = hit.rule.keywords.firstOrNull { note.contains(it, ignoreCase = true) } ?: hit.rule.keywords.first(),
+                    onApply = { applyRule(hit) },
+                )
+            }
         }
 
         // 数字键盘
