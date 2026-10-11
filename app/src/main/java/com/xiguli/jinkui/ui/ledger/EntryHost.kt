@@ -104,6 +104,7 @@ class EntryHostState {
         onDelete = { confirmDelete = it },
         onRowMenu = { menuFor = it },
         onPending = base.onPending,
+        onDebts = base.onDebts,
         onLoan = { create(loan = LoanAction.LEND) },
         selection = selection.takeIf { multiSelect },
         onSelectStart = { if (multiSelect) selection = setOf(it.id) else menuFor = it },
