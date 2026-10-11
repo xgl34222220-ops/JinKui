@@ -58,6 +58,8 @@ data class AppSettings(
     val autoSave: Boolean = false,
     /** 减少透明度（1.3 起）：玻璃表面换成不透明填充、不做背景模糊。只是本机偏好，不进备份。 */
     val reduceTransparency: Boolean = false,
+    /** 账单到期的系统通知（1.4 起）。默认关闭；打开时申请通知权限，通知里不含金额。 */
+    val debtNotify: Boolean = false,
 )
 
 /** 非敏感偏好设置。主题等需要在解锁前读取，因此不放进加密库。 */
@@ -86,6 +88,7 @@ class SettingsRepository(context: Context) {
             .putBoolean(KEY_AUTO, next.autoBookkeeping)
             .putBoolean(KEY_AUTO_SAVE, next.autoSave)
             .putBoolean(KEY_REDUCE_TRANSPARENCY, next.reduceTransparency)
+            .putBoolean(KEY_DEBT_NOTIFY, next.debtNotify)
             .commit()
         state.value = next
     }
@@ -108,6 +111,7 @@ class SettingsRepository(context: Context) {
             autoBookkeeping = prefs.getBoolean(KEY_AUTO, defaults.autoBookkeeping),
             autoSave = prefs.getBoolean(KEY_AUTO_SAVE, defaults.autoSave),
             reduceTransparency = prefs.getBoolean(KEY_REDUCE_TRANSPARENCY, defaults.reduceTransparency),
+            debtNotify = prefs.getBoolean(KEY_DEBT_NOTIFY, defaults.debtNotify),
         )
     }
 
@@ -127,6 +131,7 @@ class SettingsRepository(context: Context) {
         private const val KEY_AUTO = "auto_bookkeeping"
         private const val KEY_AUTO_SAVE = "auto_save"
         private const val KEY_REDUCE_TRANSPARENCY = "reduce_transparency"
+        private const val KEY_DEBT_NOTIFY = "debt_notify"
 
         val AUTO_LOCK_OPTIONS = listOf(0 to "立即", 30 to "30 秒", 60 to "1 分钟", 300 to "5 分钟", 600 to "10 分钟")
         val CLIPBOARD_OPTIONS = listOf(15 to "15 秒", 30 to "30 秒", 60 to "1 分钟", 120 to "2 分钟")

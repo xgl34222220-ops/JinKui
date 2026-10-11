@@ -4,4 +4,8 @@
     <string name="auto_bookkeeping_label">金匮自动记账</string>
     <string name="shortcut_record_short">记一笔</string>
     <string name="shortcut_record_long">金匮：记一笔</string>
+    <string name="debt_channel">账单到期提醒</string>
+    <string name="debt_channel_description">信用账单、借贷到期前 3 天提醒（不显示金额）</string>
+    <string name="debt_notify_title">账单或欠款快到期了</string>
+    <string name="debt_notify_text">打开金匮解锁后查看待还与待收</string>
 </resources>

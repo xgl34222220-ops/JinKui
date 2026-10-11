@@ -168,6 +168,22 @@ class AppContainer(app: Application) {
                 .distinctUntilChanged()
                 .collect { applyFonts() }
         }
+        // 账单到期提醒（1.4）：只在解锁、账本有变化或开关变化时重排；锁定时账本为空，不动已经排好的闹钟
+        scope.launch {
+            kotlinx.coroutines.flow.combine(ledger.data, settings.flow.map { it.debtNotify }.distinctUntilChanged()) { data, on -> data to on }
+                .collect { (data, on) ->
+                    if (!on) {
+                        runCatching { com.xiguli.jinkui.core.debt.DebtReminders.cancel(appContext) }
+                        return@collect
+                    }
+                    if (vault.keys == null || data === com.xiguli.jinkui.data.ledger.LedgerData.EMPTY) return@collect
+                    val items = kotlinx.coroutines.withContext(Dispatchers.Default) {
+                        val zone = java.time.ZoneId.systemDefault()
+                        com.xiguli.jinkui.data.ledger.DebtMath.overview(data, java.time.LocalDate.now(zone), zone).items
+                    }
+                    runCatching { com.xiguli.jinkui.core.debt.DebtReminders.schedule(appContext, true, items) }
+                }
+        }
         // 锁定只丢弃内存明文；剪贴板按自己的倒计时清空，
         // 否则“复制后切到别的应用粘贴”会因为自动锁定而粘贴不到。
         vault.onLocked = {
