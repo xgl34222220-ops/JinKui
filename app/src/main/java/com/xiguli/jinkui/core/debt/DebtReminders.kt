@@ -99,7 +99,9 @@ class DebtReminderReceiver : BroadcastReceiver() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         val notification = android.app.Notification.Builder(context, DebtReminders.CHANNEL)
-            .setSmallIcon(R.drawable.ic_notify_bill)
+            // 1.4.0-alpha03：状态栏小图标换成 B 款标志的单色剪影，着薄荷色
+            .setSmallIcon(R.drawable.ic_stat_jinkui)
+            .setColor(0xFF3AA084.toInt())
             .setContentTitle(context.getString(R.string.debt_notify_title))
             .setContentText(context.getString(R.string.debt_notify_text))
             .setContentIntent(open)

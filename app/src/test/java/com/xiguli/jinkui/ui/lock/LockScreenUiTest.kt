@@ -12,7 +12,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
+import androidx.compose.ui.test.assertHasClickAction
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.longClick
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.performClick
 import com.xiguli.jinkui.data.repo.ThemeMode
 import com.xiguli.jinkui.ui.theme.Jk
@@ -79,26 +84,77 @@ class LockScreenUiTest {
         }.onFailure { println("截图 $name 失败：$it") }
     }
 
+    /** PIN 键盘（浅 / 深）：品牌、提示与数字键可用；左下生物识别键与右下删除键有读屏标签，删除键长按清空。 */
     @Test
     fun pinPadLightAndDark() {
         val digits = mutableListOf<Char>()
+        var biometric = 0
+        var backspace = 0
+        var cleared = 0
         val activity = show {
-            LockContent(LockUiState(usePin = true, secretLength = 3, pinEnabled = true, biometricReady = true), onDigit = { digits += it })
+            LockContent(
+                LockUiState(usePin = true, secretLength = 3, pinEnabled = true, biometricReady = true),
+                onDigit = { digits += it },
+                onBiometric = { biometric++ },
+                onBackspace = { backspace++ },
+                onClear = { cleared++ },
+            )
         }
+        compose.onNodeWithText("金匮").assertExists()
         compose.onNodeWithText("输入 PIN 解锁").assertExists()
+        compose.onNodeWithContentDescription("已输入 3 位").assertExists()
         compose.onNodeWithText("7").performClick()
         assertEquals(listOf('7'), digits)
-        snapshot(activity, "lock-pin-light")
+        compose.onNodeWithContentDescription("使用指纹或面容解锁").assertHasClickAction().performClick()
+        assertEquals(1, biometric)
+        compose.onNodeWithContentDescription("删除一位").performClick()
+        assertEquals(1, backspace)
+        compose.onNodeWithContentDescription("删除一位").performTouchInput { longClick() }
+        assertEquals(1, cleared)
+        compose.onNodeWithText("改用主密码").assertExists()
+        compose.onNodeWithText("忘记主密码？").assertExists()
+        compose.onNodeWithText("连续输错 10 次将清空全部数据").assertExists()
+        snapshot(activity, "lock-light")
         val dark = show(dark = true) {
-            LockContent(LockUiState(usePin = true, secretLength = 6, pinEnabled = true, error = "PIN 不正确，还可以再试 7 次"))
+            LockContent(LockUiState(usePin = true, secretLength = 4, pinEnabled = true, biometricReady = true))
         }
+        snapshot(dark, "lock-dark")
+    }
+
+    /** 输错 PIN：圆点变成危险色并在读屏里说明，玻璃提示条显示还剩几次（浅 / 深）。 */
+    @Test
+    fun wrongPinLightAndDark() {
+        val message = "PIN 不正确。再输错 7 次，将清空全部数据"
+        // 两个页面同时在：深色那页用另一条文字，查找时不会撞上浅色那页
+        val darkMessage = "PIN 不正确。再输错 6 次，将清空全部数据"
+        val activity = show {
+            LockContent(LockUiState(usePin = true, secretLength = 6, pinEnabled = true, biometricReady = true, error = message))
+        }
+        compose.onNodeWithText(message).assertExists()
+        compose.onNodeWithContentDescription("已输入 6 位，PIN 不正确").assertExists()
+        snapshot(activity, "lock-pin-error-light")
+        val dark = show(dark = true) {
+            LockContent(LockUiState(usePin = true, secretLength = 6, pinEnabled = true, error = darkMessage))
+        }
+        compose.onNodeWithText(darkMessage).assertExists()
         snapshot(dark, "lock-pin-error-dark")
     }
 
+    /** 主密码模式：冷却中时提示倒计时、“解锁”不可用；有生物识别时卡片里多一个按钮（浅 / 深）。 */
     @Test
-    fun passwordModeWithCooldown() {
-        val activity = show { LockContent(LockUiState(usePin = false, waitSeconds = 28, pinEnabled = true)) }
+    fun passwordModeLightAndDark() {
+        val activity = show { LockContent(LockUiState(usePin = false, waitSeconds = 28, pinEnabled = true, secret = "abc")) }
         compose.onNodeWithText("输错次数较多，请等待 28 秒").assertExists()
+        compose.onNodeWithText("解锁").assertIsNotEnabled()
+        compose.onNodeWithText("改用 PIN").assertExists()
         snapshot(activity, "lock-password-light")
+        var biometric = 0
+        val dark = show(dark = true) {
+            LockContent(LockUiState(usePin = false, biometricReady = true), onBiometric = { biometric++ })
+        }
+        compose.onNodeWithText("输入主密码解锁").assertExists()
+        compose.onNodeWithText("使用指纹或面容").performClick()
+        assertEquals(1, biometric)
+        snapshot(dark, "lock-password-dark")
     }
 }

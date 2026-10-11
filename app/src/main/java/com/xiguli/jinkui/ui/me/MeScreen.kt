@@ -46,7 +46,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.xiguli.jinkui.data.ledger.LedgerData
 import com.xiguli.jinkui.data.ledger.LedgerMath
 import com.xiguli.jinkui.ui.LocalContainer
-import com.xiguli.jinkui.ui.components.AppGlyph
+import com.xiguli.jinkui.ui.components.BrandMark
 import com.xiguli.jinkui.ui.components.BotanicalCard
 import com.xiguli.jinkui.ui.components.BotanicalLayout
 import com.xiguli.jinkui.ui.components.JkDivider
@@ -176,7 +176,8 @@ fun MeContent(ui: MeUi, actions: MeActions) {
                     }
                 }
             }
-            AppGlyph(Modifier.align(Alignment.TopCenter), size = 76.dp)
+            // 1.4.0-alpha03：换成与桌面图标同一枚 B 款标志（原来是线条“匣子”字标）
+            BrandMark(size = 72.dp, modifier = Modifier.align(Alignment.TopCenter).padding(top = 2.dp))
         }
         Spacer(Modifier.height(Space.x2))
         FeatureGrid(actions)

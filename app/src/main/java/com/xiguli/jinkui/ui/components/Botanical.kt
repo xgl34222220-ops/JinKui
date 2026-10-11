@@ -3,6 +3,8 @@ package com.xiguli.jinkui.ui.components
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
@@ -210,21 +212,48 @@ fun EmptyCalendarArt(modifier: Modifier = Modifier, size: Dp = 150.dp) {
     }
 }
 
-/** 头图里的应用字标：薄荷圆底上一枚线条“匣子”。 */
+/**
+ * 锁屏 / 首次设置 / “我的”头图上的品牌徽记（1.4.0-alpha03）：中间是与桌面图标同一枚 B 款标志（[BrandMark]），
+ * 外面一圈淡淡的薄荷光晕与两道玻璃光环，左下、右上各探出一枝小叶。只有绘制，读屏跳过（标题由调用方给出）。
+ * 取代 1.3 之前的线条“匣子”字标。
+ */
 @Composable
-fun AppGlyph(modifier: Modifier = Modifier, size: Dp = 72.dp) {
+fun BrandEmblem(modifier: Modifier = Modifier, markSize: Dp = 76.dp) {
     val colors = Jk.colors
-    Canvas(modifier.size(size).clearAndSetSemantics { }) {
-        val u = this.size.minDimension / 24f
-        drawCircle(colors.surface, 12 * u)
-        drawCircle(colors.primary, 10.4f * u)
-        val ink = colors.onPrimary
-        // 匣子：盒身 + 盖 + 锁扣
-        drawRoundRect(ink, Offset(6.5f * u, 10f * u), Size(11f * u, 7.5f * u), CornerRadius(1.6f * u), style = Stroke(1.3f * u))
-        drawRoundRect(ink, Offset(5.8f * u, 7.2f * u), Size(12.4f * u, 3f * u), CornerRadius(1.2f * u), style = Stroke(1.3f * u))
-        drawCircle(colors.hero, 1.3f * u, Offset(12f * u, 13f * u))
-        // 一片小叶
-        leaf(Offset(16.6f * u, 7.4f * u), 4.6f * u, 1.3f * u, 30f, colors.hero, Color.Transparent)
+    val dark = colors.isDark
+    Box(
+        modifier
+            .size(markSize * 1.75f)
+            .clearAndSetSemantics { },
+        contentAlignment = Alignment.Center,
+    ) {
+        Canvas(Modifier.matchParentSize()) {
+            val c = center
+            val r = size.minDimension / 2f
+            // 光晕：薄荷径向渐变，越往外越淡
+            drawCircle(
+                brush = Brush.radialGradient(
+                    0f to colors.primary.copy(alpha = if (dark) 0.30f else 0.22f),
+                    0.6f to colors.primary.copy(alpha = if (dark) 0.10f else 0.08f),
+                    1f to colors.primary.copy(alpha = 0f),
+                    center = c,
+                    radius = r,
+                ),
+                radius = r,
+                center = c,
+            )
+            // 两道玻璃光环
+            val ring = colors.glassHighlight.copy(alpha = if (dark) 0.16f else 0.75f)
+            drawCircle(ring, radius = r * 0.80f, center = c, style = Stroke(width = 1.dp.toPx()))
+            drawCircle(ring.copy(alpha = ring.alpha * 0.5f), radius = r * 0.96f, center = c, style = Stroke(width = 1.dp.toPx()))
+            // 小叶：右上一对、左下一片
+            val u = r / 50f
+            val vein = colors.hero.copy(alpha = 0.7f)
+            leaf(Offset(c.x + r * 0.62f, c.y - r * 0.40f), 20 * u, 5 * u, 38f, colors.leaf.copy(alpha = 0.9f), vein)
+            leaf(Offset(c.x + r * 0.62f, c.y - r * 0.40f), 15 * u, 4 * u, 78f, colors.leafDeep.copy(alpha = 0.8f), vein)
+            leaf(Offset(c.x - r * 0.64f, c.y + r * 0.46f), 17 * u, 4.5f * u, -128f, colors.leaf.copy(alpha = 0.85f), vein)
+        }
+        BrandMark(size = markSize)
     }
 }
 
