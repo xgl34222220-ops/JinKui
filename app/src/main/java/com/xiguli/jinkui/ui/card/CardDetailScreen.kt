@@ -107,6 +107,9 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.material.icons.outlined.Lock
+import com.xiguli.jinkui.ui.components.icon
+import androidx.compose.material.icons.outlined.StarBorder
+import androidx.compose.material.icons.outlined.Star
 import androidx.compose.material3.Icon
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -249,17 +252,8 @@ fun CardDetailScreen(cardId: String, onBack: () -> Unit, onEdit: () -> Unit) {
             .fillMaxSize()
             .statusBarsPadding(),
     ) {
-        JkTopBar(title = "", onBack = onBack) {
-            if (current != null) {
-                JkIconButton(
-                    icon = Icons.Outlined.PushPin,
-                    description = if (current.pinned) "取消置顶" else "置顶",
-                    onClick = viewModel::togglePin,
-                    tint = if (current.pinned) colors.accent else colors.textSecondary,
-                )
-                JkIconButton(Icons.Outlined.Edit, "编辑", onEdit)
-            }
-        }
+        // 1.5.0-alpha02：编辑 / 收藏 / 移到回收站放在标题下面的一排按钮里（参考 Bitwarden、Proton Pass 的条目页）
+        JkTopBar(title = "", onBack = onBack)
         if (current == null) {
             JkEmpty(
                 title = "这张卡片已不存在",
@@ -286,6 +280,8 @@ fun CardDetailScreen(cardId: String, onBack: () -> Unit, onEdit: () -> Unit) {
                 },
                 onDuplicate = viewModel::duplicate,
                 onDelete = { confirmDelete = true },
+                onTogglePin = viewModel::togglePin,
+                onCopyNote = { viewModel.copyText("备注", current.note) },
                 onViewAttachment = { viewing = it },
                 loadAttachment = { viewModel.attachmentBytes(it) },
                 modifier = Modifier.weight(1f),
@@ -360,6 +356,10 @@ fun CardDetailContent(
     onDelete: (() -> Unit)? = null,
     ticking: Boolean = true,
     clock: () -> Long = System::currentTimeMillis,
+    /** 1.5.0-alpha02：收藏 / 取消收藏（收藏的卡片排在卡包最上面，即原来的“置顶”）。 */
+    onTogglePin: (() -> Unit)? = null,
+    /** 1.5.0-alpha02：复制备注。 */
+    onCopyNote: (() -> Unit)? = null,
 ) {
     val colors = Jk.colors
     Column(
@@ -370,16 +370,14 @@ fun CardDetailContent(
             .padding(top = Space.x05, bottom = Space.x4),
     ) {
         val face = remember(card) { CardTemplates.face(card) }
-        CardFace(
-            title = card.title,
-            type = card.type,
-            colorIndex = card.color,
-            hint = face.primary,
-            secondaryLabel = face.secondaryLabel,
-            secondary = face.secondary,
+        // 1.5.0-alpha02 头部（参考 Bitwarden / Proton Pass / Apple 密码的条目页）：图标 + 名称 + 类型，下面一排操作
+        ItemHeader(card, subtitle = face.primary)
+        ItemActions(
             pinned = card.pinned,
-            brand = BankBrand.of(card),
-            modifier = Modifier.fillMaxWidth(),
+            onEdit = onEdit,
+            onTogglePin = onTogglePin,
+            onDelete = onDelete,
+            modifier = Modifier.padding(top = Space.x2),
         )
         if (card.tags.isNotEmpty()) {
             FlowRow(
@@ -488,7 +486,11 @@ fun CardDetailContent(
         }
 
         if (card.note.isNotBlank()) {
-            DetailSection("备注")
+            DetailSection("备注") {
+                if (onCopyNote != null) {
+                    JkButton(text = "复制", icon = Icons.Outlined.ContentCopy, style = ButtonStyle.Ghost, compact = true, onClick = onCopyNote)
+                }
+            }
             JkCard(Modifier.fillMaxWidth()) {
                 Text(card.note, style = JkType.body, color = colors.textSecondary)
             }
@@ -531,15 +533,6 @@ fun CardDetailContent(
                 onClick = onDuplicate,
                 trailing = {},
             )
-            if (onDelete != null) {
-                JkDivider(inset = Space.x6 + Space.x05)
-                JkRow(
-                    title = "删除这张卡片",
-                    icon = Icons.Outlined.DeleteOutline,
-                    danger = true,
-                    onClick = onDelete,
-                )
-            }
         }
 
         Spacer(Modifier.height(Space.x2))
@@ -548,9 +541,85 @@ fun CardDetailContent(
             horizontalArrangement = Arrangement.spacedBy(Space.x1_5),
             modifier = Modifier.padding(start = Space.x05),
         ) {
-            for (line in listOf("创建于 ${formatTime(card.createdAt)}", "更新于 ${formatTime(card.updatedAt)}")) {
+            for (line in listOf("修改于 ${formatTime(card.updatedAt)}", "创建于 ${formatTime(card.createdAt)}")) {
                 Text(line, style = JkType.caption.copy(fontFeatureSettings = "tnum"), color = colors.textTertiary, maxLines = 1, softWrap = false)
             }
+        }
+    }
+}
+
+/**
+ * 1.5.0-alpha02 条目头部：左边一枚与卡面同色的图标块（类型图标），右边名称（大字）与“类型 · 主信息”。
+ * 参考 Bitwarden / Proton Pass 条目页顶部的图标 + 名称 + 类型。
+ */
+@Composable
+private fun ItemHeader(card: Card, subtitle: String) {
+    val colors = Jk.colors
+    val theme = com.xiguli.jinkui.ui.components.cardTheme(card.type, card.color, BankBrand.of(card))
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(top = Space.x1)
+            .semantics(mergeDescendants = true) {},
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier
+                .size(60.dp)
+                .clip(Radius.tile)
+                .background(androidx.compose.ui.graphics.Brush.linearGradient(listOf(theme.start, theme.end))),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(card.type.icon, contentDescription = null, tint = theme.accent, modifier = Modifier.size(28.dp))
+        }
+        Spacer(Modifier.width(Space.x2))
+        Column(Modifier.weight(1f)) {
+            Text(
+                card.title.ifBlank { "未命名" },
+                style = JkType.pageTitle,
+                color = colors.textPrimary,
+                maxLines = 2,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                modifier = Modifier.semantics { heading() },
+            )
+            Spacer(Modifier.height(2.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(card.type.label, style = JkType.small.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Medium), color = colors.accent, maxLines = 1)
+                if (subtitle.isNotBlank()) {
+                    Text(" · $subtitle", style = JkType.small, color = colors.textTertiary, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                }
+                if (card.pinned) {
+                    Spacer(Modifier.width(Space.x1))
+                    Icon(Icons.Outlined.Star, contentDescription = "已收藏", tint = colors.accent, modifier = Modifier.size(16.dp))
+                }
+            }
+        }
+    }
+}
+
+/** 头部下面的一排操作：编辑、收藏、移到回收站（参考 Bitwarden / Proton Pass）。 */
+@Composable
+private fun ItemActions(
+    pinned: Boolean,
+    onEdit: () -> Unit,
+    onTogglePin: (() -> Unit)?,
+    onDelete: (() -> Unit)?,
+    modifier: Modifier = Modifier,
+) {
+    Row(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.x1)) {
+        JkButton("编辑", onEdit, icon = Icons.Outlined.Edit, modifier = Modifier.weight(1f), compact = true)
+        if (onTogglePin != null) {
+            JkButton(
+                if (pinned) "已收藏" else "收藏",
+                onTogglePin,
+                icon = if (pinned) Icons.Outlined.Star else Icons.Outlined.StarBorder,
+                style = ButtonStyle.Secondary,
+                modifier = Modifier.weight(1f),
+                compact = true,
+            )
+        }
+        if (onDelete != null) {
+            JkButton("移到回收站", onDelete, icon = Icons.Outlined.DeleteOutline, style = ButtonStyle.Danger, modifier = Modifier.weight(1.25f), compact = true)
         }
     }
 }

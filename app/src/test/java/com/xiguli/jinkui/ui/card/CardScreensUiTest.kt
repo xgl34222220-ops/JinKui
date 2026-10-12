@@ -260,6 +260,7 @@ class CardScreensUiTest {
         card: com.xiguli.jinkui.data.model.Card,
         revealed: MutableList<String> = mutableStateListOf(),
         copied: MutableList<String> = mutableListOf(),
+        events: MutableList<String> = mutableListOf(),
     ): @Composable () -> Unit = {
         Column(Modifier.padding(top = Space.x2)) {
             CardDetailContent(
@@ -269,10 +270,13 @@ class CardScreensUiTest {
                 onRevealAll = { ids, show -> revealed.clear(); if (show) revealed.addAll(ids) },
                 copiedKey = copied.lastOrNull(),
                 onCopy = { copied += it.id },
-                onEdit = {}, onHistory = {}, onDuplicate = {}, onViewAttachment = {},
+                onEdit = { events += "edit" }, onHistory = {}, onDuplicate = {}, onViewAttachment = {},
                 loadAttachment = { ByteArray(0) },
+                onDelete = { events += "trash" },
                 ticking = false,
                 clock = { CardSamples.now },
+                onTogglePin = { events += "pin" },
+                onCopyNote = { events += "note" },
             )
         }
     }
@@ -292,6 +296,31 @@ class CardScreensUiTest {
         // 卡号四位一组显示
         compose.onNodeWithText("6225 8888 1234 5972").assertExists()
         snapshot(activity, "card-detail-revealed")
+    }
+
+    /** 1.5.0-alpha02：头部图标 + 名称 + 类型，下面“编辑 / 收藏 / 移到回收站”，备注可复制，底部“修改于”。 */
+    @Test
+    fun cardDetailHeaderAndActions() {
+        val events = mutableListOf<String>()
+        val activity = show(content = detail(CardSamples.github, events = events))
+        compose.onNodeWithText("GitHub").assertExists()
+        compose.onNodeWithText("登录密码").assertExists()
+        compose.onNodeWithText("编辑").performClick()
+        compose.onNodeWithText("收藏").performClick()
+        compose.onNodeWithText("移到回收站").performClick()
+        compose.onNodeWithText("修改于", substring = true).assertExists()
+        compose.waitForIdle()
+        assertEquals(listOf("edit", "pin", "trash"), events)
+        snapshot(activity, "card-detail-header-light")
+        closeActivities()
+        // 收藏过的显示“已收藏”
+        val dark = show(dark = true, content = detail(CardSamples.cmb, events = events))
+        compose.onNodeWithText("已收藏").assertExists()
+        compose.onAllNodesWithText("银行卡", substring = true).onFirst().assertExists()
+        snapshot(dark, "card-detail-header-dark")
+        compose.onNodeWithText("复制").performClick()
+        compose.waitForIdle()
+        assertEquals("note", events.last())
     }
 
     @Test
