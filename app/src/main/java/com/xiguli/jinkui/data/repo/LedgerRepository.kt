@@ -958,7 +958,8 @@ class LedgerRepository(
         person: String,
         personAccountId: String?,
         amount: Long,
-        fundId: String,
+        /** 资金账户；null = 不经过账户（只记欠款：不改任何资金账户的余额）。 */
+        fundId: String?,
         date: LocalDate,
         dueDate: LocalDate?,
         interest: Long,
@@ -976,8 +977,7 @@ class LedgerRepository(
             if (existing == null && name.isEmpty()) throw LedgerInputException("请填写对方")
             if (interest < 0 || interest > Money.MAX_CENTS) throw LedgerInputException("利息超出范围")
             if (dueDate != null && dueDate < date) throw LedgerInputException("预计还款日不能早于借款日期")
-            val fund = data.accounts.firstOrNull { it.id == fundId } ?: throw LedgerInputException("请选择资金账户")
-            if (LoanDirection.of(fund.kind) != null) throw LedgerInputException("请选择资金账户")
+            val (fund, newAdjust) = loanFund(data, fundId, now)
             val created = if (existing == null) {
                 LedgerAccount(
                     LedgerIds.newId(), prefix + name, direction.accountKind,
@@ -991,23 +991,18 @@ class LedgerRepository(
                 id = LedgerIds.newId(), accountId = account.id, direction = direction, date = date, dueDate = dueDate,
                 interest = interest, note = note.trim().take(500), createdAt = now, updatedAt = now,
             )
-            val lend = direction == LoanDirection.LEND
-            val tx = LedgerTransaction(
-                id = LedgerIds.newId(), type = TxType.TRANSFER, amount = amount, occurredAt = timeOn(date, zone, now),
-                accountId = if (lend) fund.id else account.id, toAccountId = if (lend) account.id else fund.id,
-                note = loan.note.ifEmpty { (if (lend) "借出 · " else "借入 · ") + DebtMath.personOf(account) },
-                createdAt = now, updatedAt = now, debtId = loan.id,
-            )
-            val accounts = data.accounts.filterNot { it.id == account.id } + account
+            val tx = DebtMath.loanPrincipalTx(LedgerIds.newId(), loan, account, fund, amount, timeOn(date, zone, now), now)
+            val accounts = data.accounts.filterNot { it.id == account.id } + account + listOfNotNull(newAdjust)
             LedgerMath.validate(tx, accounts)?.let { throw LedgerInputException(it) }
             database.writeDebtChange(
-                accounts = listOfNotNull(created ?: revived).map { it.toRow(keys) },
+                accounts = listOfNotNull(created ?: revived, newAdjust).map { it.toRow(keys) },
                 debts = listOf(loan.toRow(keys)),
                 transactions = listOf(tx.toRow(keys)),
             )
             publish { d ->
                 d.copy(
-                    accounts = if (created == null && revived == null) d.accounts else (d.accounts.filterNot { it.id == account.id } + account).sortedBy { it.position },
+                    accounts = (if (created == null && revived == null) d.accounts else d.accounts.filterNot { it.id == account.id } + account)
+                        .plus(listOfNotNull(newAdjust)).sortedBy { it.position },
                     loans = d.loans + loan,
                     transactions = d.transactions + tx,
                 )
@@ -1015,6 +1010,19 @@ class LedgerRepository(
             loan
         }
     }
+
+    /**
+     * 借贷的资金一边（1.4.0-alpha04）。[fundId] 为 null 表示“不经过账户（只记欠款）”：本金记成内部“余额调整”账户
+     * 与对方账户之间的转账——对方账户（应收 / 应付）照常增减，欠款总额正确；“余额调整”不计入资产、负债、净资产，
+     * 也不出现在记账面板里，所以任何资金账户的余额都不变。还没有“余额调整”账户时新建一个（停用状态，与账单导入同一种），
+     * 第二个返回值就是要一并写入的新账户。指定了账户时，可以是任何在用的资金账户（含信用卡 / 花呗），不能是借贷对象。
+     */
+    private fun loanFund(data: LedgerData, fundId: String?, now: Long): Pair<LedgerAccount, LedgerAccount?> =
+        try {
+            DebtMath.loanFundAccount(data.accounts, fundId, now)
+        } catch (e: IllegalArgumentException) {
+            throw LedgerInputException(e.message ?: "请选择资金账户")
+        }
 
     /**
      * 改借贷的约定（预计还款日、利息、备注）。“导入的借贷”第一次改时落库成一条记录（ID 不变）。
@@ -1042,7 +1050,8 @@ class LedgerRepository(
         accountId: String,
         principal: Long,
         interest: Long,
-        fundId: String,
+        /** 资金账户；null = 不经过账户（只记欠款：本金只减少欠款，不改资金账户余额；利息照样计入收支）。 */
+        fundId: String?,
         date: LocalDate,
         note: String = "",
         zone: ZoneId = ZoneId.systemDefault(),
@@ -1052,38 +1061,21 @@ class LedgerRepository(
             val data = state.value
             val account = data.accounts.firstOrNull { it.id == accountId } ?: throw LedgerInputException("找不到对方账户")
             val direction = LoanDirection.of(account.kind) ?: throw LedgerInputException("找不到对方账户")
-            val fund = data.accounts.firstOrNull { it.id == fundId && LoanDirection.of(it.kind) == null } ?: throw LedgerInputException("请选择资金账户")
             if (principal <= 0 && interest <= 0) throw LedgerInputException("金额要大于 0")
             val now = System.currentTimeMillis()
+            val (fund, newAdjust) = loanFund(data, fundId, now)
             val at = timeOn(date, zone, now)
             val lend = direction == LoanDirection.LEND
-            val person = DebtMath.personOf(account)
             // 合成的“导入的借贷”：流水不挂 ID，照样按账户归到它名下
             val link = loanId.takeIf { id -> data.loans.any { it.id == id && !it.legacy } }
-            val txs = buildList {
-                if (principal > 0) {
-                    add(
-                        LedgerTransaction(
-                            LedgerIds.newId(), TxType.TRANSFER, principal, at,
-                            accountId = if (lend) account.id else fund.id, toAccountId = if (lend) fund.id else account.id,
-                            note = note.trim().ifEmpty { (if (lend) "收款 · " else "还款 · ") + person },
-                            createdAt = now, updatedAt = now, debtId = link,
-                        ),
-                    )
-                }
-                if (interest > 0) {
-                    add(
-                        LedgerTransaction(
-                            LedgerIds.newId(), if (lend) TxType.INCOME else TxType.EXPENSE, interest, at, fund.id,
-                            categoryId = if (lend) categoryOr(data, "cat-invest", "cat-other-income") else categoryOr(data, "cat-other-expense"),
-                            note = "利息 · $person", createdAt = now, updatedAt = now, debtId = loanId,
-                        ),
-                    )
-                }
-            }
-            txs.forEach { tx -> LedgerMath.validate(tx, data.accounts)?.let { throw LedgerInputException(it) } }
-            database.writeDebtChange(transactions = txs.map { it.toRow(keys) })
-            publish { d -> d.copy(transactions = d.transactions + txs) }
+            val txs = DebtMath.loanPaymentTxs(
+                account, fund, principal, interest, at, now, note, link, loanId,
+                if (lend) categoryOr(data, "cat-invest", "cat-other-income") else categoryOr(data, "cat-other-expense"),
+            )
+            val accounts = data.accounts + listOfNotNull(newAdjust)
+            txs.forEach { tx -> LedgerMath.validate(tx, accounts)?.let { throw LedgerInputException(it) } }
+            database.writeDebtChange(accounts = listOfNotNull(newAdjust).map { it.toRow(keys) }, transactions = txs.map { it.toRow(keys) })
+            publish { d -> d.copy(accounts = (d.accounts + listOfNotNull(newAdjust)).sortedBy { it.position }, transactions = d.transactions + txs) }
             txs
         }
     }

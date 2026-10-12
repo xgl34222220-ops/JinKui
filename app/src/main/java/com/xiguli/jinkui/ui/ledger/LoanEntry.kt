@@ -56,7 +56,8 @@ data class LoanEntryRequest(
     val accountId: String?,
     val loanId: String?,
     val amount: Long,
-    val fundId: String,
+    /** 资金账户；null = 不经过账户（只记欠款）。 */
+    val fundId: String?,
     val date: LocalDate,
     val due: LocalDate?,
     val interest: Long,
@@ -110,4 +111,25 @@ internal fun LoanTargetChips(targets: List<LoanTarget>, selected: LoanTarget?, o
             JkChip(t.label, on, { onSelect(if (on) null else t) })
         }
     }
+}
+
+/** 1.4.0-alpha04：借贷的资金账户可以不选——只记谁欠谁、欠多少，不改任何账户的余额（例如早就花掉的借款）。 */
+const val NO_FUND_LABEL = "不经过账户（只记欠款）"
+
+/**
+ * 借贷经过哪个账户：第一个是“不经过账户（只记欠款）”，后面是全部在用的资金账户（含信用卡 / 花呗）。
+ * [selected] 为 null 表示不经过账户。
+ */
+@Composable
+internal fun LoanFundChips(funds: List<com.xiguli.jinkui.data.ledger.LedgerAccount>, selected: String?, onSelect: (String?) -> Unit) {
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(Space.x1)) {
+        item(key = "none", contentType = "none") { JkChip(NO_FUND_LABEL, selected == null, { onSelect(null) }) }
+        items(funds, key = { it.id }, contentType = { "fund" }) { a -> JkChip(a.name, a.id == selected, { onSelect(a.id) }) }
+    }
+}
+
+/** 选了“不经过账户”时的一句说明。 */
+internal fun noFundHint(action: LoanAction): String = when (action) {
+    LoanAction.LEND, LoanAction.BORROW -> "只记谁欠谁、欠多少，不改任何账户的余额（例如以前的借款、早就花掉的钱）"
+    LoanAction.COLLECT, LoanAction.REPAY -> "只减少欠款，不改任何账户的余额（例如已经在别处结清）；另付的利息仍计入收支"
 }

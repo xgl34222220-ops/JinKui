@@ -149,9 +149,10 @@ fun DebtOverviewScreen(onBack: () -> Unit, onCredit: (String) -> Unit, onLoans: 
     newLoan?.let { direction ->
         NewLoanSheet(
             people = data.accounts.filter { LoanDirection.of(it.kind) != null },
-            funds = fundAccounts(data),
+            funds = com.xiguli.jinkui.data.ledger.DebtMath.loanFunds(data.accounts),
             today = ui.today,
             initialDirection = direction,
+            initialFund = com.xiguli.jinkui.data.ledger.DebtMath.lastLoanFund(data),
             onDismiss = { newLoan = null },
         ) { d, person, accountId, amount, fundId, date, due, interest, note ->
             viewModel.run("已记一笔${d.label} ${Money.format(amount)}", { newLoan = null }) {
@@ -717,9 +718,10 @@ fun LoanListScreen(onBack: () -> Unit, startNew: LoanDirection? = null) {
     if (creating) {
         NewLoanSheet(
             people = data.accounts.filter { LoanDirection.of(it.kind) != null },
-            funds = fundAccounts(data),
+            funds = com.xiguli.jinkui.data.ledger.DebtMath.loanFunds(data.accounts),
             today = today,
             initialDirection = startNew ?: LoanDirection.LEND,
+            initialFund = com.xiguli.jinkui.data.ledger.DebtMath.lastLoanFund(data),
             onDismiss = { creating = false },
         ) { direction, person, accountId, amount, fundId, date, due, interest, note ->
             viewModel.run("已记一笔${direction.label} ${Money.format(amount)}", { creating = false }) {
@@ -729,7 +731,7 @@ fun LoanListScreen(onBack: () -> Unit, startNew: LoanDirection? = null) {
     }
     ui.loans.firstOrNull { it.loan.id == opened }?.let { loan ->
         when (sheet) {
-            "pay" -> LoanPaySheet(loan, fundAccounts(data), today, { sheet = null }) { principal, interest, fundId, date ->
+            "pay" -> LoanPaySheet(loan, com.xiguli.jinkui.data.ledger.DebtMath.loanFunds(data.accounts), today, { sheet = null }, com.xiguli.jinkui.data.ledger.DebtMath.lastLoanFund(data)) { principal, interest, fundId, date ->
                 viewModel.run(if (loan.direction == LoanDirection.LEND) "已记收款" else "已记还款", { sheet = null }) {
                     ledger.loanPayment(loan.loan.id, loan.account.id, principal, interest, fundId, date)
                 }

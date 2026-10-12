@@ -2,6 +2,7 @@ package com.xiguli.jinkui.ui.ledger
 
 import android.app.Application
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
@@ -142,6 +143,56 @@ class DebtEntryUiTest {
         compose.mainClock.advanceTimeBy(1_000)
         compose.onNodeWithText("没有未结清的借入。先记一笔“借入”。").assertExists()
         h.snapshot(dark, "entry-loan-repay-dark", withDialog = true)
+    }
+
+    /**
+     * 用户反馈“借款只能在现金，我早就花完了，都是欠账”：资金账户可以不选——默认“不经过账户（只记欠款）”，
+     * 可选的账户是全部在用的资金账户（现金、银行卡、微信、支付宝、花呗 / 信用卡）。
+     */
+    @Test
+    fun entrySheetLoanWithoutFundAccountLightAndDark() {
+        val cash = LedgerAccount("a-cash", "现金", AccountKind.CASH, position = 2)
+        val wx = LedgerAccount("a-wx", "微信", AccountKind.WECHAT, position = 3)
+        val ali = LedgerAccount("a-ali", "支付宝", AccountKind.ALIPAY, position = 4)
+        val huabei = LedgerAccount("a-hb", "花呗", AccountKind.CREDIT, position = 5)
+        // 没有借贷流水：没有“上次的选择”，默认不经过账户
+        val fresh = LedgerData(accounts = listOf(cash, bank, wx, ali, huabei), categories = LedgerDefaults.categories())
+        val requests = mutableListOf<LoanEntryRequest>()
+        val activity = h.show {
+            EntrySheet(
+                data = fresh, existing = null, onDismiss = {}, onSave = { _, _, _ -> }, onDelete = {},
+                onMessage = {}, initialTime = noon, onLoan = { requests += it }, initialLoan = LoanAction.BORROW,
+            )
+        }
+        compose.mainClock.advanceTimeBy(1_000)
+        compose.onNodeWithText(NO_FUND_LABEL).assertExists().assertIsSelected()
+        for (name in listOf("现金", "示例银行卡", "微信", "支付宝", "花呗")) compose.onAllNodesWithText(name).onFirst().assertExists()
+        compose.onNodeWithText(noFundHint(LoanAction.BORROW)).assertExists()
+        compose.onNode(hasSetTextAction().and(hasText("对方（例如：小李）", substring = true))).performTextInput("老张")
+        "3000".forEach(::key)
+        compose.waitForIdle()
+        h.snapshot(activity, "entry-loan-nofund-light", withDialog = true)
+        save()
+        val none = requests.single()
+        assertEquals(LoanAction.BORROW, none.action)
+        assertNull(none.fundId)
+        assertEquals(3_000_00L, none.amount)
+        // 也可以选花呗等任何资金账户
+        clickText("花呗")
+        compose.waitForIdle()
+        save()
+        assertEquals(huabei.id, requests.last().fundId)
+        h.close()
+
+        val dark = h.show(dark = true) {
+            EntrySheet(
+                data = fresh, existing = null, onDismiss = {}, onSave = { _, _, _ -> }, onDelete = {},
+                onMessage = {}, initialTime = noon, onLoan = {}, initialLoan = LoanAction.LEND,
+            )
+        }
+        compose.mainClock.advanceTimeBy(1_000)
+        compose.onNodeWithText(NO_FUND_LABEL).assertIsSelected()
+        h.snapshot(dark, "entry-loan-nofund-dark", withDialog = true)
     }
 
     @Test

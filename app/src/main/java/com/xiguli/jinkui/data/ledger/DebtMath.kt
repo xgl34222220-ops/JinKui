@@ -425,6 +425,99 @@ object DebtMath {
     // ── 借贷 ──────────────────────────────────────────────────────
 
     /** 账户名里的对方：“借出 · 小李” → “小李”。 */
+    /**
+     * 借贷可以经过的资金账户（1.4.0-alpha04）：在用、计入资产、不是借贷对象本身的全部账户——
+     * 现金、银行卡、微信、支付宝、理财、其他，以及信用卡 / 花呗（用信用还款、信用借出）。
+     * 也可以一个都不选：“不经过账户（只记欠款）”，见 [com.xiguli.jinkui.data.repo.LedgerRepository.createLoan]。
+     */
+    fun loanFunds(accounts: List<LedgerAccount>): List<LedgerAccount> =
+        accounts.filter { !it.archived && it.kind.countsInAssets && LoanDirection.of(it.kind) == null }.sortedBy { it.position }
+
+    /**
+     * 上一次记借贷用的资金账户（记住上次的选择，不另存设置）：最近一笔借贷本金 / 收还款流水的另一边。
+     * 上次“不经过账户”、或那个账户已经停用 / 删除时返回 null（= 不经过账户）。
+     */
+    fun lastLoanFund(data: LedgerData): String? {
+        val loanAccounts = data.accounts.filter { LoanDirection.of(it.kind) != null }.mapTo(HashSet()) { it.id }
+        val last = data.transactions
+            .filter { it.type == TxType.TRANSFER && (it.accountId in loanAccounts) != (it.toAccountId in loanAccounts) }
+            .maxWithOrNull(compareBy<LedgerTransaction> { it.createdAt }.thenBy { it.occurredAt }) ?: return null
+        val other = if (last.accountId in loanAccounts) last.toAccountId else last.accountId
+        return other?.takeIf { id -> loanFunds(data.accounts).any { it.id == id } }
+    }
+
+    /**
+     * 借贷的资金一边。[fundId] 为 null 表示“不经过账户（只记欠款）”：用内部“余额调整”账户（不计入资产、负债、净资产，
+     * 不出现在记账面板），对方账户照常增减、欠款总额正确，任何资金账户的余额都不变。还没有“余额调整”账户时
+     * 新建一个（停用状态，与账单导入同一种），第二个返回值就是要一并写入的新账户。
+     * 指定了账户时可以是任何资金账户（含信用卡 / 花呗），不能是借贷对象；找不到时抛 [IllegalArgumentException]。
+     */
+    fun loanFundAccount(accounts: List<LedgerAccount>, fundId: String?, now: Long, newId: () -> String = LedgerIds::newId): Pair<LedgerAccount, LedgerAccount?> {
+        if (fundId != null) {
+            val fund = accounts.firstOrNull { it.id == fundId } ?: throw IllegalArgumentException("找不到这个资金账户")
+            require(LoanDirection.of(fund.kind) == null) { "请选择资金账户" }
+            return fund to null
+        }
+        accounts.firstOrNull { it.kind == AccountKind.ADJUST }?.let { return it to null }
+        val adjust = LedgerAccount(
+            newId(), "余额调整", AccountKind.ADJUST, archived = true,
+            position = (accounts.maxOfOrNull { it.position } ?: -1) + 1, createdAt = now, updatedAt = now,
+        )
+        return adjust to adjust
+    }
+
+    /** 借出 / 借入的本金：资金账户（或“余额调整”）与对方账户之间的一笔转账。 */
+    fun loanPrincipalTx(id: String, loan: LedgerLoan, person: LedgerAccount, fund: LedgerAccount, amount: Long, at: Long, now: Long): LedgerTransaction {
+        val lend = loan.direction == LoanDirection.LEND
+        return LedgerTransaction(
+            id = id, type = TxType.TRANSFER, amount = amount, occurredAt = at,
+            accountId = if (lend) fund.id else person.id, toAccountId = if (lend) person.id else fund.id,
+            note = loan.note.ifEmpty { (if (lend) "借出 · " else "借入 · ") + personOf(person) },
+            createdAt = now, updatedAt = now, debtId = loan.id,
+        )
+    }
+
+    /**
+     * 收款 / 还款：本金是对方账户与资金账户（或“余额调整”）之间的转账；另付的利息是资金账户上的收入 / 支出
+     * （不经过账户时记在“余额调整”上：计入收支，不改任何资金账户的余额）。
+     */
+    fun loanPaymentTxs(
+        person: LedgerAccount,
+        fund: LedgerAccount,
+        principal: Long,
+        interest: Long,
+        at: Long,
+        now: Long,
+        note: String,
+        link: String?,
+        loanId: String,
+        interestCategory: String?,
+        newId: () -> String = LedgerIds::newId,
+    ): List<LedgerTransaction> {
+        val lend = LoanDirection.of(person.kind) == LoanDirection.LEND
+        val name = personOf(person)
+        return buildList {
+            if (principal > 0) {
+                add(
+                    LedgerTransaction(
+                        newId(), TxType.TRANSFER, principal, at,
+                        accountId = if (lend) person.id else fund.id, toAccountId = if (lend) fund.id else person.id,
+                        note = note.trim().ifEmpty { (if (lend) "收款 · " else "还款 · ") + name },
+                        createdAt = now, updatedAt = now, debtId = link,
+                    ),
+                )
+            }
+            if (interest > 0) {
+                add(
+                    LedgerTransaction(
+                        newId(), if (lend) TxType.INCOME else TxType.EXPENSE, interest, at, fund.id,
+                        categoryId = interestCategory, note = "利息 · $name", createdAt = now, updatedAt = now, debtId = loanId,
+                    ),
+                )
+            }
+        }
+    }
+
     fun personOf(account: LedgerAccount): String =
         account.name.removePrefix("借出 · ").removePrefix("借入 · ").removePrefix("借出·").removePrefix("借入·").trim().ifEmpty { account.name }
 

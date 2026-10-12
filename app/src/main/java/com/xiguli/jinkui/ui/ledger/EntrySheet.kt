@@ -170,7 +170,9 @@ fun EntrySheet(
     // 借贷（1.4.0-alpha04）：不为 null 时面板处于“借贷”模式
     val loanEnabled = onLoan != null && existing == null
     var loanAction by remember { mutableStateOf(initialLoan?.takeIf { loanEnabled }) }
-    val funds = remember(data.accounts) { fundAccounts(data) }
+    // 借贷经过的资金账户：全部在用的资金账户（含信用卡 / 花呗）；null = 不经过账户（只记欠款）。默认是上一次的选择
+    val funds = remember(data.accounts) { com.xiguli.jinkui.data.ledger.DebtMath.loanFunds(data.accounts) }
+    var loanFund by remember { mutableStateOf(com.xiguli.jinkui.data.ledger.DebtMath.lastLoanFund(data)) }
     val today = remember { LocalDate.now(zone) }
     var loanPerson by remember { mutableStateOf("") }
     var loanTarget by remember { mutableStateOf<LoanTarget?>(null) }
@@ -180,11 +182,6 @@ fun EntrySheet(
     fun enterLoan(action: LoanAction) {
         loanAction = action
         loanTarget = null
-        // 借贷只用资金账户（不是信用、借贷或余额调整账户）
-        if (funds.none { it.id == accountId }) accountId = funds.firstOrNull()?.id
-    }
-    androidx.compose.runtime.LaunchedEffect(loanAction) {
-        if (loanAction != null && funds.none { it.id == accountId } && funds.isNotEmpty()) accountId = funds.first().id
     }
 
     fun pickCategory(newId: String) {
@@ -260,13 +257,10 @@ fun EntrySheet(
     fun submitLoan(action: LoanAction) {
         val cents = if (amount.isBlank()) 0L else Money.evaluate(amount)
         val rate = if (loanInterest.isBlank()) 0L else Money.parse(loanInterest)
-        val fund = accountId?.takeIf { id -> funds.any { it.id == id } }
+        // 选的账户已经停用时退回“不经过账户”
+        val fund = loanFund?.takeIf { id -> funds.any { it.id == id } }
         if (cents == null || rate == null) {
             message(if (cents == null) "金额算式不完整" else "利息格式不对")
-            return
-        }
-        if (fund == null) {
-            message("请先在“账户与余额”里添加一个资金账户")
             return
         }
         val target = loanTarget
@@ -407,6 +401,16 @@ fun EntrySheet(
                 Spacer(Modifier.height(Space.x05))
                 LoanActionChips(loan) { enterLoan(it) }
                 Spacer(Modifier.height(Space.x1))
+                Text(
+                    if (loan.tone == TxType.EXPENSE) "钱从哪个账户出" else "钱进哪个账户",
+                    style = JkType.small,
+                    color = colors.textSecondary,
+                )
+                LoanFundChips(funds, loanFund?.takeIf { id -> funds.any { it.id == id } }) { loanFund = it }
+                if (loanFund?.takeIf { id -> funds.any { it.id == id } } == null) {
+                    Text(noFundHint(loan), style = JkType.caption, color = colors.textTertiary)
+                }
+                Spacer(Modifier.height(Space.x1))
                 if (loanTargets.isNotEmpty()) {
                     LoanTargetChips(loanTargets, loanTarget) { t ->
                         loanTarget = t
@@ -469,10 +473,10 @@ fun EntrySheet(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.horizontalScroll(rememberScrollState()),
         ) {
-            if (type != TxType.TRANSFER || loanAction != null) {
+            if (type != TxType.TRANSFER && loanAction == null) {
                 InfoChip(
                     icon = accountId?.let(accountsById::get)?.kind?.let(::accountIcon) ?: accountIcon(AccountKind.OTHER),
-                    text = accountId?.let(accountsById::get)?.name?.let { name -> loanAction?.let { a -> (if (a.tone == TxType.EXPENSE) "从 " else "到 ") + name } ?: name } ?: "选账户",
+                    text = accountId?.let(accountsById::get)?.name ?: "选账户",
                     onClick = { pickFrom = true },
                     description = "账户",
                 )
@@ -514,11 +518,11 @@ fun EntrySheet(
     }
 
     if (pickFrom || pickTo) {
-        val picking = if (pickTo) "转入账户" else if (loanAction != null) "资金账户" else if (type == TxType.TRANSFER) "转出账户" else "选择账户"
+        val picking = if (pickTo) "转入账户" else if (type == TxType.TRANSFER) "转出账户" else "选择账户"
         AccountPickerSheet(
             title = picking,
             // 选转入账户时不列出转出账户本身
-            accounts = if (loanAction != null) funds else if (pickTo) active.filter { it.id != accountId } else active,
+            accounts = if (pickTo) active.filter { it.id != accountId } else active,
             onDismiss = {
                 pickFrom = false
                 pickTo = false
@@ -528,7 +532,7 @@ fun EntrySheet(
                     toAccountId = account.id
                 } else {
                     // 新的转出账户正好是转入账户时，两者对调，而不是留下一个注定保存失败的组合
-                    if (loanAction == null && type == TxType.TRANSFER && account.id == toAccountId) toAccountId = accountId
+                    if (type == TxType.TRANSFER && account.id == toAccountId) toAccountId = accountId
                     accountId = account.id
                     accountTouched = true
                 }
