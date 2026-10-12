@@ -89,10 +89,8 @@ class DebtRecordUiTest {
     }
 
     private fun click(text: String) {
-        val node = compose.onAllNodesWithText(text).onFirst()
-        // 对话框里的按钮不在可滚动的容器里，滚不了就直接点
-        runCatching { node.performScrollTo() }
-        node.performSemanticsAction(SemanticsActions.OnClick)
+        // 暂停的时钟下不能 performScrollTo（滚动动画等不到下一帧）；语义点击不需要先滚到可见
+        compose.onAllNodesWithText(text).onFirst().performSemanticsAction(SemanticsActions.OnClick)
     }
 
     @Test
@@ -107,7 +105,7 @@ class DebtRecordUiTest {
         compose.onAllNodesWithText("小李").onFirst().assertExists()
         compose.onNode(hasSetTextAction() and hasText("500")).assertExists()
         compose.onAllNodesWithText("现金 ¥", substring = true).onFirst().assertExists()
-        compose.onNodeWithText("预计还款日（可选）").performScrollTo().assertExists()
+        compose.onNodeWithText("预计还款日（可选）").assertExists()
         h.snapshot(light, "debt-record-edit-light", withDialog = true)
         // 改金额、换人、换账户（不经过账户）、改类型为借入
         compose.onNode(hasSetTextAction() and hasText("500")).performTextReplacement("800")
@@ -159,8 +157,9 @@ class DebtRecordUiTest {
         frames()
         compose.onNodeWithText("删除这条收款？").assertExists()
         compose.onNodeWithText("可以点“撤销”恢复", substring = true).assertExists()
-        compose.onAllNodesWithText("删除").onFirst().assertExists()
-        compose.onAllNodesWithText("删除")[2].performSemanticsAction(SemanticsActions.OnClick)
+        // 对话框里的“删除”是最后一个
+        val deletes = compose.onAllNodesWithText("删除")
+        deletes[deletes.fetchSemanticsNodes().size - 1].performSemanticsAction(SemanticsActions.OnClick)
         frames()
         assertTrue(deleted)
     }

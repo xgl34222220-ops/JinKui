@@ -194,7 +194,8 @@ class DebtScreensUiTest {
         val liDebt = com.xiguli.jinkui.data.ledger.PersonDebtMath.person(overview.loans, li.id, today)!!
         val lend = h.show { LoanPersonContent(liDebt, today, PersonActions(), zone) }
         compose.onNodeWithText("小李还欠我").assertExists()
-        compose.onNodeWithText("收款").assertExists()
+        // 顶部一个“收款”，每笔借出卡片上也有一个
+        compose.onAllNodesWithText("收款").onFirst().assertExists()
         compose.onNodeWithText("再借出").assertExists()
         h.snapshot(lend, "debt-person-lend-light")
         h.close()
