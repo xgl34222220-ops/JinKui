@@ -247,7 +247,22 @@ fun LedgerBudgetContent(
             .fillMaxSize()
             .statusBarsPadding(),
     ) {
-        JkTopBar("预算", onBack = onBack)
+        JkTopBar("预算", onBack = onBack) {
+            // “改预算”放在标题栏右边（放在头图里会压在右上角的插画上）
+            val total = ui.total
+            if (total != null) {
+                Text(
+                    "改预算",
+                    style = JkType.small.copy(fontWeight = FontWeight.Bold),
+                    color = colors.accent,
+                    modifier = Modifier
+                        .heightIn(min = JkSize.touch)
+                        .clip(Radius.pill)
+                        .clickable(role = Role.Button, onClickLabel = "修改每月总预算") { onEdit(null, total.budget.amount) }
+                        .padding(horizontal = Space.x1_5, vertical = Space.x1_5),
+                )
+            }
+        }
         Column(
             Modifier
                 .fillMaxSize()
@@ -269,24 +284,11 @@ fun LedgerBudgetContent(
                         Spacer(Modifier.height(Space.x1_5))
                         JkButton("设每月总预算", { onEdit(null, 0L) }, compact = true)
                     } else {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                if (total.over) "${ui.month.monthValue}月已超支(元)" else if (thisMonth) "本月还能花(元)" else "${ui.month.monthValue}月还剩(元)",
-                                style = JkType.small.copy(fontWeight = FontWeight.Medium),
-                                color = colors.textSecondary,
-                                modifier = Modifier.weight(1f),
-                            )
-                            Text(
-                                "改预算",
-                                style = JkType.caption.copy(fontWeight = FontWeight.Bold),
-                                color = colors.accent,
-                                modifier = Modifier
-                                    .heightIn(min = 40.dp)
-                                    .clip(Radius.pill)
-                                    .clickable(role = Role.Button, onClickLabel = "修改每月总预算") { onEdit(null, total.budget.amount) }
-                                    .padding(horizontal = Space.x1, vertical = Space.x1_5),
-                            )
-                        }
+                        Text(
+                            if (total.over) "${ui.month.monthValue}月已超支(元)" else if (thisMonth) "本月还能花(元)" else "${ui.month.monthValue}月还剩(元)",
+                            style = JkType.small.copy(fontWeight = FontWeight.Medium),
+                            color = colors.textSecondary,
+                        )
                         Text(
                             Money.format(if (total.over) -total.remaining else total.remaining, symbol = false),
                             style = JkType.amountHero.copy(fontSize = 32.sp),
