@@ -145,7 +145,13 @@ fun EntryHost(
             }
         }
     }
-    if (state.creating || state.editing != null) {
+    // 1.5.0-alpha03：点开的是借贷记录（借出 / 借入 / 收款 / 还款 / 结清、以及它们的利息）时，打开借贷记录面板——
+    // 类型、对方、金额、利息、日期时间、账户、预计还款日都能改；信用卡还款、分期等普通流水照旧用记一笔面板。
+    val editingId = state.editing?.id
+    val debtRecord = remember(data, editingId) { editingId?.let { com.xiguli.jinkui.data.ledger.DebtEdit.recordOf(data, it) } }
+    if (editingId != null && debtRecord != null) {
+        DebtRecordHost(editingId, data) { state.close() }
+    } else if (state.creating || state.editing != null) {
         EntrySheet(
             data = data,
             existing = state.editing,
@@ -297,10 +303,29 @@ fun EntryHost(
             danger = true,
             onConfirm = {
                 state.confirmDelete = null
-                viewModel.delete(tx)
+                val record = com.xiguli.jinkui.data.ledger.DebtEdit.recordOf(data, tx.id)
+                if (record == null) {
+                    viewModel.delete(tx)
+                } else {
+                    // 借贷记录：连同同一次记下的利息一起删（借出 / 借入时连同它名下的收款 / 还款），可以撤销
+                    scope.launch {
+                        try {
+                            val undo = container.ledger.deleteDebtRecord(tx.id)
+                            container.messages.show("已删除", "撤销") { container.scope.launch { runCatching { container.ledger.undoDebtChange(undo) } } }
+                        } catch (e: Exception) {
+                            container.messages.show(e.message ?: "删除失败")
+                        }
+                    }
+                }
             },
         ) {
-            Text("${Money.format(tx.amount)}，删除后账户余额会随之调整，无法撤销。", style = JkType.body)
+            val related = com.xiguli.jinkui.data.ledger.DebtEdit.recordOf(data, tx.id)?.let(com.xiguli.jinkui.data.ledger.DebtEdit::relatedCount) ?: 0
+            Text(
+                "${Money.format(tx.amount)}，删除后账户余额会随之调整。" +
+                    (if (related > 0) "这笔借出 / 借入下面的 $related 条收款 / 还款会一起删除。" else "") +
+                    "删除后几秒内可以点“撤销”恢复。",
+                style = JkType.body,
+            )
         }
     }
 }

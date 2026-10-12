@@ -290,20 +290,14 @@ fun AccountDetailContent(ui: AccountDetailUi, actions: AccountDetailActions) {
                                 Text("还款日", style = JkType.caption, color = colors.textTertiary)
                                 Text(credit.dueDay ?: "还没设置", style = JkType.bodyStrong, color = colors.textPrimary)
                             }
-                            Column(Modifier.weight(1f), horizontalAlignment = Alignment.End) {
-                                Text("本期还要还", style = JkType.caption, color = colors.textTertiary)
-                                Text(
-                                    credit.statementRemaining?.let(show) ?: "—",
-                                    style = JkType.amount.copy(fontWeight = FontWeight.Bold),
-                                    color = if ((credit.statementRemaining ?: 0L) > 0) colors.expense else colors.textPrimary,
-                                )
-                            }
                         }
-                        val due = credit.dueDate
-                        if (due != null && (credit.statementRemaining ?: 0L) > 0) {
-                            Spacer(Modifier.height(Space.x05))
-                            Text("最晚 ${due.monthValue}月${due.dayOfMonth}日 还", style = JkType.caption, color = colors.textTertiary)
-                        }
+                        // 1.5.0-alpha03：一句白话状态，不再是“本期还要还 —”
+                        Spacer(Modifier.height(Space.x1))
+                        Text(
+                            credit.status,
+                            style = JkType.bodyStrong,
+                            color = if ((credit.statementRemaining ?: 0L) > 0) colors.expense else colors.textPrimary,
+                        )
                         if (credit.defaulted) {
                             Text("按默认日期估算，不对可以在“账单与分期”里改", style = JkType.caption, color = colors.textTertiary)
                         }

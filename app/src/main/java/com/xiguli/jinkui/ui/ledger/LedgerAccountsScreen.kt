@@ -100,7 +100,7 @@ internal fun buildAccountsUi(data: LedgerData): AccountsUi {
         accounts = data.accounts.filter { it.kind != AccountKind.ADJUST }.sortedWith(compareBy<LedgerAccount> { it.archived }.thenBy { it.position }),
         balances = balances,
         // “余额调整”内部账户（导入的余额校准）不计入净资产
-        netWorth = LedgerMath.netWorth(balances.filterKeys { id -> data.accounts.firstOrNull { it.id == id }?.kind?.countsInAssets != false }),
+        netWorth = LedgerMath.netWorth(data),
         usage = LedgerMath.usageCounts(data.transactions),
     )
 }
@@ -154,7 +154,9 @@ class LedgerAccountsViewModel(private val container: AppContainer) : ViewModel()
         viewModelScope.launch {
             try {
                 container.ledger.deleteAccount(account.id)
-                container.messages.show("已删除「${account.name}」")
+                container.messages.show("已删除「${account.name}」", "撤销") {
+                    container.scope.launch { runCatching { container.ledger.saveAccount(account) } }
+                }
                 onDone()
             } catch (e: Exception) {
                 container.messages.show(e.message ?: "删除失败")
@@ -385,7 +387,7 @@ fun LedgerAccountsContent(
                         JkType.amountLarge,
                         if (ui.netWorth < 0) colors.danger else colors.textPrimary,
                     )
-                    Text("余额随记账自动更新；点账户看它的流水，不对时长按 → 修改余额", style = JkType.caption, color = colors.textTertiary)
+                    Text("净资产 = 资产 − 负债（与资产页同一个数）。点账户看它的流水，不对时长按 → 修改余额", style = JkType.caption, color = colors.textTertiary)
                 }
                 Spacer(Modifier.height(Space.x2))
             }

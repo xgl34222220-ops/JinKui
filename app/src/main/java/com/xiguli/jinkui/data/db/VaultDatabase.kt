@@ -475,13 +475,19 @@ class VaultDatabase(private val context: Context) {
         deleteDebts: Collection<String> = emptyList(),
         deleteTransactions: Collection<String> = emptyList(),
         tombstones: List<LedgerTombstoneRow> = emptyList(),
+        /** 1.5.0-alpha03：写回的记录（撤销、改动）去掉删除标记。 */
+        clearTombstones: Collection<String> = emptyList(),
+        /** 1.5.0-alpha03：合并对方后删掉的账户（调用方保证它已经没有流水）。 */
+        deleteAccounts: Collection<String> = emptyList(),
     ) = transaction { db ->
         accounts.forEach { writeAccount(db, it) }
         deleteTransactions.forEach { db.execSQL("DELETE FROM ledger_transactions WHERE id = ?", arrayOf<Any?>(it)) }
         deleteDebts.forEach { db.execSQL("DELETE FROM ledger_debts WHERE id = ?", arrayOf<Any?>(it)) }
         debts.forEach { writeDebt(db, it) }
         transactions.forEach { writeTransaction(db, it) }
+        clearTombstones.forEach { db.execSQL("DELETE FROM ledger_tombstones WHERE id = ?", arrayOf<Any?>(it)) }
         tombstones.forEach { writeTombstone(db, it) }
+        deleteAccounts.forEach { db.execSQL("DELETE FROM ledger_accounts WHERE id = ?", arrayOf<Any?>(it)) }
     }
 
     private fun writeDebt(db: SupportSQLiteDatabase, row: LedgerDebtRow) {

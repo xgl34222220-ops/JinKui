@@ -913,6 +913,57 @@ class LedgerRepository(
         }
     }
 
+    /**
+     * 1.5.0-alpha03：改一笔分期（名称、总额、期数、手续费、首期日期）。分期时一并记上的消费改成新总额，
+     * 手续费那一笔改成新的合计（为 0 时删掉，原来没有时新记一笔）。一个事务写入。
+     */
+    suspend fun updateInstallment(plan: LedgerInstallment, zone: ZoneId = ZoneId.systemDefault()): LedgerInstallment = withContext(Dispatchers.IO) {
+        recurringLock.withLock {
+            val keys = keys()
+            val data = state.value
+            val previous = data.installments.firstOrNull { it.id == plan.id } ?: throw LedgerInputException("找不到这笔分期")
+            val now = System.currentTimeMillis()
+            val saved = plan.copy(
+                accountId = previous.accountId, title = plan.title.trim().take(40), note = plan.note.trim().take(500),
+                payoffDate = previous.payoffDate, startDate = minOf(previous.startDate, plan.firstDate),
+                createdAt = previous.createdAt, updatedAt = now,
+            )
+            saved.problem()?.let { throw LedgerInputException(it) }
+            val mine = data.transactions.filter { it.debtId == plan.id }
+            val purchase = mine.firstOrNull { it.note.startsWith("分期消费") }?.let { it.copy(amount = saved.total, note = "分期消费 · ${saved.title}", updatedAt = now) }
+            val feeTx = mine.firstOrNull { it.note.startsWith("分期手续费") }
+            val fees = saved.chargedFees
+            val feeNote = "分期手续费 · ${saved.title}（${saved.periods} 期）"
+            val fee = when {
+                fees <= 0 -> null
+                feeTx != null -> feeTx.copy(amount = fees, note = feeNote, updatedAt = now)
+                else -> LedgerTransaction(
+                    LedgerIds.newId(), TxType.EXPENSE, fees, timeOn(saved.startDate, zone, now), saved.accountId,
+                    categoryId = feeCategory(data), note = feeNote, createdAt = now, updatedAt = now, debtId = saved.id,
+                )
+            }
+            val removed = feeTx?.takeIf { fees <= 0 }
+            val write = listOfNotNull(purchase, fee)
+            write.forEach { tx -> LedgerMath.validate(tx, data.accounts)?.let { throw LedgerInputException(it) } }
+            val tombstones = listOfNotNull(removed?.let { LedgerTombstone(it.id, LedgerTombstone.KIND_TX, now) })
+            database.writeDebtChange(
+                debts = listOf(saved.toRow(keys)),
+                transactions = write.map { it.toRow(keys) },
+                deleteTransactions = listOfNotNull(removed?.id),
+                tombstones = tombstones.map { it.toRow() },
+            )
+            val ids = write.mapTo(HashSet()) { it.id }
+            publish { d ->
+                d.copy(
+                    installments = d.installments.map { if (it.id == saved.id) saved else it },
+                    transactions = d.transactions.filterNot { it.id in ids || it.id == removed?.id } + write,
+                    tombstones = d.tombstones + tombstones,
+                )
+            }
+            saved
+        }
+    }
+
     /** 手续费的分类：账本里有叫“手续费”的就用它（1.3 导入会建），否则“其他支出”。 */
     private fun feeCategory(data: LedgerData): String? =
         data.categories.firstOrNull { it.type == TxType.EXPENSE && !it.archived && it.name == "手续费" }?.id
@@ -1175,7 +1226,7 @@ class LedgerRepository(
                     if (lend == LoanDirection.LEND) TxType.EXPENSE else TxType.INCOME,
                     remaining, timeOn(date, zone, now), account.id,
                     categoryId = if (lend == LoanDirection.LEND) categoryOr(data, "cat-other-expense") else categoryOr(data, "cat-other-income"),
-                    note = (if (lend == LoanDirection.LEND) "免除 · " else "对方免还 · ") + DebtMath.personOf(account),
+                    note = (if (lend == LoanDirection.LEND) "坏账 · " else "免还 · ") + DebtMath.personOf(account),
                     createdAt = now, updatedAt = now,
                     debtId = loanId.takeIf { id -> data.loans.any { it.id == id && !it.legacy } },
                 )
@@ -1185,6 +1236,129 @@ class LedgerRepository(
                 tx
             }
         }
+
+    // ── 改借贷记录 / 按人改（1.5.0-alpha03）────────────────────────────
+
+    /**
+     * 写入一次借贷改动（[com.xiguli.jinkui.data.ledger.DebtChange]）：一个事务里写账户、借贷记录、流水、删除与删除标记，
+     * 余额与统计照旧由流水算出。返回撤销这次改动用的改动（交给 [undoDebtChange]）。
+     */
+    private fun applyDebtChangeLocked(change: com.xiguli.jinkui.data.ledger.DebtChange): com.xiguli.jinkui.data.ledger.DebtChange {
+        val keys = keys()
+        if (change.isEmpty) return change
+        val before = state.value
+        val now = System.currentTimeMillis()
+        val tombstones = change.tombstonesFor(now)
+        database.writeDebtChange(
+            accounts = change.accounts.map { it.toRow(keys) },
+            debts = change.loans.map { it.toRow(keys) },
+            transactions = change.transactions.map { it.toRow(keys) },
+            deleteDebts = change.deleteLoans,
+            deleteTransactions = change.deleteTransactions,
+            tombstones = tombstones.map { it.toRow() },
+            clearTombstones = change.transactions.map { it.id } + change.loans.map { it.id },
+            deleteAccounts = change.deleteAccounts,
+        )
+        publish { d -> change.applyTo(d, now) }
+        return change.inverse(before)
+    }
+
+    private inline fun <T> plain(block: () -> T): T = try {
+        block()
+    } catch (e: IllegalArgumentException) {
+        throw LedgerInputException(e.message ?: "保存失败")
+    }
+
+    /** 这笔流水所在的借贷记录（不是借贷的流水返回 null）。 */
+    fun debtRecord(txId: String, zone: ZoneId = ZoneId.systemDefault()): com.xiguli.jinkui.data.ledger.DebtRecord? =
+        com.xiguli.jinkui.data.ledger.DebtEdit.recordOf(state.value, txId, zone)
+
+    /** 改一条借贷记录（类型、对方、金额、利息、时间、账户、预计还款日、备注）。返回撤销用的改动。 */
+    suspend fun editDebtRecord(txId: String, edit: com.xiguli.jinkui.data.ledger.DebtRecordEdit, zone: ZoneId = ZoneId.systemDefault()): com.xiguli.jinkui.data.ledger.DebtChange =
+        withContext(Dispatchers.IO) {
+            recurringLock.withLock {
+                keys()
+                val data = state.value
+                val record = com.xiguli.jinkui.data.ledger.DebtEdit.recordOf(data, txId, zone) ?: throw LedgerInputException("这条记录已经不在了")
+                val change = plain { com.xiguli.jinkui.data.ledger.DebtEdit.plan(data, record, edit, System.currentTimeMillis(), zone) }
+                applyDebtChangeLocked(change)
+            }
+        }
+
+    /** 删一条借贷记录（见 [com.xiguli.jinkui.data.ledger.DebtEdit.deletePlan]）。返回撤销用的改动。 */
+    suspend fun deleteDebtRecord(txId: String, zone: ZoneId = ZoneId.systemDefault()): com.xiguli.jinkui.data.ledger.DebtChange = withContext(Dispatchers.IO) {
+        recurringLock.withLock {
+            keys()
+            val record = com.xiguli.jinkui.data.ledger.DebtEdit.recordOf(state.value, txId, zone) ?: throw LedgerInputException("这条记录已经不在了")
+            applyDebtChangeLocked(com.xiguli.jinkui.data.ledger.DebtEdit.deletePlan(record))
+        }
+    }
+
+    /** 对方改名。返回撤销用的改动。 */
+    suspend fun renamePerson(accountId: String, name: String): com.xiguli.jinkui.data.ledger.DebtChange = withContext(Dispatchers.IO) {
+        recurringLock.withLock {
+            keys()
+            applyDebtChangeLocked(plain { com.xiguli.jinkui.data.ledger.PersonEdit.rename(state.value, accountId, name, System.currentTimeMillis()) })
+        }
+    }
+
+    /** 把一个人合并到另一个人（全部记录挪过去）。返回撤销用的改动。 */
+    suspend fun mergePerson(fromId: String, intoId: String): com.xiguli.jinkui.data.ledger.DebtChange = withContext(Dispatchers.IO) {
+        recurringLock.withLock {
+            keys()
+            applyDebtChangeLocked(plain { com.xiguli.jinkui.data.ledger.PersonEdit.merge(state.value, fromId, intoId, System.currentTimeMillis()) })
+        }
+    }
+
+    /** 修改欠款：把这个人还欠多少直接改成 [target]（不计入收支）。返回撤销用的改动。 */
+    suspend fun setPersonOwed(accountId: String, target: Long, date: LocalDate, zone: ZoneId = ZoneId.systemDefault()): com.xiguli.jinkui.data.ledger.DebtChange =
+        withContext(Dispatchers.IO) {
+            recurringLock.withLock {
+                keys()
+                val now = System.currentTimeMillis()
+                applyDebtChangeLocked(plain { com.xiguli.jinkui.data.ledger.PersonEdit.setOwed(state.value, accountId, target, timeOn(date, zone, now), now, zone) })
+            }
+        }
+
+    /** 1.5.0-alpha03：去掉删除标记（撤销删除时，被删的规则 / 模板 / 周期记账要写回来）。 */
+    private suspend fun clearTombstone(id: String) = withContext(Dispatchers.IO) {
+        recurringLock.withLock {
+            keys()
+            database.writeDebtChange(clearTombstones = listOf(id))
+            publish { d -> d.copy(tombstones = d.tombstones.filterNot { it.id == id }) }
+        }
+    }
+
+    /** 撤销删除规则。 */
+    suspend fun restoreRule(rule: LedgerRule): LedgerRule {
+        clearTombstone(rule.id)
+        return saveRule(rule)
+    }
+
+    /** 撤销删除模板。 */
+    suspend fun restoreTemplate(template: LedgerTemplate): LedgerTemplate {
+        clearTombstone(template.id)
+        return saveTemplate(template)
+    }
+
+    /** 撤销删除周期记账：原样写回（进度不变，不会重复补记）。 */
+    suspend fun restoreRecurring(rule: LedgerRecurring) = withContext(Dispatchers.IO) {
+        clearTombstone(rule.id)
+        recurringLock.withLock {
+            val keys = keys()
+            database.saveLedgerRecurring(rule.toRow(keys))
+            publish { data -> data.copy(recurring = data.recurring.filterNot { it.id == rule.id } + rule) }
+        }
+    }
+
+    /** 撤销上面几种改动（传入它们返回的改动）。 */
+    suspend fun undoDebtChange(inverse: com.xiguli.jinkui.data.ledger.DebtChange) = withContext(Dispatchers.IO) {
+        recurringLock.withLock {
+            keys()
+            applyDebtChangeLocked(inverse)
+            Unit
+        }
+    }
 
     // ── 备份 ──────────────────────────────────────────────────────
 

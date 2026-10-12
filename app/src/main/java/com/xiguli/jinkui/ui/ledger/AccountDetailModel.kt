@@ -47,6 +47,8 @@ data class AccountCreditUi(
     val statementRemaining: Long?,
     val dueDate: LocalDate?,
     val defaulted: Boolean,
+    /** 1.5.0-alpha03：一句白话状态（“10月23日前还 ¥1,288.00”“本期已还清”“已逾期 1 天……”）。 */
+    val status: String = "",
 )
 
 @Immutable
@@ -137,5 +139,6 @@ private fun creditUi(data: LedgerData, account: LedgerAccount, balance: Long, to
         statementRemaining = view?.latest?.remaining,
         dueDate = view?.latest?.dueDate,
         defaulted = view?.defaulted == true,
+        status = view?.let { DebtMath.creditStatus(it, today) } ?: "还没设账单日",
     )
 }

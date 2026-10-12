@@ -139,7 +139,9 @@ class LedgerRecurringViewModel(private val container: AppContainer) : ViewModel(
         viewModelScope.launch {
             runCatching { container.ledger.deleteRecurring(rule.id) }
                 .onSuccess {
-                    container.messages.show("已删除，之前记下的流水保留")
+                    container.messages.show("已删除，之前记下的流水保留", "撤销") {
+                        container.scope.launch { runCatching { container.ledger.restoreRecurring(rule) } }
+                    }
                     onDone()
                 }
                 .onFailure { container.messages.show("删除失败") }

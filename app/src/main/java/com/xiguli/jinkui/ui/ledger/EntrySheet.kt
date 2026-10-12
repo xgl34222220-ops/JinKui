@@ -287,7 +287,7 @@ fun EntrySheet(
             message(it)
             return
         }
-        onLoan?.invoke(request)
+        onLoan?.invoke(LoanEntryMath.splitOverpay(request, target))
     }
 
     fun submit(keepOpen: Boolean) {
@@ -403,6 +403,13 @@ fun EntrySheet(
                     Spacer(Modifier.height(Space.x1))
                 }
                 CompactField(loanInterest, { loanInterest = it.take(14) }, if (loan.principal) "约定利息（可选）" else "另付利息（可选）", Modifier.fillMaxWidth())
+                if (!loan.principal) {
+                    loanTarget?.let { t ->
+                        LoanEntryMath.overpayHint(loan == LoanAction.COLLECT, Money.evaluate(amount), t.remaining)?.let {
+                            Text(it, style = JkType.caption, color = colors.textSecondary, modifier = Modifier.padding(top = Space.x05))
+                        }
+                    }
+                }
             } else if (type == TxType.TRANSFER) {
                 Spacer(Modifier.height(Space.x05))
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -618,7 +625,7 @@ fun EntrySheet(
                 onDelete(existing)
             },
         ) {
-            Text("删除后账户余额会随之调整，无法撤销。", style = JkType.body)
+            Text("删除后账户余额会随之调整；删除后几秒内可以在底部点“撤销”恢复。", style = JkType.body)
         }
     }
 }

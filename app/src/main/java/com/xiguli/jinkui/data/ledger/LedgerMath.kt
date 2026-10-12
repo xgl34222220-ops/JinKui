@@ -77,6 +77,15 @@ object LedgerMath {
     /** 净资产：所有账户余额之和（信用卡欠款为负）。 */
     fun netWorth(balances: Map<String, Long>): Long = balances.values.sum()
 
+    /**
+     * 1.5.0-alpha03：全 App 唯一的“净资产”口径（资产页、账户与余额都用它）：
+     * 全部计入资产的账户余额之和 = 资金 + 别人欠我 − 信用卡 / 花呗欠款 − 我欠别人；内部“余额调整”不算。
+     */
+    fun netWorth(data: LedgerData): Long {
+        val balances = balances(data.accounts, data.transactions)
+        return data.accounts.filter { it.kind.countsInAssets }.sumOf { balances[it.id] ?: it.openingBalance }
+    }
+
     /** [month] 在 [zone] 时区里的起止时间：[start, end)。 */
     fun monthRange(month: YearMonth, zone: ZoneId): LongRange {
         val start = month.atDay(1).atStartOfDay(zone).toInstant().toEpochMilli()

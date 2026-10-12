@@ -175,7 +175,7 @@ class DebtScreensUiTest {
     fun personDetailLightAndDark() {
         val wangDebt = com.xiguli.jinkui.data.ledger.PersonDebtMath.person(overview.loans, wang.id, today)!!
         val hits = mutableListOf<String>()
-        val actions = PersonActions(onPay = { hits += "pay" }, onMore = { hits += "more" }, onSettle = { hits += "settle" }, onLoan = { hits += "loan" })
+        val actions = PersonActions(onPay = { hits += "pay" }, onMore = { hits += "more" }, onSettle = { hits += "settle" }, onEntry = { hits += "loan" })
         val activity = h.show { LoanPersonContent(wangDebt, today, actions, zone) }
         compose.onNodeWithText("我还欠老王").assertExists()
         compose.onNodeWithText(Money.format(2_000_00)).assertExists()
@@ -187,7 +187,7 @@ class DebtScreensUiTest {
         compose.onNodeWithContentDescription("还款 ${Money.format(1_000_00)}").performScrollTo().performClick()
         compose.onAllNodesWithText("还款").onFirst().performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
         compose.onNodeWithText("再借入").performSemanticsAction(SemanticsActions.OnClick)
-        compose.onNodeWithText("结清").performSemanticsAction(SemanticsActions.OnClick)
+        compose.onNodeWithText("不用还了").performSemanticsAction(SemanticsActions.OnClick)
         assertEquals(listOf("loan", "pay", "more", "settle"), hits)
         h.snapshot(activity, "debt-person-borrow-light")
         h.close()
@@ -296,27 +296,6 @@ class DebtScreensUiTest {
         val dark = h.show(dark = true) { CreditStatementContent(hb, today, CreditActions()) }
         compose.onNodeWithText("10月10日到期 · 已逾期 1 天").assertExists()
         h.snapshot(dark, "credit-statement-dark")
-    }
-
-    @Test
-    fun loanListLightAndDark() {
-        var tab: Boolean? = null
-        val activity = h.show { LoanListContent(overview, false, LoanActions(onTab = { tab = it })) }
-        compose.onAllNodesWithText("老王").onFirst().assertExists()
-        compose.onAllNodesWithText("小李").onFirst().assertExists()
-        compose.onNodeWithText("已逾期 3 天").performScrollTo().assertExists()
-        h.snapshot(activity, "loans-light")
-        compose.onNodeWithText("已结清 1").performClick()
-        assertEquals(true, tab)
-        h.close()
-        val dark = h.show(dark = true) { LoanListContent(overview, true, LoanActions()) }
-        compose.onNodeWithText("小赵").assertExists()
-        h.snapshot(dark, "loans-settled-dark")
-        h.close()
-        val loan = overview.loans.first { it.loan.id == liLoan.id }
-        val detail = h.show { LoanDetailSheet(loan, today, {}, {}, {}, {}, {}) }
-        compose.onNodeWithText("收款").assertExists()
-        h.snapshot(detail, "loan-detail-sheet-light", withDialog = true)
     }
 
     @Test

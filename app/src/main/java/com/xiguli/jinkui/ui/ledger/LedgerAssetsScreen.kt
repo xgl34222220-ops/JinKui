@@ -90,9 +90,11 @@ data class AssetsUi(
     val payable: Long = 0L,
     /** 借贷：每个对方一个应收 / 应付账户。 */
     val loans: List<AssetRow> = emptyList(),
+    /** 1.5.0-alpha03：信用卡 / 花呗的白话状态（账户 ID → “10月23日前还 ¥1,288.00”）。 */
+    val creditStatus: Map<String, String> = emptyMap(),
 )
 
-fun buildAssetsUi(data: LedgerData): AssetsUi {
+fun buildAssetsUi(data: LedgerData, today: java.time.LocalDate = java.time.LocalDate.now(), zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): AssetsUi {
     val balances = LedgerMath.balances(data.accounts, data.transactions)
     val rows = data.accounts
         .sortedBy { it.position }
@@ -104,7 +106,7 @@ fun buildAssetsUi(data: LedgerData): AssetsUi {
     val credit = rows.filter { it.account.kind == AccountKind.CREDIT }
     val loans = rows.filter { it.account.kind == AccountKind.RECEIVABLE || it.account.kind == AccountKind.PAYABLE }
     return AssetsUi(
-        net = rows.sumOf { it.balance },
+        net = LedgerMath.netWorth(data),
         assets = rows.filter { it.balance > 0 }.sumOf { it.balance },
         liabilities = rows.filter { it.balance < 0 }.sumOf { -it.balance },
         savings = sumOf(setOf(AccountKind.CASH, AccountKind.BANK)),
@@ -115,6 +117,11 @@ fun buildAssetsUi(data: LedgerData): AssetsUi {
         receivable = sumOf(setOf(AccountKind.RECEIVABLE)),
         payable = -sumOf(setOf(AccountKind.PAYABLE)),
         loans = loans,
+        creditStatus = credit.associate { row ->
+            row.account.id to com.xiguli.jinkui.data.ledger.DebtMath.creditStatus(
+                com.xiguli.jinkui.data.ledger.DebtMath.credit(row.account, data.transactions, data.installments, today, zone), today,
+            )
+        },
     )
 }
 
@@ -281,7 +288,7 @@ fun LedgerAssetsContent(
                         val debt = -row.balance
                         AssetLine(
                             row = row,
-                            subtitle = if (debt < 0) "多还了 ${show(-debt)}" else "欠",
+                            subtitle = if (debt < 0) "多还了 ${show(-debt)}" else "欠 · " + (ui.creditStatus[row.account.id] ?: ""),
                             amount = show(kotlin.math.abs(debt)),
                             tone = if (debt > 0) colors.expense else colors.textPrimary,
                             onClick = { if (onAccount != null) onAccount(row.account.id) else onCredit(row.account.id) },

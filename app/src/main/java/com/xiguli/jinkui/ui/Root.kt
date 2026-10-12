@@ -273,7 +273,7 @@ private fun MainNavigation() {
                     onAccounts = { navigator.push(Screen.LedgerAccounts) },
                     onDebts = { navigator.push(Screen.Debts) },
                     onCredit = { navigator.push(Screen.CreditStatement(it)) },
-                    onLoans = { navigator.push(Screen.Loans) },
+                    onLoans = { navigator.push(Screen.Debts) },
                     onNewLoan = { navigator.push(Screen.LoansNew(it)) },
                     onPerson = { navigator.push(Screen.LoanPerson(it)) },
                     onAccount = { navigator.push(Screen.AccountDetail(it)) },
@@ -281,20 +281,36 @@ private fun MainNavigation() {
                 Screen.Debts -> com.xiguli.jinkui.ui.ledger.DebtOverviewScreen(
                     onBack = { navigator.pop() },
                     onCredit = { navigator.push(Screen.CreditStatement(it)) },
-                    onLoans = { navigator.push(Screen.Loans) },
+                    onLoans = {},
                     onAccounts = { navigator.push(Screen.LedgerAccounts) },
                     onAddCredit = { navigator.push(Screen.LedgerAddCredit) },
                     onPerson = { navigator.push(Screen.LoanPerson(it)) },
                 )
                 is Screen.LoanPerson -> com.xiguli.jinkui.ui.ledger.LoanPersonScreen(screen.accountId, onBack = { navigator.pop() })
-                is Screen.LoansNew -> com.xiguli.jinkui.ui.ledger.LoanListScreen(onBack = { navigator.pop() }, startNew = screen.direction)
+                // 1.5.0-alpha03：旧的“借给别人 / 欠别人”列表并进“欠款 / 借贷”（全 App 只剩一种借贷列表）
+                is Screen.LoansNew -> com.xiguli.jinkui.ui.ledger.DebtOverviewScreen(
+                    onBack = { navigator.pop() },
+                    onCredit = { navigator.push(Screen.CreditStatement(it)) },
+                    onLoans = {},
+                    onAccounts = { navigator.push(Screen.LedgerAccounts) },
+                    onAddCredit = { navigator.push(Screen.LedgerAddCredit) },
+                    onPerson = { navigator.push(Screen.LoanPerson(it)) },
+                    startNew = screen.direction,
+                )
                 Screen.LedgerAddCredit -> LedgerAccountsScreen(
                     onBack = { navigator.pop() },
                     onDebt = { account -> navigator.push(Screen.CreditStatement(account.id)) },
                     startNew = com.xiguli.jinkui.data.ledger.AccountKind.CREDIT,
                 )
                 is Screen.CreditStatement -> com.xiguli.jinkui.ui.ledger.CreditStatementScreen(screen.accountId, onBack = { navigator.pop() })
-                Screen.Loans -> com.xiguli.jinkui.ui.ledger.LoanListScreen(onBack = { navigator.pop() })
+                Screen.Loans -> com.xiguli.jinkui.ui.ledger.DebtOverviewScreen(
+                    onBack = { navigator.pop() },
+                    onCredit = { navigator.push(Screen.CreditStatement(it)) },
+                    onLoans = {},
+                    onAccounts = { navigator.push(Screen.LedgerAccounts) },
+                    onAddCredit = { navigator.push(Screen.LedgerAddCredit) },
+                    onPerson = { navigator.push(Screen.LoanPerson(it)) },
+                )
                 Screen.LedgerBudget -> LedgerBudgetScreen(onBack = { navigator.pop() })
                 Screen.Reimburse -> com.xiguli.jinkui.ui.ledger.ReimburseScreen(onBack = { navigator.pop() })
                 Screen.LedgerRules -> com.xiguli.jinkui.ui.ledger.LedgerRulesScreen(onBack = { navigator.pop() })

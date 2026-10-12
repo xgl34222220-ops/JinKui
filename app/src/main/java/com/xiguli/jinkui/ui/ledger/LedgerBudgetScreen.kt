@@ -123,8 +123,12 @@ class LedgerBudgetViewModel(private val container: AppContainer) : ViewModel() {
     fun set(categoryId: String?, amount: Long, onDone: () -> Unit) {
         viewModelScope.launch {
             try {
+                val previous = container.ledger.data.value.budgets.firstOrNull { it.categoryId == categoryId }?.amount ?: 0L
                 container.ledger.setBudget(categoryId, amount)
-                container.messages.show(if (amount == 0L) "已取消预算" else "预算已保存")
+                // 1.5.0-alpha03：改 / 取消预算后可以撤销
+                container.messages.show(if (amount == 0L) "已取消预算" else "预算已保存", "撤销") {
+                    container.scope.launch { runCatching { container.ledger.setBudget(categoryId, previous) } }
+                }
                 onDone()
             } catch (e: Exception) {
                 container.messages.show(e.message ?: "保存失败")

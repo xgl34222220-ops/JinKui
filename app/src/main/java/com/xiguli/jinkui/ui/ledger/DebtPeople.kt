@@ -22,6 +22,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -141,8 +143,9 @@ fun DebtOverviewContent(ui: DebtOverview, actions: DebtOverviewActions, initialT
             BotanicalCard(Modifier.fillMaxWidth(), layout = BotanicalLayout.SPRIG) {
                 Column(Modifier.padding(horizontal = Space.x2_5, vertical = Space.x2_5)) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.x1)) {
-                        BigFigure("别人欠我", Money.format(ui.receivable, symbol = false), colors.textPrimary, Modifier.weight(1f))
-                        BigFigure("我欠别人", Money.format(ui.payable, symbol = false), if (ui.payable > 0) colors.expense else colors.textPrimary, Modifier.weight(1f))
+                        // 1.5.0-alpha03：点大数切到下面对应的那一栏（不是死数字）
+                        BigFigure("别人欠我", Money.format(ui.receivable, symbol = false), colors.textPrimary, Modifier.weight(1f).clickable(role = Role.Button, onClickLabel = "看别人欠我的") { tab = LoanDirection.LEND })
+                        BigFigure("我欠别人", Money.format(ui.payable, symbol = false), if (ui.payable > 0) colors.expense else colors.textPrimary, Modifier.weight(1f).clickable(role = Role.Button, onClickLabel = "看我欠别人的") { tab = LoanDirection.BORROW })
                         BigFigure(
                             "净额",
                             (if (net > 0) "+" else if (net < 0) "-" else "") + Money.format(kotlin.math.abs(net), symbol = false),
@@ -322,8 +325,16 @@ class PersonActions(
     val onMore: () -> Unit = {},
     /** 结清：剩下的不再收 / 不再还。 */
     val onSettle: () -> Unit = {},
-    /** 点一笔借出 / 借入：改预计还款日、利息、备注或删除。 */
-    val onLoan: (com.xiguli.jinkui.data.ledger.LoanView) -> Unit = {},
+    /** 1.5.0-alpha03：点来往记录里的一条：直接改这条（类型、对方、金额、日期、账户……）或删除。 */
+    val onEntry: (com.xiguli.jinkui.data.ledger.LedgerTransaction) -> Unit = {},
+    /** 1.5.0-alpha03：某一笔借款卡片上的“收款 / 还款”。 */
+    val onPayLoan: (com.xiguli.jinkui.data.ledger.LoanView) -> Unit = {},
+    /** 点一笔借款的卡片：编辑它。 */
+    val onLoanCard: (com.xiguli.jinkui.data.ledger.LoanView) -> Unit = {},
+    /** 编辑这个人：改名 / 合并到另一个人。 */
+    val onEditPerson: () -> Unit = {},
+    /** 修改欠款：直接改现在还欠多少。 */
+    val onOwed: () -> Unit = {},
 )
 
 @Composable
@@ -335,8 +346,9 @@ fun LoanPersonScreen(accountId: String, onBack: () -> Unit) {
     val today = ui.today
     val person = remember(ui, accountId) { PersonDebtMath.person(ui.loans, accountId, today) }
     var sheet by remember { mutableStateOf<String?>(null) }
-    var loanSheet by remember { mutableStateOf<String?>(null) }
-    var openedLoan by remember { mutableStateOf<String?>(null) }
+    var openedTx by remember { mutableStateOf<String?>(null) }
+    var payLoan by remember { mutableStateOf<String?>(null) }
+    var legacyLoan by remember { mutableStateOf<String?>(null) }
     val ledger = container.ledger
     if (person == null) {
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
@@ -354,9 +366,21 @@ fun LoanPersonScreen(accountId: String, onBack: () -> Unit) {
             onPay = { sheet = "pay" },
             onMore = { sheet = "more" },
             onSettle = { sheet = "settle" },
-            onLoan = { openedLoan = it.loan.id },
+            onPayLoan = { payLoan = it.loan.id },
+            onLoanCard = { loan ->
+                // 一笔借款：点开改它的借出 / 借入那一条（金额、日期、账户、约定都在一个“编辑”面板里）；导入的改约定
+                val principal = loan.entries.lastOrNull { DebtMath.entryKind(loan, it) == LoanEntryKind.PRINCIPAL }
+                if (loan.stored && !loan.loan.legacy && principal != null) openedTx = principal.id else legacyLoan = loan.loan.id
+            },
+            onEntry = { openedTx = it.id },
+            onEditPerson = { sheet = "person" },
+            onOwed = { sheet = "owed" },
         ),
     )
+    // 改动后可以撤销：底部提示里点“撤销”
+    fun runUndoable(done: String, after: () -> Unit = {}, block: suspend () -> com.xiguli.jinkui.data.ledger.DebtChange) {
+        viewModel.runUndoable(done, after, block)
+    }
     when (sheet) {
         "pay" -> PersonPaySheet(
             person = person,
@@ -384,40 +408,41 @@ fun LoanPersonScreen(accountId: String, onBack: () -> Unit) {
                 ledger.createLoan(direction, name, accountId2, amount, fundId, date, due, interest, note)
             }
         }
-        "settle" -> JkDialog(
-            title = "和${person.person}结清？",
+        "person" -> PersonEditSheet(
+            person = person,
+            others = data.accounts.filter { it.kind == person.account.kind && it.id != person.account.id && !it.archived },
             onDismiss = { sheet = null },
-            confirmText = "结清",
-            onConfirm = {
-                sheet = null
-                viewModel.run("已结清") {
-                    for (loan in person.open) ledger.forgiveLoan(loan.loan.id, loan.account.id, loan.remaining, today)
-                }
+            onRename = { name -> runUndoable("已改名为$name", { sheet = null }) { ledger.renamePerson(person.account.id, name) } },
+            onMerge = { into ->
+                val target = data.accounts.firstOrNull { it.id == into }
+                runUndoable("已合并到${target?.let(DebtMath::personOf).orEmpty()}", { sheet = null; onBack() }) { ledger.mergePerson(person.account.id, into) }
             },
-        ) {
-            Text(
-                if (lend) "${person.person}还欠你的 ${Money.format(person.remaining)} 不再收回（记成一笔支出），这个人就算还清了。"
-                else "你还欠${person.person}的 ${Money.format(person.remaining)} 对方不要了（记成一笔收入），这个人就算还清了。",
-                style = JkType.body,
-            )
+        )
+        "owed" -> PersonOwedSheet(person, today, { sheet = null }) { target, date ->
+            runUndoable("已改成还欠 ${Money.format(target)}", { sheet = null }) { ledger.setPersonOwed(person.account.id, target, date) }
+        }
+        "settle" -> SettleSheet(person, today, { sheet = null }) { date ->
+            runUndoable(if (lend) "已记坏账" else "已记免还", { sheet = null }) {
+                // 每笔没还清的借款各记一笔（坏账 = 支出，免还 = 收入）；撤销时一起撤
+                val before = ledger.data.value
+                for (loan in person.open) ledger.forgiveLoan(loan.loan.id, loan.account.id, loan.remaining, date)
+                val after = ledger.data.value
+                val added = after.transactions.map { it.id }.toSet() - before.transactions.map { it.id }.toSet()
+                com.xiguli.jinkui.data.ledger.DebtChange(deleteTransactions = added.toList())
+            }
         }
     }
-    person.loans.firstOrNull { it.loan.id == openedLoan }?.let { loan ->
-        when (loanSheet) {
-            "edit" -> LoanEditSheet(loan, today, { loanSheet = null }) { edited ->
-                viewModel.run("已保存", { loanSheet = null }) { ledger.saveLoan(edited) }
+    openedTx?.let { id -> DebtRecordHost(id, data) { openedTx = null } }
+    person.loans.firstOrNull { it.loan.id == payLoan }?.let { loan ->
+        LoanPaySheet(loan, DebtMath.loanFunds(data.accounts), today, { payLoan = null }, DebtMath.lastLoanFund(data), balances) { principal, interest, fundId, date ->
+            viewModel.run(if (lend) "已记收款" else "已记还款", { payLoan = null }) {
+                ledger.loanPayment(loan.loan.id, loan.account.id, principal, interest, fundId, date)
             }
-            else -> LoanDetailSheet(
-                loan, today,
-                onDismiss = { openedLoan = null },
-                onPay = {
-                    openedLoan = null
-                    sheet = "pay"
-                },
-                onEdit = { loanSheet = "edit" },
-                onForgive = { viewModel.run("已结清", { openedLoan = null }) { ledger.forgiveLoan(loan.loan.id, loan.account.id, loan.remaining, today) } },
-                onDelete = { viewModel.run(if (loan.stored && !loan.loan.legacy) "已删除这笔借贷" else "已清除约定", { openedLoan = null }) { ledger.deleteDebt(loan.loan.id) } },
-            )
+        }
+    }
+    person.loans.firstOrNull { it.loan.id == legacyLoan }?.let { loan ->
+        LoanEditSheet(loan, today, { legacyLoan = null }) { edited ->
+            viewModel.run("已保存", { legacyLoan = null }) { ledger.saveLoan(edited) }
         }
     }
 }
@@ -429,7 +454,9 @@ fun LoanPersonContent(person: PersonDebt, today: LocalDate, actions: PersonActio
     val lend = person.direction == LoanDirection.LEND
     val overdue = person.overdue(today)
     Column(Modifier.fillMaxSize().statusBarsPadding()) {
-        JkTopBar(person.person, onBack = actions.onBack)
+        JkTopBar(person.person, onBack = actions.onBack) {
+            com.xiguli.jinkui.ui.components.JkGlassIconButton(Icons.Outlined.Edit, "编辑${person.person}", actions.onEditPerson)
+        }
         Column(
             Modifier
                 .fillMaxSize()
@@ -452,12 +479,18 @@ fun LoanPersonContent(person: PersonDebt, today: LocalDate, actions: PersonActio
                         )
                     }
                     Spacer(Modifier.height(Space.x1))
-                    Text(
-                        Money.format(person.remaining),
-                        style = JkType.amountHero.copy(fontSize = 34.sp),
-                        color = if (!lend && !person.settled || overdue) colors.expense else colors.textPrimary,
-                        maxLines = 1,
-                    )
+                    // 点大字也能直接改还欠多少（同一木记账点余额改）
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            Money.format(person.remaining),
+                            style = JkType.amountHero.copy(fontSize = 34.sp),
+                            color = if (!lend && !person.settled || overdue) colors.expense else colors.textPrimary,
+                            maxLines = 1,
+                            modifier = Modifier.clickable(role = Role.Button, onClickLabel = "修改欠款") { actions.onOwed() },
+                        )
+                        Spacer(Modifier.width(Space.x1))
+                        DebtLink("修改欠款", actions.onOwed)
+                    }
                     Spacer(Modifier.height(Space.x1))
                     DebtBar(person.progress)
                     Spacer(Modifier.height(Space.x05))
@@ -480,14 +513,20 @@ fun LoanPersonContent(person: PersonDebt, today: LocalDate, actions: PersonActio
             Row(horizontalArrangement = Arrangement.spacedBy(Space.x1)) {
                 JkButton(if (lend) "收款" else "还款", actions.onPay, enabled = !person.settled, modifier = Modifier.weight(1f))
                 JkButton(if (lend) "再借出" else "再借入", actions.onMore, style = ButtonStyle.Secondary, modifier = Modifier.weight(1f))
-                JkButton("结清", actions.onSettle, style = ButtonStyle.Ghost, enabled = !person.settled, modifier = Modifier.weight(1f))
+                JkButton(if (lend) "收不回了" else "不用还了", actions.onSettle, style = ButtonStyle.Ghost, enabled = !person.settled, modifier = Modifier.weight(1f))
             }
             Text(
-                if (lend) "收款 = ${person.person}还我钱；结清 = 剩下的不要了。" else "还款 = 我还${person.person}钱；结清 = 对方说剩下的不用还了。",
+                if (lend) "收款 = ${person.person}还我钱；收不回了 = 剩下的记成坏账。" else "还款 = 我还${person.person}钱；不用还了 = 对方说剩下的不用还（记成免还）。",
                 style = JkType.caption,
                 color = colors.textTertiary,
                 modifier = Modifier.padding(start = Space.x05, top = Space.x1),
             )
+
+            DebtSection(if (lend) "每一笔借出" else "每一笔借入")
+            for (loan in person.loans.sortedWith(compareBy<com.xiguli.jinkui.data.ledger.LoanView> { it.settled }.thenByDescending { it.loan.date })) {
+                LoanCard(loan, today, onClick = { actions.onLoanCard(loan) }, onPay = { actions.onPayLoan(loan) })
+                Spacer(Modifier.height(Space.x1))
+            }
 
             DebtSection("来往记录")
             JkCard(Modifier.fillMaxWidth(), padding = PaddingValues(vertical = Space.x05)) {
@@ -497,11 +536,12 @@ fun LoanPersonContent(person: PersonDebt, today: LocalDate, actions: PersonActio
                     if (i > 0) JkDivider(inset = Space.x2)
                     val loan = person.loans.first { l -> l.entries.any { it.id == tx.id } }
                     val kind = DebtMath.entryKind(loan, tx)
-                    val label = when (kind) {
+                    val correction = tx.note == com.xiguli.jinkui.data.ledger.PersonEdit.CORRECTION_NOTE
+                    val label = if (correction) "修改欠款" else when (kind) {
                         LoanEntryKind.PRINCIPAL -> if (lend) "借出" else "借入"
                         LoanEntryKind.REPAY -> if (lend) "收款" else "还款"
                         LoanEntryKind.INTEREST -> "利息"
-                        LoanEntryKind.WRITE_OFF -> if (lend) "结清（不再收回）" else "结清（对方免还）"
+                        LoanEntryKind.WRITE_OFF -> if (lend) "坏账（收不回了）" else "免还（对方说不用还了）"
                     }
                     // 借出 / 收款对“他欠我”的影响：借出加、收款减
                     val sign = when (kind) {
@@ -513,7 +553,7 @@ fun LoanPersonContent(person: PersonDebt, today: LocalDate, actions: PersonActio
                         Modifier
                             .fillMaxWidth()
                             .heightIn(min = 56.dp)
-                            .clickable(role = Role.Button, onClickLabel = "查看这笔借款") { actions.onLoan(loan) }
+                            .clickable(role = Role.Button, onClickLabel = "编辑这条记录") { actions.onEntry(tx) }
                             .padding(horizontal = Space.x2, vertical = Space.x1)
                             .semantics(mergeDescendants = true) { contentDescription = "$label ${Money.format(tx.amount)}" },
                         verticalAlignment = Alignment.CenterVertically,
@@ -521,7 +561,8 @@ fun LoanPersonContent(person: PersonDebt, today: LocalDate, actions: PersonActio
                         Column(Modifier.weight(1f)) {
                             Text(label, style = JkType.bodyStrong, color = colors.textPrimary)
                             Text(
-                                debtDate(LedgerMath.dateOf(tx.occurredAt, zone), today) + (if (tx.note.isNotBlank()) " · ${tx.note}" else ""),
+                                debtDate(LedgerMath.dateOf(tx.occurredAt, zone), today) + (if (tx.note.isNotBlank() && !correction) " · ${tx.note}" else "") +
+                                    if (correction) " · 不计入收支" else "",
                                 style = JkType.caption,
                                 color = colors.textTertiary,
                                 maxLines = 1,
@@ -541,7 +582,7 @@ fun LoanPersonContent(person: PersonDebt, today: LocalDate, actions: PersonActio
                 }
             }
             Text(
-                "“+”是借出 / 借入让欠款变多，“−”是收款 / 还款让欠款变少。点一条可以改约定的还款日、利息或删除那一笔。",
+                "“+”是借出 / 借入让欠款变多，“−”是收款 / 还款让欠款变少。点一条可以直接改（金额、对方、日期、账户都能改）或删除。",
                 style = JkType.caption,
                 color = colors.textTertiary,
                 modifier = Modifier.padding(horizontal = Space.x05, vertical = Space.x2),
@@ -583,6 +624,9 @@ fun PersonPaySheet(
             Text(if (lend) "钱进哪个账户" else "钱从哪个账户出", style = JkType.small, color = Jk.colors.textSecondary)
             LoanFundChips(funds, fund, balances) { fund = it }
             if (fund == null) Text(noFundHint(if (lend) LoanAction.COLLECT else LoanAction.REPAY), style = JkType.caption, color = Jk.colors.textTertiary)
+            LoanEntryMath.overpayHint(lend, if (amount.isBlank()) 0L else Money.parse(amount), person.remaining)?.let {
+                Text(it, style = JkType.small, color = Jk.colors.textSecondary)
+            }
             DateField(if (lend) "收款日期" else "还款日期", date, today, { date = it })
             error?.let { Text(it, style = JkType.small, color = Jk.colors.danger) }
         }
@@ -593,10 +637,89 @@ fun PersonPaySheet(
             error = when {
                 p == null || i == null -> "金额格式不对，最多两位小数"
                 p <= 0 && i <= 0 -> "请输入大于 0 的金额"
-                p > person.remaining -> "最多${if (lend) "收" else "还"} ${Money.format(person.remaining)}"
                 else -> null
             }
-            if (error == null) onSubmit(p!!, i!!, fund, date)
+            // 多收 / 多还的部分记成利息
+            if (error == null) {
+                val principal = minOf(p!!, person.remaining)
+                onSubmit(principal, i!! + (p - principal), fund, date)
+            }
         }, modifier = Modifier.fillMaxWidth())
+    }
+}
+
+
+/**
+ * 一笔借款的卡片（参考随手记的借贷人页：每笔一张卡，行内“还债”按钮）：
+ * “借出 ¥800.00　剩 ¥800.00”/“9月1日借出 · 10月8日到期（已逾期 3 天）”/“约定利息 ¥20.00，已收 ¥0.00”。
+ */
+@Composable
+fun LoanCard(loan: com.xiguli.jinkui.data.ledger.LoanView, today: LocalDate, onClick: () -> Unit, onPay: () -> Unit) {
+    val colors = Jk.colors
+    val lend = loan.direction == LoanDirection.LEND
+    val overdue = loan.overdue(today)
+    val label = (if (lend) "借出" else "借入") + if (!loan.stored || loan.loan.legacy) "（导入）" else ""
+    JkCard(Modifier.fillMaxWidth(), padding = PaddingValues(0.dp)) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clickable(role = Role.Button, onClickLabel = "编辑这笔$label") { onClick() }
+                .padding(horizontal = Space.x2, vertical = Space.x1_5)
+                .semantics(mergeDescendants = true) { contentDescription = "$label ${Money.format(loan.principal)}，剩 ${Money.format(loan.remaining)}" },
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("$label ${Money.format(loan.principal)}", style = JkType.bodyStrong, color = colors.textPrimary, modifier = Modifier.weight(1f, fill = false))
+                    Spacer(Modifier.width(Space.x1))
+                    Text(
+                        if (loan.settled) "已还清" else "剩 ${Money.format(loan.remaining)}",
+                        style = JkType.bodyStrong,
+                        color = when {
+                            loan.settled -> colors.textTertiary
+                            overdue || !lend -> colors.expense
+                            else -> colors.textPrimary
+                        },
+                    )
+                }
+                Text(
+                    buildString {
+                        append("${debtDate(loan.loan.date, today)}${if (lend) "借出" else "借入"}")
+                        loan.loan.dueDate?.takeIf { !loan.settled }?.let { append(" · ${debtDate(it, today)}到期（${dueLabel(it, today)}）") }
+                    },
+                    style = JkType.caption.copy(fontWeight = if (overdue) FontWeight.Bold else FontWeight.Normal),
+                    color = if (overdue) colors.expense else colors.textTertiary,
+                )
+                if (loan.loan.interest > 0) {
+                    Text("约定利息 ${Money.format(loan.loan.interest)}，已${if (lend) "收" else "付"} ${Money.format(loan.interestPaid)}", style = JkType.caption, color = colors.textTertiary)
+                }
+                if (loan.loan.note.isNotBlank()) Text(loan.loan.note, style = JkType.caption, color = colors.textTertiary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            if (!loan.settled) {
+                Spacer(Modifier.width(Space.x1))
+                JkButton(if (lend) "收款" else "还款", onPay, style = ButtonStyle.Secondary, compact = true)
+            }
+        }
+    }
+}
+
+/** 收不回了（坏账，借出）/ 对方说不用还了（免还，借入）：选日期，剩下的记成一笔支出 / 收入。 */
+@Composable
+fun SettleSheet(person: PersonDebt, today: LocalDate, onDismiss: () -> Unit, onConfirm: (LocalDate) -> Unit) {
+    val lend = person.direction == LoanDirection.LEND
+    var date by remember { mutableStateOf(today) }
+    JkSheet(onDismiss = onDismiss, title = if (lend) "收不回了（坏账）" else "对方说不用还了（免还）") {
+        Column(verticalArrangement = Arrangement.spacedBy(Space.x1_5)) {
+            Text(
+                if (lend) "${person.person}还欠你的 ${Money.format(person.remaining)} 不再收回：记成一笔“其他支出”（坏账），这个人就算还清了。"
+                else "你还欠${person.person}的 ${Money.format(person.remaining)} 不用还了：记成一笔“其他收入”（免还），这个人就算还清了。",
+                style = JkType.body,
+                color = Jk.colors.textPrimary,
+            )
+            DateField(if (lend) "哪天算收不回" else "哪天说的不用还", date, today, { date = it })
+            Text("记错了可以在来往记录里点那一条改金额、日期或删除，也可以马上点“撤销”。", style = JkType.caption, color = Jk.colors.textTertiary)
+        }
+        Spacer(Modifier.height(Space.x2))
+        JkButton(if (lend) "记为坏账 ${Money.format(person.remaining)}" else "记为免还 ${Money.format(person.remaining)}", { onConfirm(date) }, modifier = Modifier.fillMaxWidth())
     }
 }

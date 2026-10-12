@@ -213,8 +213,15 @@ class LedgerViewModel(private val container: AppContainer) : ViewModel() {
     fun save(tx: LedgerTransaction, onDone: () -> Unit) {
         viewModelScope.launch {
             try {
+                // 1.5.0-alpha03：改一笔已有的流水，保存后可以撤销（回到改之前的那一版）
+                val previous = container.ledger.data.value.transactions.firstOrNull { it.id == tx.id }
                 container.ledger.saveTransaction(tx)
                 onDone()
+                if (previous != null) {
+                    container.messages.show("已修改", "撤销") {
+                        container.scope.launch { runCatching { container.ledger.saveTransaction(previous) } }
+                    }
+                }
             } catch (e: LedgerInputException) {
                 container.messages.show(e.message ?: "保存失败")
             } catch (e: Exception) {
@@ -245,8 +252,13 @@ class LedgerViewModel(private val container: AppContainer) : ViewModel() {
 
     fun delete(tx: LedgerTransaction) {
         viewModelScope.launch {
-            runCatching { container.ledger.deleteTransaction(tx.id) }
-                .onSuccess { container.messages.show("已删除这笔记录") }
+            // 1.5.0-alpha03：删一笔也可以撤销（同多选删除）
+            runCatching { container.ledger.deleteTransactions(listOf(tx.id)) }
+                .onSuccess { gone ->
+                    container.messages.show("已删除这笔记录", "撤销") {
+                        container.scope.launch { runCatching { container.ledger.restoreTransactions(gone) } }
+                    }
+                }
                 .onFailure { container.messages.show("删除失败") }
         }
     }

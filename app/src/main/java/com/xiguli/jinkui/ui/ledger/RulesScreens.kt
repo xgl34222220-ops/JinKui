@@ -175,7 +175,12 @@ fun LedgerRulesScreen(onBack: () -> Unit) {
             rule = rule, data = data, isNew = data.rules.none { it.id == rule.id },
             onDismiss = { editingRule = null },
             onSave = { r -> run("已保存规则", after = { editingRule = null }) { container.ledger.saveRule(r) } },
-            onDelete = { run("已删除规则", after = { editingRule = null }) { container.ledger.deleteRule(rule.id) } },
+            onDelete = {
+                run(null, after = { editingRule = null }) {
+                    container.ledger.deleteRule(rule.id)
+                    container.messages.show("已删除规则", "撤销") { container.scope.launch { runCatching { container.ledger.restoreRule(rule) } } }
+                }
+            },
         )
     }
     editingTemplate?.let { t ->
@@ -183,7 +188,12 @@ fun LedgerRulesScreen(onBack: () -> Unit) {
             template = t, data = data, isNew = data.templates.none { it.id == t.id },
             onDismiss = { editingTemplate = null },
             onSave = { v -> run("已保存模板", after = { editingTemplate = null }) { container.ledger.saveTemplate(v) } },
-            onDelete = { run("已删除模板", after = { editingTemplate = null }) { container.ledger.deleteRule(t.id) } },
+            onDelete = {
+                run(null, after = { editingTemplate = null }) {
+                    container.ledger.deleteRule(t.id)
+                    container.messages.show("已删除模板", "撤销") { container.scope.launch { runCatching { container.ledger.restoreTemplate(t) } } }
+                }
+            },
         )
     }
 }

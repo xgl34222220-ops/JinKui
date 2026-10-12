@@ -204,7 +204,13 @@ class DebtEntryUiTest {
         assertEquals(800_00L, collect.remaining)
         assertTrue(LoanEntryMath.targets(data, LoanAction.REPAY, today, zone).isEmpty())
         val base = LoanEntryRequest(LoanAction.COLLECT, "小李", li.id, liLoan.id, 900_00, bank.id, today, null, 0, "")
-        assertEquals("超过了还剩的 ¥800.00", LoanEntryMath.validate(base, collect))
+        // 1.5.0-alpha03：多收的 100 记成利息（同钱迹），不再报错
+        assertNull(LoanEntryMath.validate(base, collect))
+        val split = LoanEntryMath.splitOverpay(base, collect)
+        assertEquals(800_00L, split.amount)
+        assertEquals(100_00L, split.interest)
+        assertEquals("其中 ¥100.00 超过了还欠的 ¥800.00，记为利息（收入）", LoanEntryMath.overpayHint(true, 900_00, 800_00))
+        assertNull(LoanEntryMath.overpayHint(true, 800_00, 800_00))
         assertNull(LoanEntryMath.validate(base.copy(amount = 500_00), collect))
         assertEquals("请选择要收款的借出", LoanEntryMath.validate(base.copy(loanId = null), null))
         assertEquals(

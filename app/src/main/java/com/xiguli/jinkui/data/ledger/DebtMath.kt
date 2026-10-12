@@ -422,6 +422,27 @@ object DebtMath {
         )
     }
 
+    /**
+     * 1.5.0-alpha03：信用卡 / 花呗的一句白话状态（参考钱迹信用卡列表的“应还 / 剩 / 本期已还 / 已逾期”）：
+     * “10月23日前还 ¥1,288.00”“已逾期 1 天，还要还 ¥880.00”“本期已还清”“本期还没出账（10月5日出账）”“还没设账单日”。
+     */
+    fun creditStatus(view: CreditView, today: LocalDate): String {
+        if (view.settings == null) return if (view.debt > 0) "还没设账单日" else "没有欠款 · 还没设账单日"
+        val latest = view.latest
+        val open = view.open
+        fun md(d: LocalDate) = "${d.monthValue}月${d.dayOfMonth}日"
+        return when {
+            latest != null && latest.remaining > 0 && latest.overdue(today) -> {
+                val days = ChronoUnit.DAYS.between(latest.dueDate, today)
+                "已逾期 $days 天，还要还 ${Money.format(latest.remaining)}"
+            }
+            latest != null && latest.remaining > 0 -> "${md(latest.dueDate)}前还 ${Money.format(latest.remaining)}"
+            latest != null && latest.owed > 0 -> "本期已还清" + (open?.takeIf { it.amount > 0 }?.let { " · ${md(it.statementDate)}出账" } ?: "")
+            open != null && open.amount > 0 -> "本期还没出账（${md(open.statementDate)}出账）"
+            else -> "没有要还的"
+        }
+    }
+
     // ── 借贷 ──────────────────────────────────────────────────────
 
     /** 账户名里的对方：“借出 · 小李” → “小李”。 */

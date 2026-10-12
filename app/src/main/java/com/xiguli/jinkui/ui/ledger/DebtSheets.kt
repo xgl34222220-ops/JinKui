@@ -180,14 +180,20 @@ fun InstallmentSheet(
     account: LedgerAccount,
     today: LocalDate,
     onDismiss: () -> Unit,
+    /** 1.5.0-alpha03：改一笔已有的分期（预填它的内容，不再问“同时记一笔分期消费”）。 */
+    existing: LedgerInstallment? = null,
     onSubmit: (plan: LedgerInstallment, recordPurchase: Boolean) -> Unit,
 ) {
-    var title by remember { mutableStateOf("") }
-    var total by remember { mutableStateOf("") }
-    var periods by remember { mutableStateOf("12") }
-    var byRate by remember { mutableStateOf(false) }
-    var fee by remember { mutableStateOf("") }
-    var first by remember { mutableStateOf(today) }
+    var title by remember { mutableStateOf(existing?.title ?: "") }
+    var total by remember { mutableStateOf(existing?.total?.let(Money::plain) ?: "") }
+    var periods by remember { mutableStateOf(existing?.periods?.toString() ?: "12") }
+    var byRate by remember { mutableStateOf(existing?.feeRateBp != null) }
+    var fee by remember {
+        mutableStateOf(
+            existing?.let { e -> e.feeRateBp?.let { java.math.BigDecimal(it).movePointLeft(2).stripTrailingZeros().toPlainString() } ?: e.feePerPeriod.takeIf { it > 0 }?.let(Money::plain) } ?: "",
+        )
+    }
+    var first by remember { mutableStateOf(existing?.firstDate ?: today) }
     var record by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
     val totalCents = parseCents(total)
@@ -198,7 +204,7 @@ fun InstallmentSheet(
         byRate -> if (totalCents != null && rateBp != null) DebtMath.feeFromRate(totalCents, rateBp) else if (fee.isBlank()) 0L else null
         else -> if (fee.isBlank()) 0L else parseCents(fee)
     }
-    JkSheet(onDismiss = onDismiss, title = "新增分期 · ${account.name}") {
+    JkSheet(onDismiss = onDismiss, title = (if (existing != null) "编辑分期 · " else "新增分期 · ") + account.name) {
         SheetBody {
             JkTextField(value = title, onValueChange = { title = it.take(40); error = null }, label = "分期名称", placeholder = "例如：手机、账单分期")
             JkTextField(value = total, onValueChange = { total = it.take(14); error = null }, label = "分期总额（本金）", placeholder = "0.00", keyboardType = KeyboardType.Decimal)
@@ -215,12 +221,16 @@ fun InstallmentSheet(
                 keyboardType = KeyboardType.Decimal,
             )
             DateField("首期入账日", first, today, { first = it })
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("同时记一笔分期消费", style = JkType.body, color = Jk.colors.textPrimary)
-                    Text("已经记过这笔消费（或是账单分期）就关掉", style = JkType.caption, color = Jk.colors.textTertiary)
+            if (existing == null) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("同时记一笔分期消费", style = JkType.body, color = Jk.colors.textPrimary)
+                        Text("已经记过这笔消费（或是账单分期）就关掉", style = JkType.caption, color = Jk.colors.textTertiary)
+                    }
+                    JkSwitch(record, { record = it })
                 }
-                JkSwitch(record, { record = it })
+            } else {
+                Hint("分期时记上的消费与手续费会跟着改成新的金额。")
             }
             if (totalCents != null && totalCents > 0 && count != null && count in 2..60 && feeCents != null) {
                 val per = totalCents / count
@@ -234,9 +244,9 @@ fun InstallmentSheet(
             error?.let { Hint(it, danger = true) }
         }
         Spacer(Modifier.height(Space.x2))
-        JkButton("创建分期", {
+        JkButton(if (existing != null) "保存" else "创建分期", {
             val plan = LedgerInstallment(
-                id = LedgerIds.newId(),
+                id = existing?.id ?: LedgerIds.newId(),
                 accountId = account.id,
                 title = title.trim(),
                 total = totalCents ?: 0L,
@@ -244,7 +254,8 @@ fun InstallmentSheet(
                 feePerPeriod = feeCents ?: -1L,
                 feeRateBp = rateBp,
                 firstDate = first,
-                startDate = minOf(today, first),
+                startDate = existing?.startDate?.let { minOf(it, first) } ?: minOf(today, first),
+                note = existing?.note ?: "",
             )
             val problem = when {
                 totalCents == null -> "请填写分期总额"
@@ -362,6 +373,7 @@ fun LoanPaySheet(
             Text(if (lend) "收到哪个账户" else "从哪个账户还", style = JkType.small, color = Jk.colors.textSecondary)
             LoanFundChips(funds, fund, balances) { fund = it }
             if (fund == null) Hint(noFundHint(if (lend) LoanAction.COLLECT else LoanAction.REPAY))
+            LoanEntryMath.overpayHint(lend, if (amount.isBlank()) 0L else parseCents(amount), loan.remaining)?.let { Hint(it) }
             DateField(if (lend) "收款日期" else "还款日期", date, today, { date = it })
             error?.let { Hint(it, danger = true) }
         }
@@ -375,7 +387,11 @@ fun LoanPaySheet(
                 p <= 0 && i <= 0 -> "请输入大于 0 的金额"
                 else -> null
             }
-            if (error == null) onSubmit(p!!, i!!, source, date)
+            // 多收 / 多还的部分记成利息
+            if (error == null) {
+                val principal = minOf(p!!, loan.remaining)
+                onSubmit(principal, i!! + (p - principal), source, date)
+            }
         }, modifier = Modifier.fillMaxWidth())
     }
 }
@@ -387,7 +403,7 @@ fun LoanEditSheet(loan: LoanView, today: LocalDate, onDismiss: () -> Unit, onSav
     var interest by remember { mutableStateOf(loan.loan.interest.takeIf { it > 0 }?.let(Money::plain) ?: "") }
     var note by remember { mutableStateOf(loan.loan.note) }
     var error by remember { mutableStateOf<String?>(null) }
-    JkSheet(onDismiss = onDismiss, title = "约定 · ${loan.person}") {
+    JkSheet(onDismiss = onDismiss, title = "编辑 · ${loan.person}（导入的借贷）") {
         SheetBody {
             DateField("预计还款日", due, today, { due = it }, onClear = { due = null })
             JkTextField(value = interest, onValueChange = { interest = it.take(14); error = null }, label = "约定利息（可选）", placeholder = "0.00", keyboardType = KeyboardType.Decimal, error = error)

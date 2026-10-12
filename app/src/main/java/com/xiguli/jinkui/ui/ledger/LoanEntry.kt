@@ -79,6 +79,21 @@ object LoanEntryMath {
                 .map { LoanTarget(it.account.id, it.person, it.loan.id, it.remaining) }
         }
 
+    /**
+     * 1.5.0-alpha03：收款 / 还款超过还剩的部分自动记成利息（同钱迹“还款超出部分自动算利息”）。
+     * 借出 / 借入、没有选借贷时原样返回。
+     */
+    fun splitOverpay(r: LoanEntryRequest, target: LoanTarget?): LoanEntryRequest {
+        if (r.action.principal || target == null || r.amount <= target.remaining) return r
+        return r.copy(amount = target.remaining, interest = r.interest + (r.amount - target.remaining))
+    }
+
+    /** 多出来记成利息的那句提示；没有多出来时为 null。 */
+    fun overpayHint(lend: Boolean, amount: Long?, remaining: Long): String? {
+        val extra = (amount ?: 0L) - remaining
+        return if (amount != null && remaining >= 0 && extra > 0) "其中 ${Money.format(extra)} 超过了还欠的 ${Money.format(remaining)}，记为利息（${if (lend) "收入" else "支出"}）" else null
+    }
+
     /** 保存前的校验；通过时返回 null。 */
     fun validate(r: LoanEntryRequest, target: LoanTarget?): String? = when {
         r.amount <= 0 && (r.action.principal || r.interest <= 0) -> "请输入大于 0 的金额"
@@ -86,7 +101,6 @@ object LoanEntryMath {
         r.interest < 0 -> "利息格式不对"
         r.action.principal && r.person.isBlank() && r.accountId == null -> "请填写对方"
         !r.action.principal && r.loanId == null -> if (r.action == LoanAction.COLLECT) "请选择要收款的借出" else "请选择要还的借入"
-        !r.action.principal && target != null && r.amount > target.remaining -> "超过了还剩的 ${Money.format(target.remaining)}"
         r.due != null && r.due < r.date -> "预计还款日不能早于借款日期"
         else -> null
     }

@@ -111,6 +111,22 @@ class DebtViewModel(private val container: AppContainer) : ViewModel() {
             }
         }
     }
+
+    /** 1.5.0-alpha03：执行一次可撤销的借贷改动；成功后底部提示带“撤销”。 */
+    fun runUndoable(done: String, after: () -> Unit = {}, block: suspend () -> com.xiguli.jinkui.data.ledger.DebtChange) {
+        viewModelScope.launch {
+            try {
+                val undo = block()
+                after()
+                if (undo.isEmpty) container.messages.show(done)
+                else container.messages.show(done, "撤销") { container.scope.launch { runCatching { container.ledger.undoDebtChange(undo) } } }
+            } catch (e: LedgerInputException) {
+                container.messages.show(e.message ?: "保存失败")
+            } catch (e: Exception) {
+                container.messages.show("保存失败：${e.message ?: "未知错误"}")
+            }
+        }
+    }
 }
 
 // ── 欠款 / 账单总览 ────────────────────────────────────────────────
@@ -310,6 +326,7 @@ fun CreditStatementScreen(accountId: String, onBack: () -> Unit) {
             onOpenInstallment = { opened = it.plan.id },
         ),
     )
+    var editingPlan by remember { mutableStateOf<String?>(null) }
     val ledger = container.ledger
     when (sheet) {
         "settings" -> CreditSettingsSheet(view.account, today, { sheet = null }, initial = view.settings) { settings ->
@@ -328,7 +345,13 @@ fun CreditStatementScreen(accountId: String, onBack: () -> Unit) {
             onDismiss = { opened = null },
             onPayoff = { viewModel.run("已提前结清，剩余本金并入当期账单", { opened = null }) { ledger.payoffInstallment(inst.plan.id, today) } },
             onDelete = { viewModel.run("已删除分期「${inst.plan.title}」", { opened = null }) { ledger.deleteDebt(inst.plan.id) } },
+            onEdit = { editingPlan = inst.plan.id },
         )
+    }
+    view.installments.firstOrNull { it.plan.id == editingPlan }?.let { inst ->
+        InstallmentSheet(view.account, today, { editingPlan = null }, existing = inst.plan) { plan, _ ->
+            viewModel.run("已保存分期「${plan.title}」", { editingPlan = null }) { ledger.updateInstallment(plan) }
+        }
     }
 }
 
@@ -544,7 +567,7 @@ private fun InstallmentRow(inst: InstallmentView, today: LocalDate, onClick: () 
 
 /** 分期详情：每一期的本金、手续费、计入哪期账单与是否已还；提前结清、删除。 */
 @Composable
-fun InstallmentDetailSheet(inst: InstallmentView, today: LocalDate, onDismiss: () -> Unit, onPayoff: () -> Unit, onDelete: () -> Unit) {
+fun InstallmentDetailSheet(inst: InstallmentView, today: LocalDate, onDismiss: () -> Unit, onPayoff: () -> Unit, onDelete: () -> Unit, onEdit: () -> Unit = {}) {
     val colors = Jk.colors
     var confirm by remember { mutableStateOf<String?>(null) }
     JkSheet(onDismiss = onDismiss, title = "${inst.plan.title} · 已还 ${inst.paidCount}/${inst.total} 期") {
@@ -567,6 +590,7 @@ fun InstallmentDetailSheet(inst: InstallmentView, today: LocalDate, onDismiss: (
         Spacer(Modifier.height(Space.x2))
         Row(horizontalArrangement = Arrangement.spacedBy(Space.x1)) {
             JkButton("删除", { confirm = "delete" }, style = ButtonStyle.Danger, modifier = Modifier.weight(1f))
+            JkButton("编辑", onEdit, style = ButtonStyle.Secondary, modifier = Modifier.weight(1f))
             JkButton("提前结清", { confirm = "payoff" }, enabled = !inst.earlyPaid && !inst.settled, modifier = Modifier.weight(1f))
         }
     }
@@ -581,262 +605,6 @@ fun InstallmentDetailSheet(inst: InstallmentView, today: LocalDate, onDismiss: (
 }
 
 // ── 借贷 ──────────────────────────────────────────────────────────
-
-class LoanActions(
-    val onBack: () -> Unit = {},
-    val onTab: (Boolean) -> Unit = {},
-    val onOpen: (LoanView) -> Unit = {},
-    val onNew: () -> Unit = {},
-)
-
-@Composable
-fun LoanListScreen(onBack: () -> Unit, startNew: LoanDirection? = null) {
-    val container = LocalContainer.current
-    val viewModel = jkViewModel { DebtViewModel(container) }
-    val ui by viewModel.ui.collectAsStateWithLifecycle()
-    val data by container.ledger.data.collectAsStateWithLifecycle()
-    var settled by rememberSaveable { mutableStateOf(false) }
-    var opened by remember { mutableStateOf<String?>(null) }
-    var creating by remember { mutableStateOf(startNew != null) }
-    var sheet by remember { mutableStateOf<String?>(null) }
-    val today = ui.today
-    val ledger = container.ledger
-    LoanListContent(ui, settled, LoanActions(onBack = onBack, onTab = { settled = it }, onOpen = { opened = it.loan.id }, onNew = { creating = true }))
-    if (creating) {
-        NewLoanSheet(
-            people = data.accounts.filter { LoanDirection.of(it.kind) != null },
-            funds = com.xiguli.jinkui.data.ledger.DebtMath.loanFunds(data.accounts),
-            today = today,
-            initialDirection = startNew ?: LoanDirection.LEND,
-            initialFund = com.xiguli.jinkui.data.ledger.DebtMath.lastLoanFund(data),
-            onDismiss = { creating = false },
-        ) { direction, person, accountId, amount, fundId, date, due, interest, note ->
-            viewModel.run("已记一笔${direction.label} ${Money.format(amount)}", { creating = false }) {
-                ledger.createLoan(direction, person, accountId, amount, fundId, date, due, interest, note)
-            }
-        }
-    }
-    ui.loans.firstOrNull { it.loan.id == opened }?.let { loan ->
-        when (sheet) {
-            "pay" -> LoanPaySheet(loan, com.xiguli.jinkui.data.ledger.DebtMath.loanFunds(data.accounts), today, { sheet = null }, com.xiguli.jinkui.data.ledger.DebtMath.lastLoanFund(data), com.xiguli.jinkui.data.ledger.LedgerMath.balances(data.accounts, data.transactions)) { principal, interest, fundId, date ->
-                viewModel.run(if (loan.direction == LoanDirection.LEND) "已记收款" else "已记还款", { sheet = null }) {
-                    ledger.loanPayment(loan.loan.id, loan.account.id, principal, interest, fundId, date)
-                }
-            }
-            "edit" -> LoanEditSheet(loan, today, { sheet = null }) { edited ->
-                viewModel.run("已保存", { sheet = null }) { ledger.saveLoan(edited) }
-            }
-            else -> LoanDetailSheet(
-                loan, today,
-                onDismiss = { opened = null },
-                onPay = { sheet = "pay" },
-                onEdit = { sheet = "edit" },
-                onForgive = { viewModel.run("已结清", { opened = null }) { ledger.forgiveLoan(loan.loan.id, loan.account.id, loan.remaining, today) } },
-                onDelete = { viewModel.run(if (loan.stored && !loan.loan.legacy) "已删除这笔借贷" else "已清除约定", { opened = null }) { ledger.deleteDebt(loan.loan.id) } },
-            )
-        }
-    }
-}
-
-/**
- * 借贷列表（无状态）：应收合计 / 应付合计，未结清 / 已结清两个分页，按对方分组，每人一块，
- * 每笔显示借出 / 借入、日期、预计还款日（逾期标红）与还款进度。
- */
-@Composable
-fun LoanListContent(ui: DebtOverview, settled: Boolean, actions: LoanActions) {
-    val colors = Jk.colors
-    val today = ui.today
-    val open = ui.loans.filter { !it.settled }
-    val done = ui.loans.filter { it.settled }
-    val shown = if (settled) done else open
-    Column(Modifier.fillMaxSize().statusBarsPadding()) {
-        JkTopBar("借给别人 / 欠别人", onBack = actions.onBack) { JkGlassIconButton(Icons.Outlined.Add, "记一笔借贷", actions.onNew) }
-        Column(
-            Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = Space.x2)
-                .navigationBarsPadding()
-                .padding(bottom = Space.x4),
-        ) {
-            BotanicalCard(Modifier.fillMaxWidth(), layout = BotanicalLayout.SPRIG) {
-                Row(Modifier.padding(Space.x2_5)) {
-                    HeroFigure("别人欠我（借出）", Money.format(ui.receivable), colors.textPrimary, Modifier.weight(1f))
-                    HeroFigure("我欠别人（借入）", Money.format(ui.payable), if (ui.payable > 0) colors.expense else colors.textPrimary, Modifier.weight(1f))
-                }
-            }
-            Spacer(Modifier.height(Space.x2))
-            JkSegmented(listOf(false to "未结清 ${open.size}", true to "已结清 ${done.size}"), settled, actions.onTab)
-            if (shown.isEmpty()) {
-                Spacer(Modifier.height(Space.x2))
-                JkCard(Modifier.fillMaxWidth()) {
-                    Text(
-                        if (settled) "还没有结清的借贷。" else "没有未结清的借贷。点右上角“+”记一笔借出或借入；导入的一木借出 / 借入也会列在这里。",
-                        style = JkType.small,
-                        color = colors.textTertiary,
-                    )
-                }
-            }
-            for ((person, loans) in shown.groupBy { it.person }) {
-                DebtSection(person) {
-                    val receivable = loans.filter { it.direction == LoanDirection.LEND }.sumOf { it.remaining }
-                    val payable = loans.filter { it.direction == LoanDirection.BORROW }.sumOf { it.remaining }
-                    if (!settled) {
-                        Text(
-                            listOfNotNull(
-                                receivable.takeIf { it > 0 }?.let { "他欠我 ${Money.format(it)}" },
-                                payable.takeIf { it > 0 }?.let { "我欠他 ${Money.format(it)}" },
-                            ).joinToString(" · "),
-                            style = JkType.amountSmall,
-                            color = if (payable > 0) colors.expense else colors.textSecondary,
-                        )
-                    }
-                }
-                JkCard(Modifier.fillMaxWidth(), padding = PaddingValues(vertical = Space.x05)) {
-                    loans.forEachIndexed { i, loan ->
-                        if (i > 0) JkDivider(inset = Space.x2)
-                        LoanRow(loan, today) { actions.onOpen(loan) }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun LoanRow(loan: LoanView, today: LocalDate, onClick: () -> Unit) {
-    val colors = Jk.colors
-    val lend = loan.direction == LoanDirection.LEND
-    val overdue = loan.overdue(today)
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = Space.x2, vertical = Space.x1_5),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                (if (lend) "借出" else "借入") + (if (loan.loan.legacy) "（导入）" else ""),
-                style = JkType.bodyStrong,
-                color = colors.textPrimary,
-                modifier = Modifier.weight(1f),
-            )
-            Text(
-                if (loan.settled) "已结清" else Money.format(loan.remaining),
-                style = JkType.amount.copy(fontWeight = FontWeight.Bold),
-                color = when {
-                    loan.settled -> colors.textTertiary
-                    overdue || !lend -> colors.expense
-                    else -> colors.textPrimary
-                },
-            )
-        }
-        Spacer(Modifier.height(Space.x05))
-        DebtBar(if (loan.principal > 0) loan.repaid.toFloat() / loan.principal else 0f)
-        Spacer(Modifier.height(Space.x05))
-        Text(
-            buildString {
-                append("${debtDate(loan.loan.date, today)} · 借了 ${Money.format(loan.principal)} · 已${if (lend) "收" else "还"} ${Money.format(loan.repaid)}")
-                if (loan.loan.interest > 0) append(" · 利息 ${Money.format(loan.interestPaid)}/${Money.format(loan.loan.interest)}")
-                loan.loan.dueDate?.takeIf { !loan.settled }?.let { append(" · ${debtDate(it, today)}到期") }
-            },
-            style = JkType.caption,
-            color = if (overdue) colors.expense else colors.textTertiary,
-        )
-        if (overdue) Text(dueLabel(loan.loan.dueDate!!, today), style = JkType.caption.copy(fontWeight = FontWeight.Bold), color = colors.expense)
-    }
-}
-
-/** 一笔借贷的详情：进度、约定、每一笔流水；收款 / 还款、结清剩余、修改约定、删除。 */
-@Composable
-fun LoanDetailSheet(
-    loan: LoanView,
-    today: LocalDate,
-    onDismiss: () -> Unit,
-    onPay: () -> Unit,
-    onEdit: () -> Unit,
-    onForgive: () -> Unit,
-    onDelete: () -> Unit,
-) {
-    val colors = Jk.colors
-    val lend = loan.direction == LoanDirection.LEND
-    var confirm by remember { mutableStateOf<String?>(null) }
-    JkSheet(onDismiss = onDismiss, title = "${loan.person} · ${if (lend) "借出" else "借入"}") {
-        Column(Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState())) {
-            DebtFigures(
-                Triple(if (lend) "借出" else "借入", Money.format(loan.principal), null),
-                Triple(if (lend) "已收" else "已还", Money.format(loan.repaid), null),
-                Triple(if (lend) "待收" else "待还", Money.format(loan.remaining), if (loan.overdue(today)) colors.expense else null),
-            )
-            Spacer(Modifier.height(Space.x1))
-            Text(
-                listOfNotNull(
-                    loan.loan.dueDate?.let { "预计还款日 ${debtDate(it, today)}" + if (loan.overdue(today)) "（${dueLabel(it, today)}）" else "" },
-                    loan.loan.interest.takeIf { it > 0 }?.let { "约定利息 ${Money.format(it)}，已${if (lend) "收" else "付"} ${Money.format(loan.interestPaid)}" },
-                    loan.loan.note.takeIf { it.isNotBlank() },
-                    if (loan.loan.legacy) "导入的借贷：按“${loan.account.name}”账户上的流水算出" else null,
-                ).joinToString("\n").ifEmpty { "没有填预计还款日。" },
-                style = JkType.small,
-                color = if (loan.overdue(today)) colors.expense else colors.textSecondary,
-            )
-            Spacer(Modifier.height(Space.x1_5))
-            for (tx in loan.entries) {
-                val kind = DebtMath.entryKind(loan, tx)
-                Row(Modifier.fillMaxWidth().heightIn(min = 44.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            when (kind) {
-                                LoanEntryKind.PRINCIPAL -> if (lend) "借出" else "借入"
-                                LoanEntryKind.REPAY -> if (lend) "收款" else "还款"
-                                LoanEntryKind.INTEREST -> "利息"
-                                LoanEntryKind.WRITE_OFF -> if (lend) "免除" else "对方免还"
-                            },
-                            style = JkType.small.copy(fontWeight = FontWeight.Bold),
-                            color = colors.textPrimary,
-                        )
-                        Text(
-                            debtDate(com.xiguli.jinkui.data.ledger.LedgerMath.dateOf(tx.occurredAt, ZoneId.systemDefault()), today) + if (tx.note.isNotBlank()) " · ${tx.note}" else "",
-                            style = JkType.caption,
-                            color = colors.textTertiary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    Text(
-                        (if (kind == LoanEntryKind.PRINCIPAL) "" else if (tx.type == TxType.EXPENSE && kind == LoanEntryKind.INTEREST) "-" else "") + Money.format(tx.amount),
-                        style = JkType.amountSmall,
-                        color = colors.textPrimary,
-                    )
-                }
-            }
-        }
-        Spacer(Modifier.height(Space.x2))
-        Row(horizontalArrangement = Arrangement.spacedBy(Space.x1)) {
-            JkButton("约定", onEdit, style = ButtonStyle.Secondary, modifier = Modifier.weight(1f), compact = true)
-            JkButton(if (lend) "收款" else "还款", onPay, enabled = !loan.settled, modifier = Modifier.weight(1f), compact = true)
-        }
-        Spacer(Modifier.height(Space.x1))
-        Row(horizontalArrangement = Arrangement.spacedBy(Space.x1)) {
-            JkButton("结清剩余", { confirm = "forgive" }, style = ButtonStyle.Ghost, enabled = !loan.settled && loan.remaining > 0, modifier = Modifier.weight(1f), compact = true)
-            JkButton(
-                if (loan.loan.legacy) "清除约定" else "删除",
-                { confirm = "delete" },
-                style = ButtonStyle.Danger,
-                enabled = !loan.loan.legacy || loan.stored,
-                modifier = Modifier.weight(1f),
-                compact = true,
-            )
-        }
-    }
-    when (confirm) {
-        "forgive" -> JkDialog("结清剩余的 ${Money.format(loan.remaining)}？", { confirm = null }, "结清", { confirm = null; onForgive() }) {
-            Text(if (lend) "剩余部分不再收回：记成“${loan.account.name}”上的一笔支出，他不再欠我。" else "对方免还剩余部分：记成“${loan.account.name}”上的一笔收入，我不再欠他。")
-        }
-        "delete" -> JkDialog(if (loan.loan.legacy) "清除这笔借贷的约定？" else "删除这笔借贷？", { confirm = null }, if (loan.loan.legacy) "清除" else "删除", { confirm = null; onDelete() }, danger = true) {
-            Text(if (loan.loan.legacy) "只清除预计还款日、利息与备注；导入的流水保留（要删请到“导入记录”）。" else "这笔借贷名下的借出 / 借入、收款 / 还款与利息流水会一起删除，账户余额随之恢复。")
-        }
-    }
-}
 
 /** 给账本首页用：3 天内到期或已逾期的项。 */
 fun debtReminders(data: LedgerData, today: LocalDate, zone: ZoneId): List<DueItem> =

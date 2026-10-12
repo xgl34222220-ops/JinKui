@@ -172,9 +172,17 @@ fun txRow(
     val iconKey: String?
     // 1.5.0-alpha01：“修改余额”记下的差额（真实账户与内部“余额调整”之间）显示成“余额调整 ±金额”
     val adjust = com.xiguli.jinkui.data.ledger.BalanceAdjust.adjustmentOf(tx, accountsById)
+    // 1.5.0-alpha03：借贷的流水写成“借出 · 小李”“收款 · 小李”，不再是“转账 招商银行 → 小李”
+    val loan = loanRowOf(tx, accountsById)
+    var loanSign = ""
     if (adjust != null) {
         title = "余额调整"
         where = adjust.first.name
+        iconKey = null
+    } else if (loan != null) {
+        title = loan.first
+        where = loan.second
+        loanSign = loan.third
         iconKey = null
     } else if (tx.type == TxType.TRANSFER) {
         val to = tx.toAccountId?.let { accountsById[it] }
@@ -197,13 +205,41 @@ fun txRow(
         tx.reimburseOf.isNotEmpty() -> "报销到账"
         else -> ""
     }
-    val detail = listOf(mark, tx.note.takeUnless { adjust != null && it == com.xiguli.jinkui.data.ledger.BalanceAdjust.NOTE }.orEmpty(), tx.tags.joinToString(" ") { "#$it" }).filter { it.isNotBlank() }.joinToString("　")
+    val detail = listOf(mark, tx.note.takeUnless { (adjust != null && it == com.xiguli.jinkui.data.ledger.BalanceAdjust.NOTE) || (loan != null && (it == loan.first || it == com.xiguli.jinkui.data.ledger.PersonEdit.CORRECTION_NOTE)) }.orEmpty(), tx.tags.joinToString(" ") { "#$it" }).filter { it.isNotBlank() }.joinToString("　")
     val time = Instant.ofEpochMilli(tx.occurredAt).atZone(zone).toLocalTime()
     val subtitle = "%02d:%02d　%s".format(time.hour, time.minute, where) + if (detail.isNotEmpty()) "　$detail" else ""
     val amountText = if (adjust != null) Money.format(adjust.second, signed = true) else when (tx.type) {
         TxType.EXPENSE -> "-" + Money.format(tx.amount)
         TxType.INCOME -> "+" + Money.format(tx.amount)
-        TxType.TRANSFER -> Money.format(tx.amount)
+        TxType.TRANSFER -> loanSign + Money.format(tx.amount)
     }
     return TxRowUi(tx.id, tx.type, title, subtitle, iconKey, amountText, tx, "%02d:%02d".format(time.hour, time.minute), where, detail)
+}
+
+
+/**
+ * 借贷流水在列表里的写法：（标题, 账户一栏, 转账的正负号）。不是借贷的返回 null。
+ * 借出 / 还款是钱从资金账户出去（−），借入 / 收款是进来（+）；不经过账户时写“只记欠款”。
+ */
+internal fun loanRowOf(tx: LedgerTransaction, accountsById: Map<String, LedgerAccount>): Triple<String, String, String>? {
+    val from = accountsById[tx.accountId] ?: return null
+    val to = tx.toAccountId?.let { accountsById[it] }
+    fun person(a: LedgerAccount) = com.xiguli.jinkui.data.ledger.DebtMath.personOf(a)
+    fun fundName(a: LedgerAccount?) = if (a == null || a.kind == com.xiguli.jinkui.data.ledger.AccountKind.ADJUST) "只记欠款" else a.name
+    val correction = tx.note == com.xiguli.jinkui.data.ledger.PersonEdit.CORRECTION_NOTE
+    return when (tx.type) {
+        TxType.TRANSFER -> {
+            val fromDir = com.xiguli.jinkui.data.ledger.LoanDirection.of(from.kind)
+            val toDir = to?.let { com.xiguli.jinkui.data.ledger.LoanDirection.of(it.kind) }
+            when {
+                toDir == com.xiguli.jinkui.data.ledger.LoanDirection.LEND && fromDir == null -> Triple((if (correction) "修改欠款 · " else "借出 · ") + person(to), fundName(from), if (correction) "" else "-")
+                fromDir == com.xiguli.jinkui.data.ledger.LoanDirection.LEND && toDir == null -> Triple((if (correction) "修改欠款 · " else "收款 · ") + person(from), fundName(to), if (correction) "" else "+")
+                fromDir == com.xiguli.jinkui.data.ledger.LoanDirection.BORROW && toDir == null -> Triple((if (correction) "修改欠款 · " else "借入 · ") + person(from), fundName(to), if (correction) "" else "+")
+                toDir == com.xiguli.jinkui.data.ledger.LoanDirection.BORROW && fromDir == null -> Triple((if (correction) "修改欠款 · " else "还款 · ") + person(to), fundName(from), if (correction) "" else "-")
+                else -> null
+            }
+        }
+        TxType.EXPENSE -> if (com.xiguli.jinkui.data.ledger.LoanDirection.of(from.kind) == com.xiguli.jinkui.data.ledger.LoanDirection.LEND) Triple("坏账 · " + person(from), "收不回了", "") else null
+        TxType.INCOME -> if (com.xiguli.jinkui.data.ledger.LoanDirection.of(from.kind) == com.xiguli.jinkui.data.ledger.LoanDirection.BORROW) Triple("免还 · " + person(from), "不用还了", "") else null
+    }
 }

@@ -139,14 +139,14 @@ class MoreScreensUiTest {
     fun confirmDialogLightAndDark() {
         val activity = h.show {
             JkDialog(title = "删除这笔记录？", onDismiss = {}, confirmText = "删除", danger = true, onConfirm = {}) {
-                Text("¥32.50，删除后账户余额会随之调整，无法撤销。", style = JkType.body)
+                Text("¥32.50，删除后账户余额会随之调整。删除后几秒内可以点“撤销”恢复。", style = JkType.body)
             }
         }
         h.snapshot(activity, "dialog-confirm-light", withDialog = true)
         h.close()
         val dark = h.show(dark = true) {
             JkDialog(title = "删除这笔记录？", onDismiss = {}, confirmText = "删除", danger = true, onConfirm = {}) {
-                Text("¥32.50，删除后账户余额会随之调整，无法撤销。", style = JkType.body)
+                Text("¥32.50，删除后账户余额会随之调整。删除后几秒内可以点“撤销”恢复。", style = JkType.body)
             }
         }
         h.snapshot(dark, "dialog-confirm-dark", withDialog = true)
