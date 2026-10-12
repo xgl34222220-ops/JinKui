@@ -12,8 +12,8 @@ android {
         applicationId = "com.xiguli.jinkui"
         minSdk = 26
         targetSdk = 34
-        versionCode = 24
-        versionName = "1.5.0-alpha03"
+        versionCode = 25
+        versionName = "1.5.0-alpha04"
     }
 
     // 固定的调试签名：仓库内的 app/debug.jks，口令公开（jinkui-debug），只用于 debug 构建。

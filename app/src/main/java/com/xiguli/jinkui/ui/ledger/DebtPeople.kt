@@ -370,7 +370,8 @@ fun LoanPersonScreen(accountId: String, onBack: () -> Unit) {
             onLoanCard = { loan ->
                 // 一笔借款：点开改它的借出 / 借入那一条（金额、日期、账户、约定都在一个“编辑”面板里）；导入的改约定
                 val principal = loan.entries.lastOrNull { DebtMath.entryKind(loan, it) == LoanEntryKind.PRINCIPAL }
-                if (loan.stored && !loan.loan.legacy && principal != null) openedTx = principal.id else legacyLoan = loan.loan.id
+                // 导入的借贷也一样打开那一条流水（能改金额、日期、账户，能删）；只有一条流水都没有时才退回改约定
+                if (principal != null) openedTx = principal.id else legacyLoan = loan.loan.id
             },
             onEntry = { openedTx = it.id },
             onEditPerson = { sheet = "person" },

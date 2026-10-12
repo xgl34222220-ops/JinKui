@@ -570,7 +570,8 @@ object DebtMath {
                         else -> interest += if (tx.type != TxType.TRANSFER) tx.amount else 0L
                     }
                 }
-                if (!stored && principal == 0L && repaid == 0L) return null
+                // 导入的（合成的，或者改过约定后存下来的）一分钱都没有时不列出：不然对方页多出一张“借入（导入）¥0.00 剩 ¥0.00”
+                if ((!stored || loan.legacy) && principal == 0L && repaid == 0L && interest == 0L) return null
                 val dates = entries.map { LedgerMath.dateOf(it.occurredAt, zone) }
                 return LoanView(
                     loan = if (stored) loan else loan.copy(date = dates.minOrNull() ?: loan.date),

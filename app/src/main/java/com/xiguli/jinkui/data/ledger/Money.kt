@@ -15,6 +15,8 @@ object Money {
     fun parse(text: String): Long? {
         var s = text.trim().replace(",", "").replace("，", "").replace("¥", "").replace("￥", "").trim()
         if (s.isEmpty()) return null
+        // 只敲了一个小数点（数字键盘上很容易）当成 0，不报“格式不对”
+        if (s == "." || s == "。") return 0L
         var negative = false
         if (s[0] == '-' || s[0] == '−') {
             negative = true

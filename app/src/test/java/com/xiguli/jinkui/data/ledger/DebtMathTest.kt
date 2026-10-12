@@ -396,6 +396,17 @@ class DebtMathTest {
         assertEquals(500_00L, loans.first { it.loan.legacy }.principal)
     }
 
+    @Test
+    fun savedImportedLoanWithNothingOnItIsHidden() {
+        // 用户在“导入的借贷”上改过约定（存下了 legacy 记录），后来新记了一笔借入：不该再多出一张 ¥0.00 的“借入（导入）”
+        val legacy = LedgerLoan(DebtMath.legacyLoanId(borrowedWang.id), borrowedWang.id, LoanDirection.BORROW, d(2026, 10, 12), legacy = true)
+        val loan = LedgerLoan("ln-new", borrowedWang.id, LoanDirection.BORROW, d(2026, 10, 13))
+        val txs = listOf(tx(TxType.TRANSFER, 10_600_00, at(2026, 10, 13), borrowedWang.id, bank.id, debt = loan.id))
+        val loans = DebtMath.loans(LedgerData(accounts = listOf(bank, borrowedWang), transactions = txs, loans = listOf(legacy, loan)), zone)
+        assertEquals(listOf("ln-new"), loans.map { it.loan.id })
+        assertEquals(10_600_00L, loans.single().remaining)
+    }
+
     // ── 总览 ──────────────────────────────────────────────────────
 
     @Test
