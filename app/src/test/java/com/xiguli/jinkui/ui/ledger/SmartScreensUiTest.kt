@@ -301,7 +301,8 @@ class SmartScreensUiTest {
         var imports = 0
         val ui = buildMeUi(LedgerSamples.data, cards = 5, today = LedgerSamples.today, zone = LedgerSamples.zone, version = "1.2.0-beta")
         val activity = h.show { MeContent(ui, MeActions(onImport = { imports++ })) }
-        compose.onNodeWithText("记账助手").performScrollTo()
+        // 1.5.0-alpha01：“导入账单”在宫格里，规则与模板、导入记录在“账本工具”分组
+        compose.onNodeWithText("账本工具").performScrollTo()
         h.snapshot(activity, "me-assistant-light")
         compose.onNodeWithText("导入账单").performScrollTo().performClick()
         assertEquals(1, imports)

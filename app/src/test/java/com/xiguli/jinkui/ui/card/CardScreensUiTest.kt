@@ -216,7 +216,8 @@ class CardScreensUiTest {
         RuntimeEnvironment.setFontScale(1.3f)
         try {
             val activity = show(dark = true, content = listHome())
-            compose.onNodeWithText("全部 · ${CardSamples.all.size}").assertExists()
+            // 1.5.0-alpha01：置顶的一组在上面，其余在“其他”里
+            compose.onNodeWithText("其他 · ${CardSamples.all.count { !it.pinned }}").assertExists()
             snapshot(activity, "card-list-font130-dark")
         } finally {
             RuntimeEnvironment.setFontScale(1f)
