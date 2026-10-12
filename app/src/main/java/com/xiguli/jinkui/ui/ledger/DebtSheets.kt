@@ -352,12 +352,12 @@ fun LoanPaySheet(
     var error by remember { mutableStateOf<String?>(null) }
     JkSheet(onDismiss = onDismiss, title = (if (lend) "收款 · " else "还款 · ") + loan.person) {
         SheetBody {
-            Hint("待${if (lend) "收" else "还"}本金 ${Money.format(loan.remaining)}" + if (loan.interestRemaining > 0) "，约定利息还差 ${Money.format(loan.interestRemaining)}" else "")
+            Hint("还${if (lend) "没收回" else "没还上"} ${Money.format(loan.remaining)}" + if (loan.interestRemaining > 0) "，约定利息还差 ${Money.format(loan.interestRemaining)}" else "")
             LazyRow(horizontalArrangement = Arrangement.spacedBy(Space.x1)) {
                 if (loan.remaining > 0) item(key = "all") { JkChip("全部 ${Money.format(loan.remaining)}", parseCents(amount) == loan.remaining, { amount = Money.plain(loan.remaining) }) }
                 if (loan.remaining >= 2) item(key = "half") { JkChip("一半", parseCents(amount) == loan.remaining / 2, { amount = Money.plain(loan.remaining / 2) }) }
             }
-            JkTextField(value = amount, onValueChange = { amount = it.take(14); error = null }, label = if (lend) "收回本金（可以只收一部分）" else "归还本金（可以只还一部分）", placeholder = "0.00", keyboardType = KeyboardType.Decimal)
+            JkTextField(value = amount, onValueChange = { amount = it.take(14); error = null }, label = if (lend) "这次收回多少（可以只收一部分）" else "这次还多少（可以只还一部分）", placeholder = "0.00", keyboardType = KeyboardType.Decimal)
             JkTextField(value = interest, onValueChange = { interest = it.take(14); error = null }, label = "利息（可选）", placeholder = loan.interestRemaining.takeIf { it > 0 }?.let(Money::plain) ?: "0.00", keyboardType = KeyboardType.Decimal)
             Text(if (lend) "收到哪个账户" else "从哪个账户还", style = JkType.small, color = Jk.colors.textSecondary)
             LoanFundChips(funds, fund, balances) { fund = it }

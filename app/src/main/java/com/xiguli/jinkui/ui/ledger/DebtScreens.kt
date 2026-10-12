@@ -650,7 +650,7 @@ fun LoanListContent(ui: DebtOverview, settled: Boolean, actions: LoanActions) {
     val done = ui.loans.filter { it.settled }
     val shown = if (settled) done else open
     Column(Modifier.fillMaxSize().statusBarsPadding()) {
-        JkTopBar("借贷", onBack = actions.onBack) { JkGlassIconButton(Icons.Outlined.Add, "记一笔借贷", actions.onNew) }
+        JkTopBar("借给别人 / 欠别人", onBack = actions.onBack) { JkGlassIconButton(Icons.Outlined.Add, "记一笔借贷", actions.onNew) }
         Column(
             Modifier
                 .fillMaxSize()
@@ -661,8 +661,8 @@ fun LoanListContent(ui: DebtOverview, settled: Boolean, actions: LoanActions) {
         ) {
             BotanicalCard(Modifier.fillMaxWidth(), layout = BotanicalLayout.SPRIG) {
                 Row(Modifier.padding(Space.x2_5)) {
-                    HeroFigure("应收合计（借出）", Money.format(ui.receivable), colors.textPrimary, Modifier.weight(1f))
-                    HeroFigure("应付合计（借入）", Money.format(ui.payable), if (ui.payable > 0) colors.expense else colors.textPrimary, Modifier.weight(1f))
+                    HeroFigure("别人欠我（借出）", Money.format(ui.receivable), colors.textPrimary, Modifier.weight(1f))
+                    HeroFigure("我欠别人（借入）", Money.format(ui.payable), if (ui.payable > 0) colors.expense else colors.textPrimary, Modifier.weight(1f))
                 }
             }
             Spacer(Modifier.height(Space.x2))
@@ -684,8 +684,8 @@ fun LoanListContent(ui: DebtOverview, settled: Boolean, actions: LoanActions) {
                     if (!settled) {
                         Text(
                             listOfNotNull(
-                                receivable.takeIf { it > 0 }?.let { "应收 ${Money.format(it)}" },
-                                payable.takeIf { it > 0 }?.let { "应付 ${Money.format(it)}" },
+                                receivable.takeIf { it > 0 }?.let { "他欠我 ${Money.format(it)}" },
+                                payable.takeIf { it > 0 }?.let { "我欠他 ${Money.format(it)}" },
                             ).joinToString(" · "),
                             style = JkType.amountSmall,
                             color = if (payable > 0) colors.expense else colors.textSecondary,
@@ -736,7 +736,7 @@ private fun LoanRow(loan: LoanView, today: LocalDate, onClick: () -> Unit) {
         Spacer(Modifier.height(Space.x05))
         Text(
             buildString {
-                append("${debtDate(loan.loan.date, today)} · 本金 ${Money.format(loan.principal)} · 已${if (lend) "收" else "还"} ${Money.format(loan.repaid)}")
+                append("${debtDate(loan.loan.date, today)} · 借了 ${Money.format(loan.principal)} · 已${if (lend) "收" else "还"} ${Money.format(loan.repaid)}")
                 if (loan.loan.interest > 0) append(" · 利息 ${Money.format(loan.interestPaid)}/${Money.format(loan.loan.interest)}")
                 loan.loan.dueDate?.takeIf { !loan.settled }?.let { append(" · ${debtDate(it, today)}到期") }
             },
@@ -764,7 +764,7 @@ fun LoanDetailSheet(
     JkSheet(onDismiss = onDismiss, title = "${loan.person} · ${if (lend) "借出" else "借入"}") {
         Column(Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState())) {
             DebtFigures(
-                Triple("本金", Money.format(loan.principal), null),
+                Triple(if (lend) "借出" else "借入", Money.format(loan.principal), null),
                 Triple(if (lend) "已收" else "已还", Money.format(loan.repaid), null),
                 Triple(if (lend) "待收" else "待还", Money.format(loan.remaining), if (loan.overdue(today)) colors.expense else null),
             )
@@ -830,7 +830,7 @@ fun LoanDetailSheet(
     }
     when (confirm) {
         "forgive" -> JkDialog("结清剩余的 ${Money.format(loan.remaining)}？", { confirm = null }, "结清", { confirm = null; onForgive() }) {
-            Text(if (lend) "剩余部分不再收回：记成“${loan.account.name}”上的一笔支出，应收归零。" else "对方免还剩余部分：记成“${loan.account.name}”上的一笔收入，应付归零。")
+            Text(if (lend) "剩余部分不再收回：记成“${loan.account.name}”上的一笔支出，他不再欠我。" else "对方免还剩余部分：记成“${loan.account.name}”上的一笔收入，我不再欠他。")
         }
         "delete" -> JkDialog(if (loan.loan.legacy) "清除这笔借贷的约定？" else "删除这笔借贷？", { confirm = null }, if (loan.loan.legacy) "清除" else "删除", { confirm = null; onDelete() }, danger = true) {
             Text(if (loan.loan.legacy) "只清除预计还款日、利息与备注；导入的流水保留（要删请到“导入记录”）。" else "这笔借贷名下的借出 / 借入、收款 / 还款与利息流水会一起删除，账户余额随之恢复。")
