@@ -1,5 +1,7 @@
 package com.xiguli.jinkui.ui.home
 
+import com.xiguli.jinkui.ui.theme.jkSurface
+import androidx.compose.material.icons.outlined.DeleteOutline
 import com.xiguli.jinkui.ui.nav.transitionOrigin
 import androidx.compose.ui.zIndex
 import androidx.compose.foundation.layout.offset
@@ -146,6 +148,8 @@ internal fun ListHome(
     onTogglePin: (Card) -> Unit = {},
     /** 标题栏右侧的“＋”：新建卡片。 */
     onCreate: () -> Unit = {},
+    /** 1.5.0-alpha01：列表最下面的“回收站”。 */
+    onTrash: () -> Unit = {},
     /** 筛“两步验证”时验证码每秒刷新；测试传 false 并给固定时钟。 */
     ticking: Boolean = true,
     clock: () -> Long = System::currentTimeMillis,
@@ -215,16 +219,27 @@ internal fun ListHome(
                     )
                 }
             } else {
-                val wallet = ListLayout.wallet(ui.all)
-                if (wallet.isNotEmpty()) {
-                    item(key = "wallet", contentType = "wallet") { WalletStack(wallet, onOpen, onLongClick) }
-                }
+                // 1.5.0-alpha01：列表视图不再放大卡面（钱包叠卡、置顶卡面），全部是一行一张（参考 Bitwarden / Proton Pass / Apple 密码）；
+                // 想看卡面切到右上角的卡面视图
                 if (ui.issues > 0) {
                     item(key = "health", contentType = "health") { HealthStrip(ui.issues, onHealth) }
                 }
                 if (ui.pinned.isNotEmpty()) {
                     item(key = "h-pinned", contentType = "h-pinned") { GroupHeader("置顶", ui.pinned.size) }
-                    item(key = "pinned", contentType = "pinned") { PinnedFaces(ui.pinned, onOpen, onLongClick) }
+                    itemsIndexed(ui.pinned, key = { _, card -> "p-" + card.id }, contentType = { _, _ -> "listview-row" }) { index, card ->
+                        CardRow(
+                            card = card,
+                            shape = groupShape(index, ui.pinned.size),
+                            divider = index < ui.pinned.lastIndex,
+                            onClick = { onOpen(card) },
+                            onLongClick = { onLongClick(card) },
+                            onCopy = { rowCopy(card, it) },
+                            onTogglePin = { onTogglePin(card) },
+                            isCopied = { copyFeedback.isCopied(card.id + it) },
+                            totpNow = null,
+                            modifier = Modifier.animateItem(),
+                        )
+                    }
                 }
                 val recent = ListLayout.recent(ui.all)
                 if (recent.isNotEmpty()) {
@@ -232,16 +247,17 @@ internal fun ListHome(
                     item(key = "recent", contentType = "recent") { RecentChips(recent, onOpen, onLongClick) }
                 }
                 item(key = "h-all", contentType = "h-all") {
-                    GroupHeader("全部", ui.all.size) {
+                    GroupHeader(if (ui.pinned.isEmpty()) "全部" else "其他", ui.all.count { !it.pinned }) {
                         SortButton(sortOrder, onSort)
                     }
                 }
                 // 排序切换时行平滑挪到新位置（animateItem），不是整表闪一下
-                itemsIndexed(ui.all, key = { _, card -> "a-" + card.id }, contentType = { _, _ -> "listview-row" }) { index, card ->
+                val rest = ui.all.filterNot { it.pinned }
+                itemsIndexed(rest, key = { _, card -> "a-" + card.id }, contentType = { _, _ -> "listview-row" }) { index, card ->
                     CardRow(
                         card = card,
-                        shape = groupShape(index, ui.all.size),
-                        divider = index < ui.all.lastIndex,
+                        shape = groupShape(index, rest.size),
+                        divider = index < rest.lastIndex,
                         onClick = { onOpen(card) },
                         onLongClick = { onLongClick(card) },
                         onCopy = { rowCopy(card, it) },
@@ -251,6 +267,8 @@ internal fun ListHome(
                         modifier = Modifier.animateItem(),
                     )
                 }
+                // 1.5.0-alpha01：回收站入口放在列表最下面（参考 Proton Pass 的 Trash、Apple 密码的“已删除”）
+                item(key = "trash", contentType = "trash") { TrashEntry(onTrash) }
                 item(key = "hint", contentType = "hint") {
                     Text(
                         "右滑置顶，左滑复制账号，长按更多操作",
@@ -263,6 +281,31 @@ internal fun ListHome(
                 }
             }
         }
+    }
+}
+
+/** 1.5.0-alpha01：列表底部的“回收站”一行。 */
+@Composable
+private fun TrashEntry(onClick: () -> Unit) {
+    val colors = Jk.colors
+    Row(
+        Modifier
+            .padding(start = Space.x2_5, end = Space.x2_5, top = Space.x2)
+            .fillMaxWidth()
+            .heightIn(min = JkSize.touch)
+            .clip(Radius.card)
+            .jkSurface(Jk.surfaces.card, Radius.card)
+            .clickable(role = androidx.compose.ui.semantics.Role.Button, onClick = onClick)
+            .padding(horizontal = Space.x2, vertical = Space.x1_5),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Outlined.DeleteOutline, contentDescription = null, tint = colors.textSecondary, modifier = Modifier.size(20.dp))
+        Spacer(Modifier.width(Space.x1_5))
+        Column(Modifier.weight(1f)) {
+            Text("回收站", style = JkType.bodyStrong, color = colors.textPrimary)
+            Text("删除的卡片保留 30 天，可以还原", style = JkType.caption, color = colors.textTertiary)
+        }
+        Icon(Icons.Outlined.ChevronRight, contentDescription = null, tint = colors.textTertiary, modifier = Modifier.size(18.dp))
     }
 }
 

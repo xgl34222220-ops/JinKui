@@ -628,7 +628,8 @@ private fun TotpRow(field: CardField, copied: Boolean, onCopy: () -> Unit, ticki
     }
     val code = remember(config, now / 1_000L) { config?.let { Totp.code(it, now) } }
     val label = field.label.ifBlank { "两步验证码" }
-    val urgent = code != null && code.secondsLeft <= 5
+    // 1.5.0-alpha01：最后 7 秒变警示色（参考 Bitwarden 的倒计时），提醒换下一个码
+    val urgent = code != null && code.secondsLeft <= 7
     val tint by animateColorAsState(if (urgent) colors.danger else colors.accent, tween(240), label = "totpTint")
     Row(
         modifier = Modifier

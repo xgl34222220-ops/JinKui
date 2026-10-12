@@ -35,10 +35,11 @@ fun buildHomeUi(
     val sorted = sortCards(cards, sortOrder)
     val types = CardType.entries.filter { type -> cards.any { it.type == type } }
     val tags = cards.flatMap { it.tags }.distinct().sorted()
-    val filters = (if (cards.any { it.pinned }) listOf("p:" to "置顶") else emptyList()) +
+    // 1.5.0-alpha01：先按类型筛（参考 Bitwarden 的类型、Apple 密码的分类），再是两步验证、置顶与标签
+    val filters = (if (types.size > 1) types.map { "t:" + it.key to it.label } else emptyList()) +
         // 有两步验证码的卡片时多一个“两步验证”快速筛选：结果行上直接显示实时验证码（参考 Aegis 的验证码列表）
         (if (cards.any { ListLayout.totpField(it) != null }) listOf("o:" to "两步验证") else emptyList()) +
-        (if (types.size > 1) types.map { "t:" + it.key to it.label } else emptyList()) +
+        (if (cards.any { it.pinned }) listOf("p:" to "置顶") else emptyList()) +
         tags.map { "g:$it" to "#$it" }
     val active = filter?.takeIf { key -> filters.any { it.first == key } }
     if (query.isNotBlank() || active != null) {

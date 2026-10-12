@@ -190,6 +190,7 @@ private fun MainNavigation() {
                             onSettings = { navigator.push(Screen.Settings) },
                             onHealth = { navigator.push(Screen.Health) },
                             onOrganize = { navigator.push(Screen.Organize) },
+                            onTrash = { navigator.push(Screen.CardTrash) },
                         )
                         HomeTab.STATS -> LedgerStatsScreen()
                         HomeTab.ME -> MeScreen(
@@ -264,6 +265,7 @@ private fun MainNavigation() {
                     onCredit = { navigator.push(Screen.CreditStatement(it)) },
                     onLoans = { navigator.push(Screen.Loans) },
                     onNewLoan = { navigator.push(Screen.LoansNew(it)) },
+                    onPerson = { navigator.push(Screen.LoanPerson(it)) },
                 )
                 Screen.Debts -> com.xiguli.jinkui.ui.ledger.DebtOverviewScreen(
                     onBack = { navigator.pop() },

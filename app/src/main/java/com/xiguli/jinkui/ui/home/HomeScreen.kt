@@ -202,6 +202,8 @@ fun HomeScreen(
     onSettings: () -> Unit,
     onHealth: () -> Unit,
     onOrganize: () -> Unit,
+    /** 1.5.0-alpha01：卡包列表底部的回收站入口。 */
+    onTrash: () -> Unit = {},
 ) {
     val container = LocalContainer.current
     val viewModel = jkViewModel { HomeViewModel(container) }
@@ -233,6 +235,7 @@ fun HomeScreen(
             onToggleView = { container.settings.update { it.copy(deckView = true) } },
             onLock = { container.vault.lock() },
             onCreate = { showTypes = true },
+            onTrash = onTrash,
             onMore = { showMore = true },
             onHealth = onHealth,
             onSort = { order -> container.settings.update { it.copy(sortOrder = order) } },
