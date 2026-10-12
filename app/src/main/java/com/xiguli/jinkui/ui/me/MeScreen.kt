@@ -148,7 +148,7 @@ fun MeScreen(actions: MeActions) {
     if (showGenerator) GeneratorSheet(onDismiss = { showGenerator = false })
 }
 
-/** “我的”（无状态）：植物插画头图（应用字标、记账天数与条数）→ 4 × 2 功能宫格 → 分组的设置行。 */
+/** “我的”（无状态）：植物插画头图（应用字标、记账天数与条数）→ 4 × 2 功能宫格（账本常用）→ 账本工具 / 卡包 / 数据与安全 / 关于。 */
 @Composable
 fun MeContent(ui: MeUi, actions: MeActions) {
     val colors = Jk.colors
@@ -194,35 +194,34 @@ fun MeContent(ui: MeUi, actions: MeActions) {
         Spacer(Modifier.height(Space.x2))
         FeatureGrid(actions)
         Spacer(Modifier.height(Space.x2))
+        // 1.5.0-alpha01：按“账本工具 / 卡包 / 数据与安全 / 关于”分组（参考钱迹设置页与一木记账“我的”）；常用的都在上面宫格里
+        RowGroup("账本工具") {
+            MeRow(MintGlyph.ADD_NOTE, "规则与模板", "按关键词自动分类；常记的一笔一点就记", actions.onRules)
+            JkDivider(inset = 56.dp)
+            MeRow(MintGlyph.RECURRING, "导入记录", "每次导入了多少笔，可整批撤销", actions.onImportHistory)
+            JkDivider(inset = 56.dp)
+            MeRow(MintGlyph.CARDS, "账户与余额", "添加、停用账户，修改余额", actions.onAccounts)
+        }
+        Spacer(Modifier.height(Space.x2))
+        RowGroup("卡包") {
+            MeRow(MintGlyph.KEY, "密码生成器", "生成不容易被猜到的密码", actions.onGenerator)
+            JkDivider(inset = 56.dp)
+            MeRow(MintGlyph.SHIELD, "安全体检", "弱密码、重复密码与快到期的卡", actions.onHealth)
+            JkDivider(inset = 56.dp)
+            MeRow(MintGlyph.TAG, "标签整理", "给卡片的标签改名、合并", actions.onOrganize)
+            JkDivider(inset = 56.dp)
+            MeRow(MintGlyph.CARDS, "回收站", if (ui.trash > 0) "${ui.trash} 张删除的卡片，30 天内可以还原" else "删除的卡片保留 30 天，可以还原", actions.onTrash)
+        }
+        Spacer(Modifier.height(Space.x2))
         RowGroup("数据与安全") {
             MeRow(MintGlyph.BACKUP, "加密备份与恢复", "导出 / 导入 .jkbak，只用主密码加密", actions.onBackup)
             JkDivider(inset = 56.dp)
-            MeRow(MintGlyph.SHIELD, "安全体检", "弱密码、重复密码与到期提醒", actions.onHealth)
-            JkDivider(inset = 56.dp)
-            MeRow(MintGlyph.KEY, "密码生成器", null, actions.onGenerator)
-            JkDivider(inset = 56.dp)
-            MeRow(MintGlyph.CARDS, "回收站", if (ui.trash > 0) "${ui.trash} 张删除的卡片，30 天内可以还原" else "删除的卡片保留 30 天，可以还原", actions.onTrash)
-            JkDivider(inset = 56.dp)
-            MeRow(MintGlyph.CARDS, "账户与余额", "现金、银行卡、支付宝、微信、信用卡", actions.onAccounts)
-        }
-        Spacer(Modifier.height(Space.x2))
-        RowGroup("记账助手") {
-            MeRow(MintGlyph.BILL, "欠款 / 借贷", "借钱给别人、欠别人钱，信用卡与花呗账单、分期，到期提醒", actions.onDebts)
-            JkDivider(inset = 56.dp)
-            MeRow(MintGlyph.BILL, "报销", "替单位垫付的待报销、已报销；退款在账本里长按那笔支出", actions.onReimburse)
-            JkDivider(inset = 56.dp)
-            MeRow(MintGlyph.ADD_NOTE, "规则与模板", "按关键词自动分类，导入账单也套用；常记的一笔一点就记", actions.onRules)
-            JkDivider(inset = 56.dp)
-            MeRow(MintGlyph.ADD_NOTE, "导入账单", "微信支付、支付宝、记账 App 账单或 CSV 表格", actions.onImport)
-            JkDivider(inset = 56.dp)
-            MeRow(MintGlyph.RECURRING, "导入记录", "每次导入的时间、来源与笔数，可整批撤销", actions.onImportHistory)
-            JkDivider(inset = 56.dp)
-            MeRow(MintGlyph.RECURRING, "自动记账", "收付款通知生成待确认，确认后才记账", actions.onAuto)
-        }
-        Spacer(Modifier.height(Space.x2))
-        RowGroup("其他") {
             MeRow(MintGlyph.LOCK, "立即锁定", "清掉内存里的明文，回到解锁页", actions.onLock)
             JkDivider(inset = 56.dp)
+            MeRow(MintGlyph.SETTINGS, "设置", "解锁方式、外观与字体、提醒", actions.onSettings)
+        }
+        Spacer(Modifier.height(Space.x2))
+        RowGroup("关于") {
             MeRow(MintGlyph.INFO, "关于金匮", "全程离线，不申请联网权限" + if (ui.version.isNotEmpty()) " · ${ui.version}" else "", null)
         }
     }
@@ -234,15 +233,15 @@ private data class Feature(val glyph: MintGlyph, val label: String, val onClick:
 private fun FeatureGrid(actions: MeActions) {
     val colors = Jk.colors
     val features = listOf(
-        Feature(MintGlyph.RECURRING, "周期记账", actions.onRecurring),
+        // 1.5.0-alpha01：宫格只放账本最常用的 8 个（参考一木记账“我的”）；标签、备份、设置挪到下面分组里
+        Feature(MintGlyph.ASSETS, "资产账户", actions.onAssets),
+        Feature(MintGlyph.BILL, "借钱欠款", actions.onDebts),
         Feature(MintGlyph.BUDGET, "预算", actions.onBudget),
-        Feature(MintGlyph.ASSETS, "账户资产", actions.onAssets),
+        Feature(MintGlyph.RECURRING, "周期记账", actions.onRecurring),
         Feature(MintGlyph.CATEGORY, "分类管理", actions.onCategories),
-        Feature(MintGlyph.TAG, "标签", actions.onOrganize),
-        Feature(MintGlyph.BACKUP, "备份", actions.onBackup),
-        // 1.4.0-alpha04：借钱给别人 / 欠别人钱 / 信用卡账单放进宫格（原来的“安全锁定”在下面“其他 · 立即锁定”里仍然有）
-        Feature(MintGlyph.BILL, "欠款借贷", actions.onDebts),
-        Feature(MintGlyph.SETTINGS, "更多设置", actions.onSettings),
+        Feature(MintGlyph.BILL, "报销", actions.onReimburse),
+        Feature(MintGlyph.ADD_NOTE, "导入账单", actions.onImport),
+        Feature(MintGlyph.RECURRING, "自动记账", actions.onAuto),
     )
     Column(
         Modifier

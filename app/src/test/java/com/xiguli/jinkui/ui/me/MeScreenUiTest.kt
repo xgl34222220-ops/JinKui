@@ -103,12 +103,19 @@ class MeScreenUiTest {
         var debts = false
         val light = show { MeContent(ui, MeActions(onBudget = { budget = true }, onLock = { locked = true }, onDebts = { debts = true })) }
         compose.onNodeWithText("坚持记账的第 ${ui.days} 天").assertExists()
-        for (label in listOf("周期记账", "预算", "账户资产", "分类管理", "标签", "备份", "欠款借贷", "更多设置")) {
+        // 1.5.0-alpha01：宫格是账本最常用的 8 个；下面按账本工具 / 卡包 / 数据与安全 / 关于分组
+        for (label in listOf("资产账户", "借钱欠款", "预算", "周期记账", "分类管理", "报销", "导入账单", "自动记账")) {
             compose.onNodeWithText(label).assertExists()
         }
-        compose.onNodeWithText("预算").performClick()
-        // 1.4.0-alpha04：宫格里的“欠款借贷”打开欠款 / 借贷；锁定在“其他 · 立即锁定”
-        compose.onNodeWithText("欠款借贷").performClick()
+        for (group in listOf("账本工具", "卡包", "数据与安全", "关于")) {
+            compose.onNodeWithText(group).performScrollTo().assertExists()
+        }
+        for (row in listOf("规则与模板", "账户与余额", "密码生成器", "安全体检", "标签整理", "回收站", "加密备份与恢复", "设置")) {
+            compose.onNodeWithText(row).performScrollTo().assertExists()
+        }
+        compose.onNodeWithText("预算").performScrollTo().performClick()
+        // 宫格里的“借钱欠款”打开欠款 / 借贷；锁定在“数据与安全 · 立即锁定”
+        compose.onNodeWithText("借钱欠款").performScrollTo().performClick()
         compose.onNodeWithText("立即锁定").performScrollTo().performClick()
         assertTrue(budget)
         assertTrue(debts)
