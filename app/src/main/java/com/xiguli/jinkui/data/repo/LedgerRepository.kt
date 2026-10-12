@@ -476,6 +476,41 @@ class LedgerRepository(
     }
 
     /**
+     * 1.5.0-alpha01：修改余额。把账户现在的余额直接改成 [target]（信用卡、花呗填负数 = 当前欠款），
+     * 记一笔差额（见 [BalanceAdjust]）；余额本来就一样时什么都不记，返回 null。删掉返回的那笔流水即可撤销。
+     */
+    suspend fun adjustBalance(
+        accountId: String,
+        target: Long,
+        mode: com.xiguli.jinkui.data.ledger.BalanceAdjustMode = com.xiguli.jinkui.data.ledger.BalanceAdjustMode.NOT_COUNTED,
+    ): LedgerTransaction? = withContext(Dispatchers.IO) {
+        recurringLock.withLock {
+            val keys = keys()
+            val data = state.value
+            val now = System.currentTimeMillis()
+            val current = LedgerMath.balances(data.accounts, data.transactions)[accountId] ?: throw LedgerInputException("找不到这个账户")
+            val plan = try {
+                com.xiguli.jinkui.data.ledger.BalanceAdjust.plan(data, accountId, current, target, mode, now, now)
+            } catch (e: IllegalArgumentException) {
+                throw LedgerInputException(e.message ?: "无法修改余额")
+            } ?: return@withLock null
+            val accounts = data.accounts + listOfNotNull(plan.newAdjustAccount)
+            LedgerMath.validate(plan.transaction, accounts)?.let { throw LedgerInputException(it) }
+            database.writeDebtChange(
+                accounts = listOfNotNull(plan.newAdjustAccount).map { it.toRow(keys) },
+                transactions = listOf(plan.transaction.toRow(keys)),
+            )
+            publish { d ->
+                d.copy(
+                    accounts = (d.accounts + listOfNotNull(plan.newAdjustAccount)).sortedBy { it.position },
+                    transactions = d.transactions + plan.transaction,
+                )
+            }
+            plan.transaction
+        }
+    }
+
+    /**
      * 删除一笔流水。周期记账生成的流水同时记下删除标记：
      * 之后补记不会再生成这一天，导入旧备份也不会把它加回来。
      */

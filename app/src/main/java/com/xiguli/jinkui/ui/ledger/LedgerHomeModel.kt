@@ -170,7 +170,13 @@ fun txRow(
     val title: String
     val where: String
     val iconKey: String?
-    if (tx.type == TxType.TRANSFER) {
+    // 1.5.0-alpha01：“修改余额”记下的差额（真实账户与内部“余额调整”之间）显示成“余额调整 ±金额”
+    val adjust = com.xiguli.jinkui.data.ledger.BalanceAdjust.adjustmentOf(tx, accountsById)
+    if (adjust != null) {
+        title = "余额调整"
+        where = adjust.first.name
+        iconKey = null
+    } else if (tx.type == TxType.TRANSFER) {
         val to = tx.toAccountId?.let { accountsById[it] }
         title = "转账"
         where = "${account?.name ?: "未知账户"} → ${to?.name ?: "未知账户"}"
@@ -191,10 +197,10 @@ fun txRow(
         tx.reimburseOf.isNotEmpty() -> "报销到账"
         else -> ""
     }
-    val detail = listOf(mark, tx.note, tx.tags.joinToString(" ") { "#$it" }).filter { it.isNotBlank() }.joinToString("　")
+    val detail = listOf(mark, tx.note.takeUnless { adjust != null && it == com.xiguli.jinkui.data.ledger.BalanceAdjust.NOTE }.orEmpty(), tx.tags.joinToString(" ") { "#$it" }).filter { it.isNotBlank() }.joinToString("　")
     val time = Instant.ofEpochMilli(tx.occurredAt).atZone(zone).toLocalTime()
     val subtitle = "%02d:%02d　%s".format(time.hour, time.minute, where) + if (detail.isNotEmpty()) "　$detail" else ""
-    val amountText = when (tx.type) {
+    val amountText = if (adjust != null) Money.format(adjust.second, signed = true) else when (tx.type) {
         TxType.EXPENSE -> "-" + Money.format(tx.amount)
         TxType.INCOME -> "+" + Money.format(tx.amount)
         TxType.TRANSFER -> Money.format(tx.amount)

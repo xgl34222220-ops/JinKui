@@ -24,6 +24,7 @@ import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -470,12 +471,21 @@ fun JkRow(
     danger: Boolean = false,
     onClick: (() -> Unit)? = null,
     trailing: (@Composable () -> Unit)? = null,
+    /** 1.5.0-alpha01：长按（例如账户行长按“修改余额”）。 */
+    onLongClick: (() -> Unit)? = null,
+    onLongClickLabel: String? = null,
 ) {
     val colors = Jk.colors
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .then(
+                when {
+                    onLongClick != null -> Modifier.combinedClickable(onClick = onClick ?: {}, onLongClick = onLongClick, onLongClickLabel = onLongClickLabel)
+                    onClick != null -> Modifier.clickable(onClick = onClick)
+                    else -> Modifier
+                },
+            )
             .heightIn(min = 56.dp)
             .padding(horizontal = Space.x2, vertical = Space.x1_5),
         verticalAlignment = Alignment.CenterVertically,

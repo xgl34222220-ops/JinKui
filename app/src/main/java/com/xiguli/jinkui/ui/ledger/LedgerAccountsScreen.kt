@@ -73,12 +73,31 @@ data class AccountsUi(
     val balances: Map<String, Long>,
     val netWorth: Long,
     val usage: Map<String, Int>,
+    /** 1.5.0-alpha01：每个账户最近的几笔余额调整（新的在前），修改余额面板里可以撤销。 */
+    val recentAdjusts: Map<String, List<RecentAdjust>> = emptyMap(),
 )
 
 internal fun buildAccountsUi(data: LedgerData): AccountsUi {
     val balances = LedgerMath.balances(data.accounts, data.transactions)
+    val byId = data.accounts.associateBy { it.id }
+    val zone = java.time.ZoneId.systemDefault()
+    val recent = HashMap<String, MutableList<RecentAdjust>>()
+    for (tx in data.transactions.sortedByDescending { it.occurredAt }) {
+        val hit = com.xiguli.jinkui.data.ledger.BalanceAdjust.adjustmentOf(tx, byId)
+            ?: if (tx.note == com.xiguli.jinkui.data.ledger.BalanceAdjust.NOTE && tx.debtId == null && tx.type != com.xiguli.jinkui.data.ledger.TxType.TRANSFER) {
+                byId[tx.accountId]?.let { it to if (tx.type == com.xiguli.jinkui.data.ledger.TxType.INCOME) tx.amount else -tx.amount }
+            } else null
+        if (hit == null) continue
+        val list = recent.getOrPut(hit.first.id) { mutableListOf() }
+        if (list.size >= 3) continue
+        val day = LedgerMath.dateOf(tx.occurredAt, zone)
+        val counted = tx.type != com.xiguli.jinkui.data.ledger.TxType.TRANSFER
+        list += RecentAdjust(tx.id, hit.second, "${day.year}年${day.monthValue}月${day.dayOfMonth}日 · " + if (counted) "记为收入 / 支出" else "不计入收支")
+    }
     return AccountsUi(
-        accounts = data.accounts.sortedWith(compareBy<LedgerAccount> { it.archived }.thenBy { it.position }),
+        recentAdjusts = recent,
+        // 内部“余额调整”账户不出现在列表里
+        accounts = data.accounts.filter { it.kind != AccountKind.ADJUST }.sortedWith(compareBy<LedgerAccount> { it.archived }.thenBy { it.position }),
         balances = balances,
         // “余额调整”内部账户（导入的余额校准）不计入净资产
         netWorth = LedgerMath.netWorth(balances.filterKeys { id -> data.accounts.firstOrNull { it.id == id }?.kind?.countsInAssets != false }),
@@ -105,6 +124,32 @@ class LedgerAccountsViewModel(private val container: AppContainer) : ViewModel()
         }
     }
 
+    /** 1.5.0-alpha01：修改余额；成功后提示新余额，并可一键撤销。 */
+    fun adjust(account: LedgerAccount, target: Long, mode: com.xiguli.jinkui.data.ledger.BalanceAdjustMode, onDone: () -> Unit) {
+        viewModelScope.launch {
+            try {
+                val tx = container.ledger.adjustBalance(account.id, target, mode)
+                onDone()
+                if (tx != null) {
+                    val shown = if (account.kind == AccountKind.CREDIT) "现在欠 ${Money.format(-target)}" else "余额 ${Money.format(target)}"
+                    container.messages.show("「${account.name}」$shown", "撤销") { undo(tx.id) }
+                }
+            } catch (e: LedgerInputException) {
+                container.messages.show(e.message ?: "修改失败")
+            } catch (e: Exception) {
+                container.messages.show("修改失败：${e.message ?: "未知错误"}")
+            }
+        }
+    }
+
+    fun undo(txId: String) {
+        viewModelScope.launch {
+            runCatching { container.ledger.deleteTransaction(txId) }
+                .onSuccess { container.messages.show("已撤销这次余额调整") }
+                .onFailure { container.messages.show(it.message ?: "撤销失败") }
+        }
+    }
+
     fun delete(account: LedgerAccount, onDone: () -> Unit) {
         viewModelScope.launch {
             try {
@@ -127,6 +172,7 @@ fun LedgerAccountsScreen(onBack: () -> Unit, onDebt: (LedgerAccount) -> Unit = {
     val colors = Jk.colors
     // 1.4.0-alpha04：从“欠款 / 账单”的“添加信用卡”进来时，直接打开“添加账户”，种类预选好
     var editing by remember { mutableStateOf(startNew?.let { LedgerAccount(LedgerIds.newId(), "", it) }) }
+    var adjusting by remember { mutableStateOf<LedgerAccount?>(null) }
 
     LedgerAccountsContent(
         ui = ui,
@@ -134,7 +180,19 @@ fun LedgerAccountsScreen(onBack: () -> Unit, onDebt: (LedgerAccount) -> Unit = {
         onBack = onBack,
         onAdd = { editing = LedgerAccount(LedgerIds.newId(), "", AccountKind.BANK) },
         onEdit = { editing = it },
+        onAdjust = { adjusting = it },
     )
+
+    adjusting?.let { account ->
+        BalanceAdjustSheet(
+            account = account,
+            current = ui.balances[account.id] ?: 0L,
+            recent = ui.recentAdjusts[account.id].orEmpty(),
+            onDismiss = { adjusting = null },
+            onSave = { target, mode -> viewModel.adjust(account, target, mode) { adjusting = null } },
+            onUndo = { viewModel.undo(it) },
+        )
+    }
 
     editing?.let { account ->
         AccountEditSheet(
@@ -148,6 +206,11 @@ fun LedgerAccountsScreen(onBack: () -> Unit, onDebt: (LedgerAccount) -> Unit = {
             onDebt = {
                 editing = null
                 onDebt(account)
+            },
+            balance = ui.balances[account.id],
+            onAdjust = {
+                editing = null
+                adjusting = account
             },
         )
     }
@@ -163,6 +226,9 @@ private fun AccountEditSheet(
     onSave: (LedgerAccount) -> Unit,
     onDelete: () -> Unit,
     onDebt: () -> Unit = {},
+    /** 1.5.0-alpha01：账户现在的余额；不为 null 且能修改余额时出现“修改余额”。 */
+    balance: Long? = null,
+    onAdjust: () -> Unit = {},
 ) {
     val colors = Jk.colors
     var name by remember { mutableStateOf(account.name) }
@@ -212,6 +278,16 @@ private fun AccountEditSheet(
                         }
                     }
                 }
+            }
+            // 1.5.0-alpha01：修改余额（直接填现在的余额，记一笔余额调整；期初余额不用改）
+            if (!isNew && balance != null && com.xiguli.jinkui.data.ledger.BalanceAdjust.canAdjust(account)) {
+                Spacer(Modifier.height(Space.x1))
+                JkRow(
+                    title = "修改余额",
+                    subtitle = (if (account.kind == AccountKind.CREDIT) "现在欠 ${Money.format(-balance)}" else "现在余额 ${Money.format(balance)}") + "，直接改成实际的数",
+                    modifier = Modifier.clip(Radius.control),
+                    onClick = onAdjust,
+                )
             }
             // 1.4：信用账户的账单 / 分期，借贷账户的借贷记录
             if (!isNew && (account.kind == AccountKind.CREDIT || account.kind == AccountKind.RECEIVABLE || account.kind == AccountKind.PAYABLE)) {
@@ -279,6 +355,8 @@ fun LedgerAccountsContent(
     onBack: () -> Unit,
     onAdd: () -> Unit,
     onEdit: (LedgerAccount) -> Unit,
+    /** 1.5.0-alpha01：长按一个账户 → 修改余额。 */
+    onAdjust: (LedgerAccount) -> Unit = {},
 ) {
     val colors = Jk.colors
     Column(
@@ -301,7 +379,7 @@ fun LedgerAccountsContent(
                         JkType.amountLarge,
                         if (ui.netWorth < 0) colors.danger else colors.textPrimary,
                     )
-                    Text("余额 = 期初余额 + 全部收支与转账，随流水自动更新", style = JkType.caption, color = colors.textTertiary)
+                    Text("余额随记账自动更新；不对时长按账户 → 修改余额", style = JkType.caption, color = colors.textTertiary)
                 }
                 Spacer(Modifier.height(Space.x2))
             }
@@ -323,6 +401,8 @@ fun LedgerAccountsContent(
                             },
                             icon = accountIcon(account.kind),
                             onClick = { onEdit(account) },
+                            onLongClick = if (com.xiguli.jinkui.data.ledger.BalanceAdjust.canAdjust(account)) ({ onAdjust(account) }) else null,
+                            onLongClickLabel = "修改余额",
                             trailing = {
                                 Text(
                                     Money.format(balance),
