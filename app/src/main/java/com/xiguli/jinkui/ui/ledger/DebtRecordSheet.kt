@@ -306,8 +306,10 @@ fun PersonEditSheet(
     onDismiss: () -> Unit,
     onRename: (String) -> Unit,
     onMerge: (intoId: String) -> Unit,
+    onDelete: (() -> Unit)? = null,
 ) {
     val colors = Jk.colors
+    var confirmDelete by remember { mutableStateOf(false) }
     var name by remember { mutableStateOf(person.person) }
     var error by remember { mutableStateOf<String?>(null) }
     var mergeInto by remember { mutableStateOf<LedgerAccount?>(null) }
@@ -331,6 +333,20 @@ fun PersonEditSheet(
                     for (a in others) JkChip(DebtMath.personOf(a), false, { mergeInto = a })
                 }
             }
+            if (onDelete != null) {
+                Spacer(Modifier.height(Space.x05))
+                JkButton("删除${person.person}和全部记录", { confirmDelete = true }, style = ButtonStyle.Danger, modifier = Modifier.fillMaxWidth())
+            }
+        }
+    }
+    if (confirmDelete && onDelete != null) {
+        JkDialog(
+            title = "删除${person.person}？",
+            onDismiss = { confirmDelete = false },
+            confirmText = "删除",
+            onConfirm = { confirmDelete = false; onDelete() },
+        ) {
+            Text("${person.person}的 ${person.entries.size} 条记录都会删除，涉及的账户余额会改回去。删除后几秒内可以点“撤销”。", style = JkType.body)
         }
     }
     mergeInto?.let { into ->

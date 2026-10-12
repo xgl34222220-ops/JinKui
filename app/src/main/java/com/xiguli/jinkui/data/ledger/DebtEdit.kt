@@ -363,6 +363,12 @@ object DebtEdit {
 
     fun relatedCount(record: DebtRecord): Int =
         if (record.ownsLoan) record.loan.entries.count { it.id !in record.ids } else 0
+
+    /** 删一整笔借款（卡片上的“删除这笔”）：它的全部流水 + 存下来的借贷记录（导入的借贷存过约定时也删）。 */
+    fun deleteLoanPlan(data: LedgerData, loan: LoanView): DebtChange = DebtChange(
+        deleteLoans = listOfNotNull(loan.loan.id.takeIf { id -> data.loans.any { it.id == id } }),
+        deleteTransactions = loan.entries.map { it.id }.distinct(),
+    )
 }
 
 /**
@@ -398,6 +404,23 @@ object PersonEdit {
      * 把 [fromId] 这个人合并到 [intoId]（同一方向）：全部记录、借贷、期初欠款都挪过去，原来那个人删掉
      * （有周期记账在用时改为停用）。
      */
+    /**
+     * 删除这个人：和他有关的全部流水（借出 / 借入 / 收款 / 还款 / 利息 / 坏账 / 修改欠款）、全部借贷记录、这个人本身。
+     * 有周期记账还用着这个人时只停用不删。可以撤销。
+     */
+    fun deletePerson(data: LedgerData, accountId: String, now: Long): DebtChange {
+        val account = data.accounts.firstOrNull { it.id == accountId && LoanDirection.of(it.kind) != null } ?: throw IllegalArgumentException("找不到这个人")
+        val loanIds = data.loans.filter { it.accountId == accountId }.mapTo(HashSet()) { it.id } + DebtMath.legacyLoanId(accountId)
+        val txs = data.transactions.filter { it.accountId == accountId || it.toAccountId == accountId || it.debtId in loanIds }.map { it.id }
+        val usedByRecurring = data.recurring.any { it.accountId == accountId || it.toAccountId == accountId }
+        return DebtChange(
+            accounts = listOfNotNull(account.copy(archived = true, openingBalance = 0L, updatedAt = now).takeIf { usedByRecurring }),
+            deleteLoans = data.loans.filter { it.accountId == accountId }.map { it.id },
+            deleteTransactions = txs,
+            deleteAccounts = if (usedByRecurring) emptyList() else listOf(accountId),
+        )
+    }
+
     fun merge(data: LedgerData, fromId: String, intoId: String, now: Long): DebtChange {
         require(fromId != intoId) { "请选择另一个人" }
         val from = data.accounts.firstOrNull { it.id == fromId } ?: throw IllegalArgumentException("找不到这个人")

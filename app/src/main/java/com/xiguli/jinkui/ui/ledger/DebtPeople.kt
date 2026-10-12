@@ -418,6 +418,7 @@ fun LoanPersonScreen(accountId: String, onBack: () -> Unit) {
                 val target = data.accounts.firstOrNull { it.id == into }
                 runUndoable("已合并到${target?.let(DebtMath::personOf).orEmpty()}", { sheet = null; onBack() }) { ledger.mergePerson(person.account.id, into) }
             },
+            onDelete = { runUndoable("已删除${person.person}", { sheet = null; onBack() }) { ledger.deletePerson(person.account.id) } },
         )
         "owed" -> PersonOwedSheet(person, today, { sheet = null }) { target, date ->
             runUndoable("已改成还欠 ${Money.format(target)}", { sheet = null }) { ledger.setPersonOwed(person.account.id, target, date) }
@@ -442,7 +443,9 @@ fun LoanPersonScreen(accountId: String, onBack: () -> Unit) {
         }
     }
     person.loans.firstOrNull { it.loan.id == legacyLoan }?.let { loan ->
-        LoanEditSheet(loan, today, { legacyLoan = null }) { edited ->
+        LoanEditSheet(loan, today, { legacyLoan = null }, onDelete = {
+            runUndoable("已删除这笔", { legacyLoan = null }) { ledger.deleteLoan(loan.loan.id, loan.account.id) }
+        }) { edited ->
             viewModel.run("已保存", { legacyLoan = null }) { ledger.saveLoan(edited) }
         }
     }

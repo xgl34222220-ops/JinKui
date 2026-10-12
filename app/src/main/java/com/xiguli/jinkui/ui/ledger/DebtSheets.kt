@@ -398,7 +398,8 @@ fun LoanPaySheet(
 
 /** 改借贷的约定：预计还款日、利息、备注。 */
 @Composable
-fun LoanEditSheet(loan: LoanView, today: LocalDate, onDismiss: () -> Unit, onSave: (LedgerLoan) -> Unit) {
+fun LoanEditSheet(loan: LoanView, today: LocalDate, onDismiss: () -> Unit, onDelete: (() -> Unit)? = null, onSave: (LedgerLoan) -> Unit) {
+    var confirmDelete by remember { mutableStateOf(false) }
     var due by remember { mutableStateOf(loan.loan.dueDate) }
     var interest by remember { mutableStateOf(loan.loan.interest.takeIf { it > 0 }?.let(Money::plain) ?: "") }
     var note by remember { mutableStateOf(loan.loan.note) }
@@ -415,5 +416,19 @@ fun LoanEditSheet(loan: LoanView, today: LocalDate, onDismiss: () -> Unit, onSav
             val cents = if (interest.isBlank()) 0L else parseCents(interest)
             if (cents == null) error = "利息格式不对" else onSave(loan.loan.copy(dueDate = due, interest = cents, note = note.trim()))
         }, modifier = Modifier.fillMaxWidth())
+        if (onDelete != null) {
+            Spacer(Modifier.height(Space.x1))
+            JkButton("删除这笔", { confirmDelete = true }, style = com.xiguli.jinkui.ui.components.ButtonStyle.Danger, modifier = Modifier.fillMaxWidth())
+        }
+    }
+    if (confirmDelete && onDelete != null) {
+        com.xiguli.jinkui.ui.components.JkDialog(
+            title = "删除这笔${if (loan.direction == LoanDirection.LEND) "借出" else "借入"}？",
+            onDismiss = { confirmDelete = false },
+            confirmText = "删除",
+            onConfirm = { confirmDelete = false; onDelete() },
+        ) {
+            Text("这笔的 ${loan.entries.size} 条记录（含收款 / 还款 / 利息）一起删除，删除后几秒内可以点“撤销”。", style = JkType.body)
+        }
     }
 }

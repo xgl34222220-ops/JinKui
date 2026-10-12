@@ -296,4 +296,26 @@ class DebtEditTest {
         assertEquals(2, moved.size)
         assertNotNull(record(after, moved.first().id).interestTx)
     }
+
+    @Test
+    fun deletePersonRemovesEverythingAndUndoRestores() {
+        val c = PersonEdit.deletePerson(data, li.id, now)
+        val after = apply(data, c)
+        assertTrue(after.accounts.none { it.id == li.id })
+        assertTrue(after.transactions.none { it.id in setOf(tLend.id, tCollect.id, tInterest.id) })
+        assertTrue(after.loans.none { it.accountId == li.id })
+        // 现金余额回到没借过的样子
+        assertEquals(balances(data)[cash.id]!! + 500_00 - 200_00 - 10_00, balances(after)[cash.id])
+        val back = apply(after, c.inverse(data))
+        sameTxs(data, back)
+        assertTrue(back.accounts.any { it.id == li.id })
+    }
+
+    @Test
+    fun deleteWholeLoanIncludingImported() {
+        val view = DebtMath.loans(data, zone).first { it.account.id == imported.id }
+        val after = apply(data, DebtEdit.deleteLoanPlan(data, view))
+        assertTrue(after.transactions.none { it.id == tImported.id })
+        assertTrue(DebtMath.loans(after, zone).none { it.account.id == imported.id })
+    }
 }

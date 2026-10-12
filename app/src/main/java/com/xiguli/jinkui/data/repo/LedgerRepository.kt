@@ -1294,6 +1294,25 @@ class LedgerRepository(
         }
     }
 
+    /** 删除这个人和他的全部借贷记录。返回撤销用的改动。 */
+    suspend fun deletePerson(accountId: String): com.xiguli.jinkui.data.ledger.DebtChange = withContext(Dispatchers.IO) {
+        recurringLock.withLock {
+            keys()
+            applyDebtChangeLocked(plain { com.xiguli.jinkui.data.ledger.PersonEdit.deletePerson(state.value, accountId, System.currentTimeMillis()) })
+        }
+    }
+
+    /** 删一整笔借款（含它的收款 / 还款 / 利息）。返回撤销用的改动。 */
+    suspend fun deleteLoan(loanId: String, accountId: String, zone: ZoneId = ZoneId.systemDefault()): com.xiguli.jinkui.data.ledger.DebtChange = withContext(Dispatchers.IO) {
+        recurringLock.withLock {
+            keys()
+            val data = state.value
+            val loan = com.xiguli.jinkui.data.ledger.DebtMath.loans(data, zone).firstOrNull { it.loan.id == loanId && it.account.id == accountId }
+                ?: throw LedgerInputException("这笔借款已经不在了")
+            applyDebtChangeLocked(com.xiguli.jinkui.data.ledger.DebtEdit.deleteLoanPlan(data, loan))
+        }
+    }
+
     /** 对方改名。返回撤销用的改动。 */
     suspend fun renamePerson(accountId: String, name: String): com.xiguli.jinkui.data.ledger.DebtChange = withContext(Dispatchers.IO) {
         recurringLock.withLock {
