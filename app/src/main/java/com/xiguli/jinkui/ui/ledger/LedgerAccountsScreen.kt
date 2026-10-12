@@ -164,7 +164,13 @@ class LedgerAccountsViewModel(private val container: AppContainer) : ViewModel()
 }
 
 @Composable
-fun LedgerAccountsScreen(onBack: () -> Unit, onDebt: (LedgerAccount) -> Unit = {}, startNew: AccountKind? = null) {
+fun LedgerAccountsScreen(
+    onBack: () -> Unit,
+    onDebt: (LedgerAccount) -> Unit = {},
+    startNew: AccountKind? = null,
+    /** 1.5.0-alpha02：点资金账户 / 信用卡 → 账户详情（借贷对象仍打开编辑面板）。 */
+    onOpen: ((LedgerAccount) -> Unit)? = null,
+) {
     val container = LocalContainer.current
     val viewModel = jkViewModel { LedgerAccountsViewModel(container) }
     val ui by viewModel.ui.collectAsStateWithLifecycle()
@@ -179,7 +185,7 @@ fun LedgerAccountsScreen(onBack: () -> Unit, onDebt: (LedgerAccount) -> Unit = {
         cards = cards,
         onBack = onBack,
         onAdd = { editing = LedgerAccount(LedgerIds.newId(), "", AccountKind.BANK) },
-        onEdit = { editing = it },
+        onEdit = { if (onOpen != null && com.xiguli.jinkui.data.ledger.BalanceAdjust.canAdjust(it)) onOpen(it) else editing = it },
         onAdjust = { adjusting = it },
     )
 
@@ -217,7 +223,7 @@ fun LedgerAccountsScreen(onBack: () -> Unit, onDebt: (LedgerAccount) -> Unit = {
 }
 
 @Composable
-private fun AccountEditSheet(
+internal fun AccountEditSheet(
     account: LedgerAccount,
     isNew: Boolean,
     usage: Int,
@@ -379,7 +385,7 @@ fun LedgerAccountsContent(
                         JkType.amountLarge,
                         if (ui.netWorth < 0) colors.danger else colors.textPrimary,
                     )
-                    Text("余额随记账自动更新；不对时长按账户 → 修改余额", style = JkType.caption, color = colors.textTertiary)
+                    Text("余额随记账自动更新；点账户看它的流水，不对时长按 → 修改余额", style = JkType.caption, color = colors.textTertiary)
                 }
                 Spacer(Modifier.height(Space.x2))
             }

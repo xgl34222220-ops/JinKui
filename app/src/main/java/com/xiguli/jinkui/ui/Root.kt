@@ -257,6 +257,12 @@ private fun MainNavigation() {
                     onDebt = { account ->
                         navigator.push(if (account.kind == com.xiguli.jinkui.data.ledger.AccountKind.CREDIT) Screen.CreditStatement(account.id) else Screen.LoanPerson(account.id))
                     },
+                    onOpen = { account -> navigator.push(Screen.AccountDetail(account.id)) },
+                )
+                is Screen.AccountDetail -> com.xiguli.jinkui.ui.ledger.AccountDetailScreen(
+                    screen.accountId,
+                    onBack = { navigator.pop() },
+                    onStatements = { navigator.push(Screen.CreditStatement(it)) },
                 )
                 Screen.LedgerAssets -> LedgerAssetsScreen(
                     onBack = { navigator.pop() },
@@ -266,6 +272,7 @@ private fun MainNavigation() {
                     onLoans = { navigator.push(Screen.Loans) },
                     onNewLoan = { navigator.push(Screen.LoansNew(it)) },
                     onPerson = { navigator.push(Screen.LoanPerson(it)) },
+                    onAccount = { navigator.push(Screen.AccountDetail(it)) },
                 )
                 Screen.Debts -> com.xiguli.jinkui.ui.ledger.DebtOverviewScreen(
                     onBack = { navigator.pop() },

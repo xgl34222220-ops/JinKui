@@ -135,6 +135,10 @@ fun EntrySheet(
     onLoan: ((LoanEntryRequest) -> Unit)? = null,
     /** 打开时直接进入借贷的某一类（首页“借出 / 借入”快捷入口）。 */
     initialLoan: LoanAction? = null,
+    /** 1.5.0-alpha02：从某个账户的详情页记一笔 / 转账时预选的账户（转账时是转出账户）。 */
+    initialAccount: String? = null,
+    /** 1.5.0-alpha02：打开时的类型（账户详情页的“转账”）。 */
+    initialType: TxType? = null,
 ) {
     val message: (String) -> Unit = onMessage ?: LocalContainer.current.messages::show
     val touch = LocalUserActivity.current
@@ -155,14 +159,15 @@ fun EntrySheet(
         data.categories.filter { it.type == t && it.parentId == null && !it.archived }.minByOrNull { it.position }?.id
 
     var id by remember { mutableStateOf(existing?.id ?: LedgerIds.newId()) }
-    var type by remember { mutableStateOf(seed?.type ?: presetType ?: TxType.EXPENSE) }
+    var type by remember { mutableStateOf(seed?.type ?: initialType ?: presetType ?: TxType.EXPENSE) }
     var amount by remember { mutableStateOf(seed?.amount?.let(Money::plain) ?: "") }
     var categoryId by remember { mutableStateOf(seed?.categoryId ?: initialCategory) }
+    val presetAccount = initialAccount?.takeIf { id -> seed == null && active.any { it.id == id } }
     var accountId by remember {
-        mutableStateOf(seed?.accountId?.takeIf { id -> existing != null || active.any { it.id == id } } ?: defaultAccount(seed?.categoryId ?: initialCategory ?: firstTop(seed?.type ?: presetType ?: TxType.EXPENSE)))
+        mutableStateOf(presetAccount ?: seed?.accountId?.takeIf { id -> existing != null || active.any { it.id == id } } ?: defaultAccount(seed?.categoryId ?: initialCategory ?: firstTop(seed?.type ?: presetType ?: TxType.EXPENSE)))
     }
-    /** 用户手动选过账户后，换分类不再自动改账户。改一笔时也不自动改。 */
-    var accountTouched by remember { mutableStateOf(existing != null || template != null) }
+    /** 用户手动选过账户后，换分类不再自动改账户。改一笔时也不自动改。从账户详情页进来时也不改。 */
+    var accountTouched by remember { mutableStateOf(existing != null || template != null || presetAccount != null) }
     // 转账默认转入另一个账户，避免一打开就是“同一账户转给自己”
     var toAccountId by remember { mutableStateOf(seed?.toAccountId ?: active.firstOrNull { it.id != accountId }?.id) }
     var time by remember { mutableLongStateOf(existing?.occurredAt ?: initialTime ?: System.currentTimeMillis()) }

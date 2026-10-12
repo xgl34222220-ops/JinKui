@@ -128,6 +128,8 @@ fun LedgerAssetsScreen(
     onNewLoan: (com.xiguli.jinkui.data.ledger.LoanDirection) -> Unit = {},
     /** 1.5.0-alpha01：点借贷里的一个人，打开“某一个人”页。 */
     onPerson: (String) -> Unit = {},
+    /** 1.5.0-alpha02：点资金账户 / 信用卡 → 账户详情。 */
+    onAccount: ((String) -> Unit)? = null,
 ) {
     val container = LocalContainer.current
     val data by container.ledger.data.collectAsStateWithLifecycle()
@@ -142,7 +144,7 @@ fun LedgerAssetsScreen(
     var adjusting by androidx.compose.runtime.remember { mutableStateOf<LedgerAccount?>(null) }
     LedgerAssetsContent(
         ui, onBack, onAccounts, onDebts, onCredit, onLoans, monthDue.first, monthDue.second, onNewLoan,
-        onPerson = onPerson, onAdjust = { adjusting = it },
+        onPerson = onPerson, onAdjust = { adjusting = it }, onAccount = onAccount,
     )
     adjusting?.let { account ->
         BalanceAdjustSheet(
@@ -176,6 +178,7 @@ fun LedgerAssetsContent(
     @Suppress("UNUSED_PARAMETER") onNewLoan: (com.xiguli.jinkui.data.ledger.LoanDirection) -> Unit = {},
     onPerson: ((String) -> Unit)? = null,
     onAdjust: (LedgerAccount) -> Unit = {},
+    onAccount: ((String) -> Unit)? = null,
 ) {
     val colors = Jk.colors
     var hidden by rememberSaveable { mutableStateOf(false) }
@@ -263,8 +266,9 @@ fun LedgerAssetsContent(
                         subtitle = row.account.kind.label + if (row.account.archived) " · 已停用" else "",
                         amount = show(row.balance),
                         tone = if (row.balance < 0) colors.danger else colors.textPrimary,
-                        onClick = onAccounts,
+                        onClick = { if (onAccount != null) onAccount(row.account.id) else onAccounts() },
                         onLongClick = { onAdjust(row.account) },
+                        clickLabel = if (onAccount != null) "查看流水" else null,
                     )
                     if (i < ui.others.lastIndex) JkDivider(inset = Space.x2 + JkSize.chip + Space.x1_5)
                 }
@@ -280,9 +284,9 @@ fun LedgerAssetsContent(
                             subtitle = if (debt < 0) "多还了 ${show(-debt)}" else "欠",
                             amount = show(kotlin.math.abs(debt)),
                             tone = if (debt > 0) colors.expense else colors.textPrimary,
-                            onClick = { onCredit(row.account.id) },
+                            onClick = { if (onAccount != null) onAccount(row.account.id) else onCredit(row.account.id) },
                             onLongClick = { onAdjust(row.account) },
-                            clickLabel = "查看账单",
+                            clickLabel = if (onAccount != null) "查看流水与账单" else "查看账单",
                         )
                         if (i < ui.credit.lastIndex) JkDivider(inset = Space.x2 + JkSize.chip + Space.x1_5)
                     }
@@ -307,7 +311,7 @@ fun LedgerAssetsContent(
                 }
             }
             Text(
-                "余额随记账自动更新；和实际不一样时，长按账户 → 修改余额。信用卡、花呗的欠款和我欠别人的钱算负债，别人欠我的钱算资产。",
+                "余额随记账自动更新；点账户看它的流水，和实际不一样时长按 → 修改余额。信用卡、花呗的欠款和我欠别人的钱算负债，别人欠我的钱算资产。",
                 style = JkType.caption,
                 color = colors.textTertiary,
                 modifier = Modifier.padding(horizontal = Space.x05, vertical = Space.x2),

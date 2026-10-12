@@ -54,6 +54,9 @@ sealed interface Screen {
     data object CardTrash : Screen
     /** 1.4.0-alpha04：欠款 / 借贷里的某一个人（对方账户）。 */
     data class LoanPerson(val accountId: String) : Screen
+
+    /** 1.5.0-alpha02：一个账户的详情（余额、本月流入 / 流出、这个账户的流水）。 */
+    data class AccountDetail(val accountId: String) : Screen
 }
 
 /** 首页底部悬浮栏的五个分区（1.1 起）：账本是首页；卡包保留全部卡片功能。 */

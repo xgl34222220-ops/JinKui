@@ -814,7 +814,7 @@ private fun SelectionBar(ui: LedgerUi, selection: Set<String>, actions: LedgerHo
     }
 }
 
-private fun rowShape(index: Int, count: Int): androidx.compose.ui.graphics.Shape {
+internal fun rowShape(index: Int, count: Int): androidx.compose.ui.graphics.Shape {
     val r = 22.dp
     return when {
         count == 1 -> RoundedCornerShape(r)

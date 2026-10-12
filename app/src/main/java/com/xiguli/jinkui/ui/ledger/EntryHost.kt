@@ -47,6 +47,9 @@ class EntryHostState {
     var initialTime by mutableStateOf<Long?>(null)
     /** 1.4.0-alpha04：打开时直接进入借贷的某一类。 */
     var loanAction by mutableStateOf<LoanAction?>(null)
+    /** 1.5.0-alpha02：账户详情页预选的账户与类型。 */
+    var presetAccount by mutableStateOf<String?>(null)
+    var presetType by mutableStateOf<TxType?>(null)
     var confirmDelete by mutableStateOf<LedgerTransaction?>(null)
     /** 1.4.0-alpha04：给这笔支出记退款。 */
     var refundFor by mutableStateOf<LedgerTransaction?>(null)
@@ -67,7 +70,9 @@ class EntryHostState {
         selection = if (on) current + ids else current - ids.toSet()
     }
 
-    fun create(category: String? = null, from: LedgerTransaction? = null, time: Long? = null, loan: LoanAction? = null) {
+    fun create(category: String? = null, from: LedgerTransaction? = null, time: Long? = null, loan: LoanAction? = null, account: String? = null, type: TxType? = null) {
+        presetAccount = account
+        presetType = type
         presetCategory = category
         template = from
         initialTime = time
@@ -82,6 +87,8 @@ class EntryHostState {
         template = null
         initialTime = null
         loanAction = null
+        presetAccount = null
+        presetType = null
     }
 
     /** 首页 / 日历用的那组行操作。 */
@@ -161,6 +168,8 @@ fun EntryHost(
                 state.editing = null
             },
             initialLoan = state.loanAction,
+            initialAccount = state.presetAccount,
+            initialType = state.presetType,
             onLoan = { r ->
                 scope.launch {
                     try {
