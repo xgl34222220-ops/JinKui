@@ -489,10 +489,10 @@ private fun QuickActionsSheet(
     }
 }
 
-/** 新建卡片：直接从 11 种卡面里挑一种。 */
+/** 新建卡片：直接从 11 种卡面里挑一种（1.5.0-alpha02 起编辑页“更换类型”也用它）。 */
 @Composable
-private fun TypePickerSheet(onDismiss: () -> Unit, onPick: (CardType) -> Unit) {
-    JkSheet(onDismiss = onDismiss, title = "新建卡片") {
+internal fun TypePickerSheet(onDismiss: () -> Unit, title: String = "新建卡片", onPick: (CardType) -> Unit) {
+    JkSheet(onDismiss = onDismiss, title = title) {
         Column(
             modifier = Modifier
                 .heightIn(max = 460.dp)

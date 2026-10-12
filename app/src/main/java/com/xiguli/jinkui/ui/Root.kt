@@ -224,6 +224,10 @@ private fun MainNavigation() {
                     cardId = screen.cardId,
                     newType = screen.type,
                     onClose = { navigator.pop() },
+                    onRetype = { type ->
+                        navigator.pop()
+                        navigator.push(Screen.Edit(null, type))
+                    },
                 )
                 Screen.Settings -> SettingsScreen(
                     onBack = { navigator.pop() },

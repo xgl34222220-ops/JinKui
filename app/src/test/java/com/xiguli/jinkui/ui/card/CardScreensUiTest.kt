@@ -29,6 +29,7 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.unit.dp
@@ -360,11 +361,56 @@ class CardScreensUiTest {
                 onAddField = {}, onGenerate = {}, onScanQr = {}, onAddPhoto = {}, loadAttachment = { ByteArray(0) },
             )
         }
-        compose.onNodeWithText("卡面").assertExists()
-        compose.onNodeWithText("字段").assertExists()
+        // 1.5.0-alpha02：类型在最上面，按组填：主要信息 → 自定义字段 → 备注 → 标签 → 卡面颜色
+        compose.onNodeWithText("类型").assertExists()
+        compose.onNodeWithText("主要信息").assertExists()
+        compose.onNodeWithText("自定义字段").assertExists()
+        compose.onNodeWithText("添加自定义字段").assertExists()
+        compose.onNodeWithText("卡面颜色").assertExists()
         compose.onNodeWithText("请填写名称，例如“招商银行储蓄卡”").assertExists()
         compose.onNodeWithText("这里通常只有数字（可以带空格或短横线）").assertExists()
         snapshot(activity, "card-add-form")
+    }
+
+    /** 1.5.0-alpha02：登录密码表单——先类型（新建可更换），密码下面直接生成，两步验证一组，自定义字段。 */
+    @Test
+    fun loginFormInlineGeneratorAndCustomFields() {
+        val draft = CardDraft(null, CardType.LOGIN)
+        draft.title = "GitHub"
+        draft.fields.add(DraftField("cf1", "安全问题", "第一只宠物", sensitive = false, kind = com.xiguli.jinkui.data.model.FieldKind.TEXT))
+        var retype = 0
+        val activity = show {
+            CardEditForm(
+                draft = draft, isNew = true, suggestions = emptyList(), scanningId = null,
+                onAddField = {}, onGenerate = {}, onScanQr = {}, onAddPhoto = {}, loadAttachment = { ByteArray(0) },
+                onChangeType = { retype++ },
+            )
+        }
+        compose.onNodeWithText("登录密码").assertExists()
+        compose.onNodeWithText("更换").performClick()
+        compose.onNodeWithText("两步验证").assertExists()
+        compose.onNodeWithText("添加两步验证码").assertExists()
+        compose.onNodeWithText("自定义字段").assertExists()
+        snapshot(activity, "card-add-login-light")
+        val password = draft.fields.first { it.kind == com.xiguli.jinkui.data.model.FieldKind.PASSWORD }
+        compose.onAllNodesWithText("生成强密码").onFirst().performClick()
+        compose.waitForIdle()
+        assertEquals(1, retype)
+        assertEquals(20, password.value.length)
+        compose.onNodeWithText("强度：强").assertExists()
+        compose.onNodeWithText("添加两步验证码").performScrollTo().performClick()
+        compose.waitForIdle()
+        assertTrue(draft.fields.any { it.kind == com.xiguli.jinkui.data.model.FieldKind.TOTP })
+        closeActivities()
+        val dark = show(dark = true) {
+            CardEditForm(
+                draft = draft, isNew = false, suggestions = emptyList(), scanningId = null,
+                onAddField = {}, onGenerate = {}, onScanQr = {}, onAddPhoto = {}, loadAttachment = { ByteArray(0) },
+            )
+        }
+        // 编辑已有卡片不能换类型
+        compose.onNodeWithText("更换").assertDoesNotExist()
+        snapshot(dark, "card-add-login-dark")
     }
 
     @Test

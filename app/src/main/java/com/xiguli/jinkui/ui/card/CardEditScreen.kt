@@ -261,7 +261,13 @@ class CardEditViewModel(
 }
 
 @Composable
-fun CardEditScreen(cardId: String?, newType: CardType?, onClose: () -> Unit) {
+fun CardEditScreen(
+    cardId: String?,
+    newType: CardType?,
+    onClose: () -> Unit,
+    /** 1.5.0-alpha02：新建时“更换类型”——换成另一种类型重新开始填。 */
+    onRetype: (CardType) -> Unit = {},
+) {
     val container = LocalContainer.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -274,6 +280,8 @@ fun CardEditScreen(cardId: String?, newType: CardType?, onClose: () -> Unit) {
     var generatorFor by remember { mutableStateOf<DraftField?>(null) }
     var pickKind by remember { mutableStateOf(false) }
     var batch by remember { mutableStateOf<MigrationBatch?>(null) }
+    var pickType by remember { mutableStateOf(false) }
+    var retypeTo by remember { mutableStateOf<CardType?>(null) }
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         if (uri != null) {
@@ -370,7 +378,32 @@ fun CardEditScreen(cardId: String?, newType: CardType?, onClose: () -> Unit) {
             },
             loadAttachment = { viewModel.attachmentBytes(it) },
             modifier = Modifier.weight(1f),
+            onChangeType = if (viewModel.isNew) ({ pickType = true }) else null,
         )
+    }
+
+    if (pickType) {
+        com.xiguli.jinkui.ui.home.TypePickerSheet(onDismiss = { pickType = false }, title = "换成哪种类型") { type ->
+            pickType = false
+            if (type != viewModel.type) {
+                if (viewModel.hasChanges()) retypeTo = type else onRetype(type)
+            }
+        }
+    }
+    retypeTo?.let { type ->
+        JkDialog(
+            title = "换成「${type.label}」？",
+            onDismiss = { retypeTo = null },
+            confirmText = "换类型",
+            dismissText = "继续填",
+            danger = true,
+            onConfirm = {
+                retypeTo = null
+                onRetype(type)
+            },
+        ) {
+            Text("换类型会按新类型重新准备栏目，已经填的内容不会保留。", style = JkType.body, color = colors.textSecondary)
+        }
     }
 
     if (confirmDiscard) {
@@ -390,7 +423,7 @@ fun CardEditScreen(cardId: String?, newType: CardType?, onClose: () -> Unit) {
     }
 
     if (pickKind) {
-        JkSheet(onDismiss = { pickKind = false }, title = "添加字段") {
+        JkSheet(onDismiss = { pickKind = false }, title = "添加自定义字段") {
             val kinds = listOf(
                 Triple(FieldKind.TEXT, "文本", Icons.Outlined.Notes),
                 Triple(FieldKind.PASSWORD, "密码（默认打码，可一键生成）", Icons.Outlined.Password),
@@ -430,8 +463,9 @@ fun CardEditScreen(cardId: String?, newType: CardType?, onClose: () -> Unit) {
 }
 
 /**
- * 编辑表单本体：名称与预览 → 卡面 → 标签 → 字段 → 备注 → 附件，每组一个眉题。
- * 只读写 [draft] 的 Compose 状态，不碰仓库，界面测试可以直接渲染。
+ * 编辑表单本体。1.5.0-alpha02 重排（参考 Bitwarden / Proton Pass 的新建条目：先选类型，再按组填）：
+ * 类型（新建时可更换）→ 名称 → 主要信息（模板里的栏目）→ 两步验证 → 自定义字段 → 备注 → 标签 → 卡面颜色 → 附件。
+ * 密码栏目下面直接有“生成强密码”和强度提示。只读写 [draft] 的 Compose 状态，不碰仓库，界面测试可以直接渲染。
  */
 @Composable
 fun CardEditForm(
@@ -445,9 +479,27 @@ fun CardEditForm(
     onAddPhoto: () -> Unit,
     loadAttachment: suspend (String) -> ByteArray,
     modifier: Modifier = Modifier,
+    /** 新建时“更换”类型；null 时不显示（编辑已有卡片不能换类型）。 */
+    onChangeType: (() -> Unit)? = null,
 ) {
     val colors = Jk.colors
     var tagInput by remember { mutableStateOf("") }
+    val templateLabels = remember(draft.type) { CardTemplates.fieldsFor(draft.type).map { it.label }.toSet() }
+    val all = draft.fields.toList()
+    val main = all.filter { it.kind != FieldKind.TOTP && it.label.trim() in templateLabels }
+    val totp = all.filter { it.kind == FieldKind.TOTP }
+    val custom = all.filter { it.kind != FieldKind.TOTP && it.label.trim() !in templateLabels }
+    val lastField = all.lastOrNull()
+    @Composable
+    fun editor(field: DraftField) = FieldEditor(
+        field = field,
+        hint = CardTemplates.hintFor(draft.type, field.label),
+        last = field == lastField,
+        scanning = scanningId == field.id,
+        onRemove = { draft.fields.remove(field) },
+        onGenerate = { onGenerate(field) },
+        onScanQr = { onScanQr(field) },
+    )
     Column(
         modifier = modifier
             .verticalScroll(rememberScrollState())
@@ -455,18 +507,34 @@ fun CardEditForm(
             .padding(horizontal = Space.x2_5)
             .padding(top = Space.x05, bottom = Space.x5),
     ) {
-        // 实时预览：名称、颜色、开户行一改，卡面跟着变。
-        CardFace(
-            title = draft.title.ifBlank { draft.type.label },
-            type = draft.type,
-            colorIndex = draft.color,
-            hint = "预览",
-            aspect = 2.4f,
-            brand = draft.brand,
-            modifier = Modifier
+        // 类型：一枚与卡面同色的图标块 + 类型名；新建时可以更换
+        val theme = cardTheme(draft.type, draft.color, draft.brand)
+        Row(
+            Modifier
                 .fillMaxWidth()
-                .padding(bottom = Space.x2_5),
-        )
+                .jkSurface(Jk.surfaces.card, Radius.field)
+                .padding(start = Space.x1_5, end = Space.x05, top = Space.x1_5, bottom = Space.x1_5),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                Modifier
+                    .size(48.dp)
+                    .clip(Radius.tile)
+                    .background(Brush.linearGradient(listOf(theme.start, theme.end))),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(draft.type.icon, contentDescription = null, tint = theme.accent, modifier = Modifier.size(24.dp))
+            }
+            Spacer(Modifier.width(Space.x1_5))
+            Column(Modifier.weight(1f)) {
+                Text("类型", style = JkType.caption, color = colors.textTertiary)
+                Text(draft.type.label, style = JkType.bodyStrong, color = colors.textPrimary)
+            }
+            if (onChangeType != null) {
+                JkButton("更换", onChangeType, style = ButtonStyle.Ghost, compact = true)
+            }
+        }
+        Spacer(Modifier.height(Space.x1_5))
         JkTextField(
             value = draft.title,
             onValueChange = {
@@ -474,48 +542,66 @@ fun CardEditForm(
                 draft.titleError = null
             },
             label = "名称",
-            placeholder = "例如：招商银行储蓄卡",
+            placeholder = when (draft.type) {
+                CardType.LOGIN -> "例如：GitHub、微信"
+                CardType.WIFI -> "例如：家里 Wi-Fi"
+                else -> "例如：招商银行储蓄卡"
+            },
             imeAction = ImeAction.Next,
             error = draft.titleError,
         )
 
-        FormSection("卡面", hint = if (draft.type == CardType.BANK) "默认卡面会按名称或开户行带上银行的主色" else null)
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(Space.x05),
-            modifier = Modifier.horizontalScroll(rememberScrollState()),
-        ) {
-            // 第一个是该类型自己的默认卡面，其后是可选的纯色。
-            for (index in listOf(CardPalette.AUTO) + CardPalette.colors.indices) {
-                val selected = index == draft.color
-                val theme = cardTheme(draft.type, index, if (index == CardPalette.AUTO) BankBrand.of(draft.type, index, draft.title, "") else null)
-                Box(
-                    modifier = Modifier
-                        .size(JkSize.touch)
-                        .clip(CircleShape)
-                        .clickable(onClickLabel = if (index == CardPalette.AUTO) "使用默认卡面" else "使用第 ${index + 1} 种颜色") { draft.color = index }
-                        .semantics {
-                            contentDescription = if (index == CardPalette.AUTO) "默认卡面" else "颜色 ${index + 1}"
-                            this.selected = selected
-                        },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(CircleShape)
-                            .border(2.dp, if (selected) colors.textPrimary else colors.bg, CircleShape)
-                            .padding(4.dp)
-                            .clip(CircleShape)
-                            .background(Brush.linearGradient(listOf(theme.start, theme.end))),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        if (index == CardPalette.AUTO) {
-                            Icon(draft.type.icon, contentDescription = null, tint = theme.accent, modifier = Modifier.size(14.dp))
-                        }
-                    }
-                }
+        if (main.isNotEmpty()) {
+            FormSection("主要信息", hint = "带锁的栏目保存后默认打码，点锁可以切换")
+            Column(verticalArrangement = Arrangement.spacedBy(Space.x1)) { for (field in main) editor(field) }
+        }
+
+        if (totp.isNotEmpty() || draft.type == CardType.LOGIN) {
+            FormSection("两步验证", hint = "填了以后，详情页会显示每 30 秒变一次的验证码")
+            Column(verticalArrangement = Arrangement.spacedBy(Space.x1)) { for (field in totp) editor(field) }
+            if (totp.isEmpty()) {
+                JkButton(
+                    text = "添加两步验证码",
+                    icon = Icons.Outlined.Timer,
+                    style = ButtonStyle.Secondary,
+                    onClick = { draft.addField(FieldKind.TOTP) },
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
         }
+
+        FormSection("自定义字段", hint = "模板里没有的信息，比如安全问题、备用邮箱、客服电话")
+        if (custom.isNotEmpty()) {
+            Column(verticalArrangement = Arrangement.spacedBy(Space.x1)) { for (field in custom) editor(field) }
+            Spacer(Modifier.height(Space.x1))
+        }
+        JkButton(
+            text = "添加自定义字段",
+            icon = Icons.Outlined.Add,
+            style = ButtonStyle.Secondary,
+            onClick = onAddField,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        val missing = draft.missingTemplateCount
+        if (!isNew && missing > 0) {
+            Spacer(Modifier.height(Space.x05))
+            JkButton(
+                text = "补上「${draft.type.label}」模板里缺的 $missing 个字段",
+                style = ButtonStyle.Ghost,
+                compact = true,
+                onClick = draft::addMissingTemplateFields,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+
+        FormSection("备注")
+        JkTextField(
+            value = draft.note,
+            onValueChange = { draft.note = it },
+            placeholder = "可以写点提醒自己的话，支持搜索",
+            singleLine = false,
+            minLines = 3,
+        )
 
         FormSection("标签", hint = "用来分组与筛选，回车或逗号分隔")
         if (draft.tags.isNotEmpty()) {
@@ -549,49 +635,43 @@ fun CardEditForm(
             }
         }
 
-        FormSection("字段", hint = "带锁的字段默认打码；点锁可切换")
-        Column(verticalArrangement = Arrangement.spacedBy(Space.x1)) {
-            val all = draft.fields.toList()
-            all.forEachIndexed { index, field ->
-                FieldEditor(
-                    field = field,
-                    hint = CardTemplates.hintFor(draft.type, field.label),
-                    last = index == all.lastIndex,
-                    scanning = scanningId == field.id,
-                    onRemove = { draft.fields.remove(field) },
-                    onGenerate = { onGenerate(field) },
-                    onScanQr = { onScanQr(field) },
-                )
+        FormSection("卡面颜色", hint = if (draft.type == CardType.BANK) "默认卡面会按名称或开户行带上银行的主色" else null)
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(Space.x05),
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
+        ) {
+            // 第一个是该类型自己的默认卡面，其后是可选的纯色。
+            for (index in listOf(CardPalette.AUTO) + CardPalette.colors.indices) {
+                val selected = index == draft.color
+                val swatch = cardTheme(draft.type, index, if (index == CardPalette.AUTO) BankBrand.of(draft.type, index, draft.title, "") else null)
+                Box(
+                    modifier = Modifier
+                        .size(JkSize.touch)
+                        .clip(CircleShape)
+                        .clickable(onClickLabel = if (index == CardPalette.AUTO) "使用默认卡面" else "使用第 ${index + 1} 种颜色") { draft.color = index }
+                        .semantics {
+                            contentDescription = if (index == CardPalette.AUTO) "默认卡面" else "颜色 ${index + 1}"
+                            this.selected = selected
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .border(2.dp, if (selected) colors.textPrimary else colors.bg, CircleShape)
+                            .padding(4.dp)
+                            .clip(CircleShape)
+                            .background(Brush.linearGradient(listOf(swatch.start, swatch.end))),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (index == CardPalette.AUTO) {
+                            Icon(draft.type.icon, contentDescription = null, tint = swatch.accent, modifier = Modifier.size(14.dp))
+                        }
+                    }
+                }
             }
         }
-        Spacer(Modifier.height(Space.x1))
-        JkButton(
-            text = "添加字段",
-            icon = Icons.Outlined.Add,
-            style = ButtonStyle.Secondary,
-            onClick = onAddField,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        val missing = draft.missingTemplateCount
-        if (!isNew && missing > 0) {
-            Spacer(Modifier.height(Space.x05))
-            JkButton(
-                text = "补上「${draft.type.label}」模板里缺的 $missing 个字段",
-                style = ButtonStyle.Ghost,
-                compact = true,
-                onClick = draft::addMissingTemplateFields,
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
-
-        FormSection("备注")
-        JkTextField(
-            value = draft.note,
-            onValueChange = { draft.note = it },
-            placeholder = "可以写点提醒自己的话，支持搜索",
-            singleLine = false,
-            minLines = 3,
-        )
 
         FormSection("附件", hint = "照片会去掉拍摄信息后加密保存在本机，不会出现在系统相册里")
         Row(
@@ -626,6 +706,17 @@ fun CardEditForm(
                 Text("添加照片", style = JkType.caption, color = colors.textSecondary)
             }
         }
+    }
+}
+
+/** 密码强度的白话：弱 / 一般 / 强（按估算的熵）。 */
+internal fun strengthLabel(password: String): String? {
+    if (password.isBlank()) return null
+    val bits = com.xiguli.jinkui.core.crypto.PasswordGenerator.estimateBits(password)
+    return when {
+        bits < 40 -> "弱：容易被猜到，建议生成一个"
+        bits < 70 -> "一般"
+        else -> "强"
     }
 }
 
@@ -725,9 +816,6 @@ private fun FieldEditor(
                     .heightIn(min = JkSize.touch)
                     .padding(vertical = Space.x1_5),
             )
-            if (field.kind == FieldKind.PASSWORD) {
-                JkIconButton(Icons.Outlined.AutoFixHigh, "生成密码", onGenerate)
-            }
             if (field.kind == FieldKind.TOTP) {
                 JkIconButton(
                     Icons.Outlined.QrCodeScanner,
@@ -745,6 +833,36 @@ private fun FieldEditor(
                 )
             } else {
                 Spacer(Modifier.width(Space.x1_5))
+            }
+        }
+        // 1.5.0-alpha02：密码栏目下面直接生成（参考 Bitwarden / Proton Pass 的内联生成器），不用另开一页
+        if (field.kind == FieldKind.PASSWORD) {
+            Row(
+                Modifier.fillMaxWidth().padding(start = Space.x1, end = Space.x1, bottom = Space.x1),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                JkButton(
+                    text = "生成强密码",
+                    icon = Icons.Outlined.AutoFixHigh,
+                    style = ButtonStyle.Ghost,
+                    compact = true,
+                    onClick = {
+                        field.value = com.xiguli.jinkui.core.crypto.PasswordGenerator.generate(com.xiguli.jinkui.core.crypto.GeneratorOptions())
+                        revealed = true
+                    },
+                )
+                JkButton(text = "更多选项", style = ButtonStyle.Ghost, compact = true, onClick = onGenerate)
+                Spacer(Modifier.weight(1f))
+                strengthLabel(field.value)?.let { label ->
+                    Text(
+                        "强度：$label",
+                        style = JkType.caption,
+                        color = if (label.startsWith("弱")) colors.expense else colors.textTertiary,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(end = Space.x1).weight(1f, fill = false),
+                    )
+                }
             }
         }
         when {
