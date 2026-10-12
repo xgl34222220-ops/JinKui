@@ -1081,6 +1081,48 @@ class LedgerRepository(
     }
 
     /**
+     * 按人收款 / 还款（1.4.0-alpha04，“欠款 / 借贷”页的人详情）：本金先冲最早借的那笔（[PersonDebtMath.split]），
+     * 另付的利息记在第一笔上；[fundId] 为 null 表示不经过账户（只减少欠款）。一个事务写入。
+     */
+    suspend fun personPayment(
+        accountId: String,
+        principal: Long,
+        interest: Long,
+        fundId: String?,
+        date: LocalDate,
+        note: String = "",
+        zone: ZoneId = ZoneId.systemDefault(),
+    ): List<LedgerTransaction> = withContext(Dispatchers.IO) {
+        recurringLock.withLock {
+            val keys = keys()
+            val data = state.value
+            val today = LocalDate.now(zone)
+            val person = com.xiguli.jinkui.data.ledger.PersonDebtMath.person(DebtMath.loans(data, zone), accountId, today)
+                ?: throw LedgerInputException("找不到这个人的借贷")
+            if (principal <= 0 && interest <= 0) throw LedgerInputException("金额要大于 0")
+            if (interest < 0 || interest > Money.MAX_CENTS) throw LedgerInputException("利息超出范围")
+            val parts = com.xiguli.jinkui.data.ledger.PersonDebtMath.split(person, principal)
+                ?: throw LedgerInputException("超过了还欠的 ${Money.format(person.remaining)}")
+            val now = System.currentTimeMillis()
+            val (fund, newAdjust) = loanFund(data, fundId, now)
+            val at = timeOn(date, zone, now)
+            val lend = person.direction == LoanDirection.LEND
+            val category = if (lend) categoryOr(data, "cat-invest", "cat-other-income") else categoryOr(data, "cat-other-expense")
+            val first = parts.firstOrNull()?.first ?: person.open.firstOrNull() ?: person.loans.maxByOrNull { it.loan.date }!!
+            val plan = parts.ifEmpty { listOf(first to 0L) }
+            val txs = plan.flatMapIndexed { i, (loan, amount) ->
+                val link = loan.loan.id.takeIf { id -> data.loans.any { it.id == id && !it.legacy } }
+                DebtMath.loanPaymentTxs(person.account, fund, amount, if (i == 0) interest else 0L, at, now, note, link, loan.loan.id, category)
+            }
+            val accounts = data.accounts + listOfNotNull(newAdjust)
+            txs.forEach { tx -> LedgerMath.validate(tx, accounts)?.let { throw LedgerInputException(it) } }
+            database.writeDebtChange(accounts = listOfNotNull(newAdjust).map { it.toRow(keys) }, transactions = txs.map { it.toRow(keys) })
+            publish { d -> d.copy(accounts = (d.accounts + listOfNotNull(newAdjust)).sortedBy { it.position }, transactions = d.transactions + txs) }
+            txs
+        }
+    }
+
+    /**
      * 结清（剩余不再收 / 不再还）：把剩余本金记成对方账户上的一笔支出（借出：坏账 / 免除）或收入（借入：对方免还），
      * 对方账户余额归零，这笔借贷变成已结清。
      */

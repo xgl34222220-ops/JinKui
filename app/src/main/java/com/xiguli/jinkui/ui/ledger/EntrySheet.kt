@@ -141,6 +141,8 @@ fun EntrySheet(
     val colors = Jk.colors
     val zone = remember { ZoneId.systemDefault() }
     val active = remember(data.accounts) { data.accounts.filter { !it.archived } }
+    // 1.4.0-alpha04：选账户时显示各账户当前余额（信用卡 / 花呗显示欠款与可用额度）
+    val balances = remember(data.accounts, data.transactions) { LedgerMath.balances(data.accounts, data.transactions) }
     val seed = existing ?: template
     val presetType = remember(initialCategory, data.categories) {
         initialCategory?.let { id -> data.categories.firstOrNull { it.id == id }?.type }
@@ -406,7 +408,7 @@ fun EntrySheet(
                     style = JkType.small,
                     color = colors.textSecondary,
                 )
-                LoanFundChips(funds, loanFund?.takeIf { id -> funds.any { it.id == id } }) { loanFund = it }
+                LoanFundChips(funds, loanFund?.takeIf { id -> funds.any { it.id == id } }, balances) { loanFund = it }
                 if (loanFund?.takeIf { id -> funds.any { it.id == id } } == null) {
                     Text(noFundHint(loan), style = JkType.caption, color = colors.textTertiary)
                 }
@@ -438,9 +440,9 @@ fun EntrySheet(
             } else if (type == TxType.TRANSFER) {
                 Spacer(Modifier.height(Space.x05))
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    AccountChip("转出", accountId?.let(accountsById::get), { pickFrom = true }, Modifier.weight(1f))
+                    AccountChip("转出", accountId?.let(accountsById::get), { pickFrom = true }, Modifier.weight(1f), balances)
                     Text("→", style = JkType.heading, color = colors.textTertiary, modifier = Modifier.padding(horizontal = Space.x1))
-                    AccountChip("转入", toAccountId?.let(accountsById::get), { pickTo = true }, Modifier.weight(1f))
+                    AccountChip("转入", toAccountId?.let(accountsById::get), { pickTo = true }, Modifier.weight(1f), balances)
                 }
             } else {
                 // 分类宫格：每行 5 个，圆形图标底 + 名称，选中的填上类型色
@@ -523,6 +525,7 @@ fun EntrySheet(
             title = picking,
             // 选转入账户时不列出转出账户本身
             accounts = if (pickTo) active.filter { it.id != accountId } else active,
+            balances = balances,
             onDismiss = {
                 pickFrom = false
                 pickTo = false
@@ -670,7 +673,7 @@ private fun CompactField(value: String, onChange: (String) -> Unit, placeholder:
 }
 
 @Composable
-private fun AccountChip(label: String, account: LedgerAccount?, onClick: () -> Unit, modifier: Modifier = Modifier) {
+private fun AccountChip(label: String, account: LedgerAccount?, onClick: () -> Unit, modifier: Modifier = Modifier, balances: Map<String, Long> = emptyMap()) {
     val colors = Jk.colors
     Row(
         modifier = modifier
@@ -687,6 +690,8 @@ private fun AccountChip(label: String, account: LedgerAccount?, onClick: () -> U
         Column {
             Text(label, style = JkType.caption, color = colors.textTertiary)
             Text(account?.name ?: "选择账户", style = JkType.body, color = if (account != null) colors.textPrimary else colors.textTertiary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            // 1.4.0-alpha04：转出 / 转入下面写上这个账户现在有多少（信用卡写欠多少）
+            account?.let { a -> balances[a.id]?.let { b -> Text(accountBalanceText(a, b), style = JkType.caption, color = colors.textTertiary, maxLines = 1, overflow = TextOverflow.Ellipsis) } }
         }
     }
 }
@@ -715,6 +720,8 @@ private fun InfoChip(icon: ImageVector, text: String, onClick: () -> Unit, descr
 fun AccountPickerSheet(
     title: String,
     accounts: List<LedgerAccount>,
+    /** 1.4.0-alpha04：各账户当前余额；给了就在每一行右边写余额（信用卡 / 花呗写欠多少，下面写可用额度）。 */
+    balances: Map<String, Long> = emptyMap(),
     onDismiss: () -> Unit,
     onPick: (LedgerAccount) -> Unit,
 ) {
@@ -728,16 +735,42 @@ fun AccountPickerSheet(
                 .verticalScroll(rememberScrollState()),
         ) {
             for (account in accounts) {
+                val balance = balances[account.id]
                 JkRow(
                     title = account.name,
-                    subtitle = account.kind.label,
+                    subtitle = pickerSubtitle(account, balance),
                     icon = accountIcon(account.kind),
                     modifier = Modifier.clip(Radius.control),
-                    trailing = {},
+                    trailing = balance?.let { b -> { PickerBalance(account, b) } } ?: {},
                     onClick = { onPick(account) },
                 )
             }
         }
+    }
+}
+
+/** 选账户一行的副标题：种类；信用卡 / 花呗有额度时加上“可用 ¥x”。 */
+internal fun pickerSubtitle(account: LedgerAccount, balance: Long?): String {
+    val limit = account.credit?.limit ?: 0L
+    if (account.kind != AccountKind.CREDIT || balance == null || limit <= 0L) return account.kind.label
+    val owed = (-balance).coerceAtLeast(0L)
+    return "${account.kind.label} · 可用额度 ${Money.format((limit - owed).coerceAtLeast(0L))}"
+}
+
+/** 选账户一行右边的余额：普通账户写余额，信用卡 / 花呗写“欠 ¥x”或“没有欠款”。 */
+@Composable
+private fun PickerBalance(account: LedgerAccount, balance: Long) {
+    val colors = Jk.colors
+    if (account.kind == AccountKind.CREDIT) {
+        val owed = (-balance).coerceAtLeast(0L)
+        Text(
+            if (owed > 0) "欠 ${Money.format(owed)}" else "没有欠款",
+            style = JkType.amountSmall,
+            color = if (owed > 0) colors.expense else colors.textTertiary,
+            maxLines = 1,
+        )
+    } else {
+        Text(Money.format(balance), style = JkType.amountSmall, color = if (balance < 0) colors.expense else colors.textPrimary, maxLines = 1)
     }
 }
 

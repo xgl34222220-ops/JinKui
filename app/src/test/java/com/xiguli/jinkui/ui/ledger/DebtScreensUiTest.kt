@@ -5,9 +5,9 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onFirst
-import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -21,6 +21,7 @@ import com.xiguli.jinkui.data.ledger.LedgerInstallment
 import com.xiguli.jinkui.data.ledger.LedgerLoan
 import com.xiguli.jinkui.data.ledger.LedgerTransaction
 import com.xiguli.jinkui.data.ledger.LoanDirection
+import com.xiguli.jinkui.data.ledger.Money
 import com.xiguli.jinkui.data.ledger.TxFilter
 import com.xiguli.jinkui.data.ledger.TxType
 import com.xiguli.jinkui.ui.MainLooperDrainRule
@@ -40,7 +41,7 @@ import org.robolectric.annotation.ConscryptMode
 import org.robolectric.RobolectricTestRunner
 
 /**
- * 1.4 欠款 / 账单的界面：总览（本月待还、逾期标红、即将到期、信用账户、借贷）、信用账户账单、借贷列表、
+ * 1.4 欠款 / 借贷的界面：总览（1.4.0-alpha04 起按人：别人欠我 / 我欠别人 / 净额，两栏一人一行；信用卡 / 花呗单独一段）、某一个人、选账户带余额、信用账户账单、借贷列表、
  * 还款面板、分期面板（浅色 / 深色截图），以及账本首页的到期提示条。全部是合成数据。
  */
 @RunWith(RobolectricTestRunner::class)
@@ -111,25 +112,140 @@ class DebtScreensUiTest {
 
     private val overview by lazy { DebtMath.overview(data, today, zone) }
 
+    /**
+     * 1.4.0-alpha04 重做：首屏三个大数（别人欠我 / 我欠别人 / 净额）、记一笔借出 / 借入两个大按钮，
+     * “别人欠我 / 我欠别人”两栏一人一行（还欠多少、已还 x / 共 y、到期），信用卡 / 花呗欠款单独一段。首屏不出现术语。
+     */
     @Test
     fun overviewLightAndDark() {
         assertEquals(900_00L + 2_000_00L + overview.items.filter { it.title == "示例信用卡" && it.counts }.sumOf { it.amount }, overview.monthDue)
         var opened: String? = null
-        val activity = h.show { DebtOverviewContent(overview, DebtOverviewActions(onCredit = { opened = it })) }
-        compose.onNodeWithText("欠款合计(元)").assertExists()
-        compose.onNodeWithText("本月待还").assertExists()
+        var person: String? = null
+        val newLoans = mutableListOf<LoanDirection>()
+        val actions = DebtOverviewActions(onCredit = { opened = it }, onPerson = { person = it }, onNewLoan = { newLoans += it })
+        val activity = h.show { DebtOverviewContent(overview, actions) }
+        for (label in listOf("别人欠我", "我欠别人", "净额")) compose.onNodeWithText(label).assertExists()
+        compose.onNodeWithText(Money.format(overview.receivable, symbol = false)).assertExists()
+        compose.onNodeWithText(Money.format(overview.payable, symbol = false)).assertExists()
+        compose.onNodeWithText("-" + Money.format(overview.payable - overview.receivable, symbol = false)).assertExists()
+        compose.onNodeWithText("借出 = 我把钱借给别人；借入 = 我向别人借钱", substring = true).assertExists()
+        // 首屏不出现“本金 / 应收 / 应付 / 冲抵”这类词
+        for (jargon in listOf("本金", "应收", "应付", "冲抵", "欠款合计")) {
+            assertTrue(jargon, compose.onAllNodesWithText(jargon, substring = true).fetchSemanticsNodes().isEmpty())
+        }
+        compose.onAllNodesWithText("记一笔借出").onFirst().performSemanticsAction(SemanticsActions.OnClick)
+        compose.onAllNodesWithText("记一笔借入").onFirst().performSemanticsAction(SemanticsActions.OnClick)
+        assertEquals(listOf(LoanDirection.LEND, LoanDirection.BORROW), newLoans)
+        // 别人欠我：小李一行，还欠 800，已收回 0 / 共 800，已逾期
+        compose.onNodeWithText("别人欠我 · 1 人").assertExists()
+        compose.onNodeWithText("已收回 ${Money.format(0)} / 共 ${Money.format(800_00)}").performScrollTo().assertExists()
+        compose.onAllNodesWithText(Money.format(800_00)).onFirst().assertExists()
+        h.snapshot(activity, "debts-overview-light")
+        compose.onAllNodesWithText("小李").onFirst().performScrollTo()
+        h.snapshot(activity, "debts-tab-lend-light")
+        compose.onAllNodesWithText("小李").onFirst().performClick()
+        assertEquals(li.id, person)
+        // 我欠别人：老王一行，还欠 2000，已还 1000 / 共 3000
+        compose.onNodeWithText("我欠别人 · 1 人").performSemanticsAction(SemanticsActions.OnClick)
+        compose.waitForIdle()
+        compose.onNodeWithText("已还 ${Money.format(1_000_00)} / 共 ${Money.format(3_000_00)}").performScrollTo().assertExists()
+        compose.onAllNodesWithText("老王").onFirst().performScrollTo()
+        h.snapshot(activity, "debts-tab-borrow-light")
+        compose.onAllNodesWithText("老王").onFirst().performClick()
+        assertEquals(wang.id, person)
+        // 信用卡 / 花呗单独一段
+        compose.onNodeWithText("一共欠 ${Money.format(overview.creditDebt)}", substring = true).performScrollTo().assertExists()
         compose.onAllNodesWithText("已逾期 1 天").onFirst().assertExists()
         compose.onAllNodesWithText("花呗").onFirst().assertExists()
-        h.snapshot(activity, "debts-overview-light")
-        compose.onNodeWithText("应收合计").performScrollTo().assertExists()
-        compose.onAllNodesWithText("示例信用卡").onLast().performScrollTo().performClick()
+        compose.onAllNodesWithText("示例信用卡").onFirst().performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
         assertEquals(card.id, opened)
         h.close()
         val dark = h.show(dark = true) { DebtOverviewContent(overview, DebtOverviewActions()) }
         h.snapshot(dark, "debts-overview-dark")
+        compose.onAllNodesWithText("小李").onFirst().performScrollTo()
+        h.snapshot(dark, "debts-tab-lend-dark")
+        h.close()
+        val darkBorrow = h.show(dark = true) { DebtOverviewContent(overview, DebtOverviewActions(), initialTab = LoanDirection.BORROW) }
+        compose.onAllNodesWithText("老王").onFirst().performScrollTo()
+        h.snapshot(darkBorrow, "debts-tab-borrow-dark")
     }
 
-    /** 1.4.0-alpha02：导入一木账单（合成样例）后，总览里能看到欠款合计、默认账单日的花呗、没设账单日的信用卡与借贷。 */
+    /** 某一个人：还欠多少（大字）、已还 x / 共 y、约定还款日 → 还款 / 再借入 / 结清 → 来往记录。 */
+    @Test
+    fun personDetailLightAndDark() {
+        val wangDebt = com.xiguli.jinkui.data.ledger.PersonDebtMath.person(overview.loans, wang.id, today)!!
+        val hits = mutableListOf<String>()
+        val actions = PersonActions(onPay = { hits += "pay" }, onMore = { hits += "more" }, onSettle = { hits += "settle" }, onLoan = { hits += "loan" })
+        val activity = h.show { LoanPersonContent(wangDebt, today, actions, zone) }
+        compose.onNodeWithText("我还欠老王").assertExists()
+        compose.onNodeWithText(Money.format(2_000_00)).assertExists()
+        compose.onNodeWithText("已还 ${Money.format(1_000_00)} / 共 ${Money.format(3_000_00)}").assertExists()
+        compose.onAllNodesWithText("约定", substring = true).onFirst().assertExists()
+        compose.onNodeWithText("还款 = 我还老王钱", substring = true).assertExists()
+        compose.onNodeWithText("来往记录").performScrollTo().assertExists()
+        compose.onNodeWithContentDescription("借入 ${Money.format(3_000_00)}").performScrollTo().assertExists()
+        compose.onNodeWithContentDescription("还款 ${Money.format(1_000_00)}").performScrollTo().performClick()
+        compose.onAllNodesWithText("还款").onFirst().performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
+        compose.onNodeWithText("再借入").performSemanticsAction(SemanticsActions.OnClick)
+        compose.onNodeWithText("结清").performSemanticsAction(SemanticsActions.OnClick)
+        assertEquals(listOf("loan", "pay", "more", "settle"), hits)
+        h.snapshot(activity, "debt-person-borrow-light")
+        h.close()
+        val liDebt = com.xiguli.jinkui.data.ledger.PersonDebtMath.person(overview.loans, li.id, today)!!
+        val lend = h.show { LoanPersonContent(liDebt, today, PersonActions(), zone) }
+        compose.onNodeWithText("小李还欠我").assertExists()
+        compose.onNodeWithText("收款").assertExists()
+        compose.onNodeWithText("再借出").assertExists()
+        h.snapshot(lend, "debt-person-lend-light")
+        h.close()
+        val dark = h.show(dark = true) { LoanPersonContent(wangDebt, today, PersonActions(), zone) }
+        h.snapshot(dark, "debt-person-borrow-dark")
+    }
+
+    /** 按人还款：默认还欠的全部，选账户时带余额，可以不经过账户。 */
+    @Test
+    fun personPaySheetLightAndDark() {
+        val wangDebt = com.xiguli.jinkui.data.ledger.PersonDebtMath.person(overview.loans, wang.id, today)!!
+        val balances = com.xiguli.jinkui.data.ledger.LedgerMath.balances(data.accounts, data.transactions)
+        val funds = DebtMath.loanFunds(data.accounts)
+        var paid: Triple<Long, Long, String?>? = null
+        val activity = h.show {
+            PersonPaySheet(wangDebt, funds, balances, null, today, {}) { p, i, f, _ -> paid = Triple(p, i, f) }
+        }
+        compose.onNodeWithText("我还老王钱").assertExists()
+        compose.onNodeWithText("全部 ${Money.format(2_000_00)}").assertExists()
+        compose.onNodeWithText(NO_FUND_LABEL).assertExists()
+        compose.onNodeWithText("示例银行卡 ${Money.format(balances.getValue(bank.id))}").assertExists()
+        compose.onNodeWithText("花呗 欠 ${Money.format(-balances.getValue(huabei.id))}").assertExists()
+        h.snapshot(activity, "debt-person-pay-light", withDialog = true)
+        compose.onNodeWithText("确认还款").performSemanticsAction(SemanticsActions.OnClick)
+        compose.waitForIdle()
+        assertEquals(Triple(2_000_00L, 0L, null as String?), paid)
+        h.close()
+        val dark = h.show(dark = true) { PersonPaySheet(wangDebt, funds, balances, bank.id, today, {}) { _, _, _, _ -> } }
+        h.snapshot(dark, "debt-person-pay-dark", withDialog = true)
+    }
+
+    /** 选账户的面板：每个账户右边写余额，信用卡 / 花呗写欠多少，下面写可用额度。 */
+    @Test
+    fun accountPickerShowsBalancesLightAndDark() {
+        val balances = com.xiguli.jinkui.data.ledger.LedgerMath.balances(data.accounts, data.transactions)
+        val accounts = listOf(bank, huabei, card)
+        val picked = mutableListOf<String>()
+        val activity = h.show { AccountPickerSheet("选择账户", accounts, balances, onDismiss = {}) { picked += it.id } }
+        compose.onNodeWithText(Money.format(balances.getValue(bank.id))).assertExists()
+        val hbOwed = -balances.getValue(huabei.id)
+        compose.onNodeWithText("欠 ${Money.format(hbOwed)}").assertExists()
+        compose.onNodeWithText("信用卡 · 可用额度 ${Money.format(5_000_00 - hbOwed)}", substring = true).assertExists()
+        h.snapshot(activity, "account-picker-balances-light", withDialog = true)
+        compose.onNodeWithText("花呗").performSemanticsAction(SemanticsActions.OnClick)
+        assertEquals(listOf(huabei.id), picked)
+        h.close()
+        val dark = h.show(dark = true) { AccountPickerSheet("转出账户", accounts, balances, onDismiss = {}) {} }
+        h.snapshot(dark, "account-picker-balances-dark", withDialog = true)
+    }
+
+    /** 1.4.0-alpha02：导入一木账单（合成样例）后，总览里能看到欠款、默认账单日的花呗、没设账单日的信用卡与借贷。 */
     @Test
     fun importedDebtsShowInOverview() {
         val table = com.xiguli.jinkui.data.importer.TableReader.read(
@@ -145,12 +261,14 @@ class DebtScreensUiTest {
         )
         val o = DebtMath.overview(imported, LocalDate.of(2026, 10, 5), zone)
         assertEquals(950_00L, o.totalDebt)
-        val activity = h.show { DebtOverviewContent(o, DebtOverviewActions()) }
-        compose.onNodeWithText("欠款合计(元)").assertExists()
-        compose.onNodeWithText("950.00").assertExists()
+        // 老王是借入：直接打开“我欠别人”那一栏
+        val activity = h.show { DebtOverviewContent(o, DebtOverviewActions(), initialTab = LoanDirection.BORROW) }
+        compose.onNodeWithText("我欠别人").assertExists()
+        compose.onNodeWithText(Money.format(o.payable, symbol = false)).assertExists()
+        compose.onNodeWithText("一共欠 ${Money.format(o.creditDebt)}", substring = true).performScrollTo().assertExists()
         compose.onNodeWithText("设置账单日 ›").performScrollTo().assertExists()
         compose.onNodeWithText("默认 · 每月 1 号出账、10 号还款，可在账单设置里修改").performScrollTo().assertExists()
-        compose.onNodeWithText("老王").performScrollTo().assertExists()
+        compose.onAllNodesWithText("老王").onFirst().performScrollTo().assertExists()
         h.snapshot(activity, "debts-overview-imported-light")
         h.close()
         val hb = o.credits.first { it.account.name == "花呗" }
@@ -184,8 +302,8 @@ class DebtScreensUiTest {
     fun loanListLightAndDark() {
         var tab: Boolean? = null
         val activity = h.show { LoanListContent(overview, false, LoanActions(onTab = { tab = it })) }
-        compose.onNodeWithText("老王").assertExists()
-        compose.onNodeWithText("小李").assertExists()
+        compose.onAllNodesWithText("老王").onFirst().assertExists()
+        compose.onAllNodesWithText("小李").onFirst().assertExists()
         compose.onNodeWithText("已逾期 3 天").performScrollTo().assertExists()
         h.snapshot(activity, "loans-light")
         compose.onNodeWithText("已结清 1").performClick()

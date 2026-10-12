@@ -375,6 +375,7 @@ internal fun RecurringEditSheet(
         AccountPickerSheet(
             title = if (pickTo) "转入账户" else if (type == TxType.TRANSFER) "转出账户" else "选择账户",
             accounts = if (pickTo) active.filter { it.id != accountId } else active,
+            balances = remember(data.accounts, data.transactions) { LedgerMath.balances(data.accounts, data.transactions) },
             onDismiss = {
                 pickFrom = false
                 pickTo = false

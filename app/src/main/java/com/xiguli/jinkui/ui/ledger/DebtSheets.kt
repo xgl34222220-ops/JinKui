@@ -268,11 +268,16 @@ fun NewLoanSheet(
     initialDirection: LoanDirection = LoanDirection.LEND,
     /** 默认的资金账户（上一次的选择）；null = 不经过账户（只记欠款）。 */
     initialFund: String? = null,
+    /** 1.4.0-alpha04：再借——预选这个对方账户。 */
+    initialPersonId: String? = null,
+    /** 各账户当前余额（选账户时显示）。 */
+    balances: Map<String, Long> = emptyMap(),
     onSubmit: (direction: LoanDirection, person: String, accountId: String?, amount: Long, fundId: String?, date: LocalDate, due: LocalDate?, interest: Long, note: String) -> Unit,
 ) {
     var direction by remember { mutableStateOf(initialDirection) }
-    var person by remember { mutableStateOf("") }
-    var personId by remember { mutableStateOf<String?>(null) }
+    val preset = initialPersonId?.let { id -> people.firstOrNull { it.id == id } }
+    var person by remember { mutableStateOf(preset?.let(DebtMath::personOf) ?: "") }
+    var personId by remember { mutableStateOf(preset?.id) }
     var amount by remember { mutableStateOf("") }
     var fund by remember { mutableStateOf(initialFund?.takeIf { id -> funds.any { it.id == id } }) }
     var date by remember { mutableStateOf(today) }
@@ -301,7 +306,7 @@ fun NewLoanSheet(
             JkTextField(value = person, onValueChange = { person = it.take(20); personId = null; error = null }, label = "对方", placeholder = "例如：小李")
             JkTextField(value = amount, onValueChange = { amount = it.take(14); error = null }, label = "金额", placeholder = "0.00", keyboardType = KeyboardType.Decimal)
             Text(if (direction == LoanDirection.LEND) "钱从哪个账户借出" else "钱借到哪个账户", style = JkType.small, color = Jk.colors.textSecondary)
-            LoanFundChips(funds, fund) { fund = it }
+            LoanFundChips(funds, fund, balances) { fund = it }
             if (fund == null) Hint(noFundHint(if (direction == LoanDirection.LEND) LoanAction.LEND else LoanAction.BORROW))
             DateField("借款日期", date, today, { date = it })
             DateField("预计还款日（可选）", due, today, { due = it }, onClear = { due = null })
@@ -335,6 +340,8 @@ fun LoanPaySheet(
     onDismiss: () -> Unit,
     /** 默认的资金账户（上一次的选择）；null = 不经过账户（只记欠款）。 */
     initialFund: String? = null,
+    /** 各账户当前余额（选账户时显示）。 */
+    balances: Map<String, Long> = emptyMap(),
     onSubmit: (principal: Long, interest: Long, fundId: String?, date: LocalDate) -> Unit,
 ) {
     val lend = loan.direction == LoanDirection.LEND
@@ -353,7 +360,7 @@ fun LoanPaySheet(
             JkTextField(value = amount, onValueChange = { amount = it.take(14); error = null }, label = if (lend) "收回本金（可以只收一部分）" else "归还本金（可以只还一部分）", placeholder = "0.00", keyboardType = KeyboardType.Decimal)
             JkTextField(value = interest, onValueChange = { interest = it.take(14); error = null }, label = "利息（可选）", placeholder = loan.interestRemaining.takeIf { it > 0 }?.let(Money::plain) ?: "0.00", keyboardType = KeyboardType.Decimal)
             Text(if (lend) "收到哪个账户" else "从哪个账户还", style = JkType.small, color = Jk.colors.textSecondary)
-            LoanFundChips(funds, fund) { fund = it }
+            LoanFundChips(funds, fund, balances) { fund = it }
             if (fund == null) Hint(noFundHint(if (lend) LoanAction.COLLECT else LoanAction.REPAY))
             DateField(if (lend) "收款日期" else "还款日期", date, today, { date = it })
             error?.let { Hint(it, danger = true) }

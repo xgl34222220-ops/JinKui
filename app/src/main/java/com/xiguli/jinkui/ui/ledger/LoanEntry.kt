@@ -2,6 +2,7 @@ package com.xiguli.jinkui.ui.ledger
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
@@ -29,10 +30,10 @@ import java.time.ZoneId
  * 实际写入用的是欠款页同一套 [com.xiguli.jinkui.data.repo.LedgerRepository.createLoan] / loanPayment。
  */
 enum class LoanAction(val label: String, val direction: LoanDirection, val principal: Boolean, val hint: String) {
-    LEND("借出", LoanDirection.LEND, true, "借钱给别人，别人欠我"),
-    BORROW("借入", LoanDirection.BORROW, true, "向别人借钱，我欠别人"),
-    COLLECT("收款", LoanDirection.LEND, false, "别人还我钱"),
-    REPAY("还款", LoanDirection.BORROW, false, "我还别人钱");
+    LEND("借出", LoanDirection.LEND, true, "借出 = 我把钱借给别人（别人欠我）"),
+    BORROW("借入", LoanDirection.BORROW, true, "借入 = 我向别人借钱（我欠别人）"),
+    COLLECT("收款", LoanDirection.LEND, false, "收款 = 别人还我钱"),
+    REPAY("还款", LoanDirection.BORROW, false, "还款 = 我还别人钱");
 
     /** 钱从资金账户流出（借出、还款）还是流入（借入、收款），决定颜色。 */
     val tone: TxType get() = if (this == LEND || this == REPAY) TxType.EXPENSE else TxType.INCOME
@@ -121,10 +122,16 @@ const val NO_FUND_LABEL = "不经过账户（只记欠款）"
  * [selected] 为 null 表示不经过账户。
  */
 @Composable
-internal fun LoanFundChips(funds: List<com.xiguli.jinkui.data.ledger.LedgerAccount>, selected: String?, onSelect: (String?) -> Unit) {
-    LazyRow(horizontalArrangement = Arrangement.spacedBy(Space.x1)) {
-        item(key = "none", contentType = "none") { JkChip(NO_FUND_LABEL, selected == null, { onSelect(null) }) }
-        items(funds, key = { it.id }, contentType = { "fund" }) { a -> JkChip(a.name, a.id == selected, { onSelect(a.id) }) }
+internal fun LoanFundChips(
+    funds: List<com.xiguli.jinkui.data.ledger.LedgerAccount>,
+    selected: String?,
+    balances: Map<String, Long> = emptyMap(),
+    onSelect: (String?) -> Unit,
+) {
+    // 1.4.0-alpha04：换行排开（不再横向滑动），每个账户都看得见、点得到；每个账户带上当前余额（信用卡 / 花呗显示欠款）
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.x1), verticalArrangement = Arrangement.spacedBy(Space.x1)) {
+        JkChip(NO_FUND_LABEL, selected == null, { onSelect(null) })
+        for (a in funds) JkChip(accountChipText(a, balances[a.id]), a.id == selected, { onSelect(a.id) })
     }
 }
 

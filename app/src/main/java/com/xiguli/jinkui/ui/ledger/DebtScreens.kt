@@ -125,15 +125,26 @@ class DebtOverviewActions(
     val onNewLoan: (LoanDirection) -> Unit = {},
     /** 1.4.0-alpha04：添加信用卡（打开“添加账户”，种类预选信用卡）。 */
     val onAddCredit: () -> Unit = {},
+    /** 1.4.0-alpha04：打开某一个人（对方账户）的借贷。 */
+    val onPerson: (String) -> Unit = {},
 )
 
 @Composable
-fun DebtOverviewScreen(onBack: () -> Unit, onCredit: (String) -> Unit, onLoans: () -> Unit, onAccounts: () -> Unit, onAddCredit: () -> Unit = onAccounts) {
+fun DebtOverviewScreen(
+    onBack: () -> Unit,
+    onCredit: (String) -> Unit,
+    onLoans: () -> Unit,
+    onAccounts: () -> Unit,
+    onAddCredit: () -> Unit = onAccounts,
+    onPerson: (String) -> Unit = {},
+    startNew: LoanDirection? = null,
+    initialTab: LoanDirection = LoanDirection.LEND,
+) {
     val container = LocalContainer.current
     val viewModel = jkViewModel { DebtViewModel(container) }
     val ui by viewModel.ui.collectAsStateWithLifecycle()
     val data by container.ledger.data.collectAsStateWithLifecycle()
-    var newLoan by remember { mutableStateOf<LoanDirection?>(null) }
+    var newLoan by remember { mutableStateOf(startNew) }
     DebtOverviewContent(
         ui,
         DebtOverviewActions(
@@ -141,10 +152,12 @@ fun DebtOverviewScreen(onBack: () -> Unit, onCredit: (String) -> Unit, onLoans: 
             onCredit = onCredit,
             onLoans = onLoans,
             onAccounts = onAccounts,
-            onItem = { item -> if (item.kind == DueKind.LOAN) onLoans() else onCredit(item.accountId) },
+            onItem = { item -> if (item.kind == DueKind.LOAN) onPerson(item.accountId) else onCredit(item.accountId) },
             onNewLoan = { newLoan = it },
             onAddCredit = onAddCredit,
+            onPerson = onPerson,
         ),
+        initialTab = startNew ?: initialTab,
     )
     newLoan?.let { direction ->
         NewLoanSheet(
@@ -153,6 +166,7 @@ fun DebtOverviewScreen(onBack: () -> Unit, onCredit: (String) -> Unit, onLoans: 
             today = ui.today,
             initialDirection = direction,
             initialFund = com.xiguli.jinkui.data.ledger.DebtMath.lastLoanFund(data),
+            balances = remember(data) { com.xiguli.jinkui.data.ledger.LedgerMath.balances(data.accounts, data.transactions) },
             onDismiss = { newLoan = null },
         ) { d, person, accountId, amount, fundId, date, due, interest, note ->
             viewModel.run("已记一笔${d.label} ${Money.format(amount)}", { newLoan = null }) {
@@ -185,133 +199,6 @@ fun DebtEmptyState(actions: DebtOverviewActions, modifier: Modifier = Modifier) 
     }
 }
 
-/**
- * 欠款 / 账单（无状态）：本月待还头图（逾期部分标红）→ 即将到期（信用账单、分期、有预计还款日的借贷，按日期）→
- * 信用账户卡片 → 借贷汇总（应收合计 / 应付合计、按人）。
- */
-@Composable
-fun DebtOverviewContent(ui: DebtOverview, actions: DebtOverviewActions) {
-    val colors = Jk.colors
-    val today = ui.today
-    Column(Modifier.fillMaxSize().statusBarsPadding()) {
-        JkTopBar("欠款 / 账单", onBack = actions.onBack)
-        Column(
-            Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = Space.x2)
-                .navigationBarsPadding()
-                .padding(bottom = Space.x4),
-        ) {
-            if (ui.credits.isEmpty() && ui.loans.isEmpty()) {
-                DebtEmptyState(actions)
-                Text(
-                    "信用卡、花呗、白条请添加种类为“信用卡”的账户，设好账单日与还款日后，这里会算出每期应还与已还。",
-                    style = JkType.caption,
-                    color = colors.textTertiary,
-                    modifier = Modifier.padding(horizontal = Space.x05, vertical = Space.x2),
-                )
-                return@Column
-            }
-            BotanicalCard(Modifier.fillMaxWidth(), layout = BotanicalLayout.SPRIG) {
-                // 1.4.0-alpha02：头图是全部欠款（信用账户欠款 + 借入待还），不只是本月到期的；本月待还 / 逾期 / 待收在下面
-                Column(Modifier.padding(Space.x2_5)) {
-                    Text("欠款合计(元)", style = JkType.small.copy(fontWeight = FontWeight.Medium), color = colors.textSecondary)
-                    Text(
-                        Money.format(ui.totalDebt, symbol = false),
-                        style = JkType.amountHero.copy(fontSize = 32.sp),
-                        color = if (ui.overdue > 0) colors.expense else colors.textPrimary,
-                        maxLines = 1,
-                    )
-                    Text(
-                        "信用账户 ${Money.format(ui.creditDebt)} · 借入待还 ${Money.format(ui.payable)}",
-                        style = JkType.caption,
-                        color = colors.textTertiary,
-                        maxLines = 1,
-                    )
-                    Spacer(Modifier.height(Space.x1))
-                    Row(horizontalArrangement = Arrangement.spacedBy(Space.x3)) {
-                        HeroFigure("本月待还", Money.format(ui.monthDue), colors.textPrimary)
-                        HeroFigure("其中逾期", Money.format(ui.overdue), if (ui.overdue > 0) colors.expense else colors.textPrimary)
-                        HeroFigure("本月待收", Money.format(ui.monthReceivable), colors.textPrimary)
-                    }
-                }
-            }
-
-            DebtSection("即将到期")
-            JkCard(Modifier.fillMaxWidth(), padding = PaddingValues(vertical = Space.x05)) {
-                if (ui.items.isEmpty()) {
-                    Text(
-                        if (ui.totalDebt > 0 || ui.receivable > 0) "近期没有到期的账单。没填预计还款日的借贷列在下面的“借贷”里；给借贷填上预计还款日、给信用账户设好账单日，到期前会在这里列出。"
-                        else "没有待还的账单。给信用账户设好账单日、给借贷填上预计还款日，到期前会在这里列出。",
-                        style = JkType.small,
-                        color = colors.textTertiary,
-                        modifier = Modifier.padding(Space.x2),
-                    )
-                }
-                ui.items.forEachIndexed { i, item ->
-                    if (i > 0) JkDivider(inset = Space.x2 + 48.dp + Space.x1_5)
-                    DueRow(item, today) { actions.onItem(item) }
-                }
-            }
-
-            DebtSection("信用账户") { DebtLink("管理账户", actions.onAccounts) }
-            if (ui.credits.isEmpty()) {
-                JkCard(Modifier.fillMaxWidth()) {
-                    Text("还没有信用账户。在“账户与余额”里添加种类为“信用卡”的账户（花呗、白条也选它）。", style = JkType.small, color = colors.textTertiary)
-                }
-            }
-            for (credit in ui.credits) {
-                CreditCard(credit, today) { actions.onCredit(credit.account.id) }
-                Spacer(Modifier.height(Space.x1_5))
-            }
-
-            DebtSection("借贷") {
-                Row {
-                    DebtLink("记一笔", { actions.onNewLoan(LoanDirection.LEND) })
-                    DebtLink("全部借贷", actions.onLoans)
-                }
-            }
-            JkCard(Modifier.fillMaxWidth(), padding = PaddingValues(vertical = Space.x1)) {
-                Row(Modifier.padding(horizontal = Space.x2, vertical = Space.x1)) {
-                    HeroFigure("应收合计", Money.format(ui.receivable), colors.textPrimary, Modifier.weight(1f))
-                    HeroFigure("应付合计", Money.format(ui.payable), if (ui.payable > 0) colors.expense else colors.textPrimary, Modifier.weight(1f))
-                }
-                if (ui.people.isEmpty()) {
-                    Text("没有未结清的借贷。", style = JkType.small, color = colors.textTertiary, modifier = Modifier.padding(horizontal = Space.x2, vertical = Space.x1))
-                }
-                ui.people.take(5).forEach { p ->
-                    JkDivider(inset = Space.x2)
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .heightIn(min = 52.dp)
-                            .clickable(onClick = actions.onLoans)
-                            .padding(horizontal = Space.x2, vertical = Space.x1),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(p.person, style = JkType.bodyStrong, color = colors.textPrimary, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(
-                            listOfNotNull(
-                                p.receivable.takeIf { it > 0 }?.let { "应收 ${Money.format(it)}" },
-                                p.payable.takeIf { it > 0 }?.let { "应付 ${Money.format(it)}" },
-                            ).joinToString(" · "),
-                            style = JkType.amountSmall,
-                            color = if (p.payable > 0) colors.expense else colors.textSecondary,
-                        )
-                    }
-                }
-            }
-            Text(
-                "金额都由账户流水算出：账单日当天结束时的欠款为应还（扣掉还没入账的分期），出账后转入的钱为已还；借贷的借出、收款与还款都是对方账户与资金账户之间的转账。全部只存在本机加密库里。",
-                style = JkType.caption,
-                color = colors.textTertiary,
-                modifier = Modifier.padding(horizontal = Space.x05, vertical = Space.x2),
-            )
-        }
-    }
-}
-
 @Composable
 private fun HeroFigure(label: String, value: String, tone: androidx.compose.ui.graphics.Color, modifier: Modifier = Modifier) {
     Column(modifier) {
@@ -322,7 +209,7 @@ private fun HeroFigure(label: String, value: String, tone: androidx.compose.ui.g
 
 /** 总览里的一张信用账户卡：已用 / 额度、最新账单剩余与到期日。 */
 @Composable
-private fun CreditCard(view: CreditView, today: LocalDate, onClick: () -> Unit) {
+internal fun CreditCard(view: CreditView, today: LocalDate, onClick: () -> Unit) {
     val colors = Jk.colors
     val latest = view.latest
     val overdue = latest?.overdue(today) == true
@@ -731,7 +618,7 @@ fun LoanListScreen(onBack: () -> Unit, startNew: LoanDirection? = null) {
     }
     ui.loans.firstOrNull { it.loan.id == opened }?.let { loan ->
         when (sheet) {
-            "pay" -> LoanPaySheet(loan, com.xiguli.jinkui.data.ledger.DebtMath.loanFunds(data.accounts), today, { sheet = null }, com.xiguli.jinkui.data.ledger.DebtMath.lastLoanFund(data)) { principal, interest, fundId, date ->
+            "pay" -> LoanPaySheet(loan, com.xiguli.jinkui.data.ledger.DebtMath.loanFunds(data.accounts), today, { sheet = null }, com.xiguli.jinkui.data.ledger.DebtMath.lastLoanFund(data), com.xiguli.jinkui.data.ledger.LedgerMath.balances(data.accounts, data.transactions)) { principal, interest, fundId, date ->
                 viewModel.run(if (loan.direction == LoanDirection.LEND) "已记收款" else "已记还款", { sheet = null }) {
                     ledger.loanPayment(loan.loan.id, loan.account.id, principal, interest, fundId, date)
                 }

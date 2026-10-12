@@ -52,6 +52,8 @@ sealed interface Screen {
     data object LedgerRules : Screen
     /** 1.4.0-alpha04：卡包回收站。 */
     data object CardTrash : Screen
+    /** 1.4.0-alpha04：欠款 / 借贷里的某一个人（对方账户）。 */
+    data class LoanPerson(val accountId: String) : Screen
 }
 
 /** 首页底部悬浮栏的五个分区（1.1 起）：账本是首页；卡包保留全部卡片功能。 */

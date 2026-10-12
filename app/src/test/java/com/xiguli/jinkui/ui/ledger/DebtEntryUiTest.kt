@@ -100,7 +100,7 @@ class DebtEntryUiTest {
         compose.mainClock.advanceTimeBy(1_000)
         // 第四个分段是“借贷”；借出 / 借入 / 收款 / 还款四个类型都看得见
         for (label in listOf("借贷", "借出", "借入", "收款", "还款")) compose.onAllNodesWithText(label).onFirst().assertExists()
-        compose.onNodeWithText("借钱给别人，别人欠我").assertExists()
+        compose.onNodeWithText("借出 = 我把钱借给别人（别人欠我）").assertExists()
         compose.onNodeWithText("预计还款日（可选）").assertExists()
         // 借出：没填对方时提示
         "300".forEach(::key)
@@ -122,7 +122,7 @@ class DebtEntryUiTest {
         // 收款：选没结清的借出，金额自动填成还剩的 800
         clickText("收款")
         compose.waitForIdle()
-        compose.onNodeWithText("别人还我钱").assertExists()
+        compose.onNodeWithText("收款 = 别人还我钱").assertExists()
         compose.onNodeWithText("小李 · 剩", substring = true).performSemanticsAction(SemanticsActions.OnClick)
         compose.waitForIdle()
         save()
@@ -166,7 +166,9 @@ class DebtEntryUiTest {
         }
         compose.mainClock.advanceTimeBy(1_000)
         compose.onNodeWithText(NO_FUND_LABEL).assertExists().assertIsSelected()
-        for (name in listOf("现金", "示例银行卡", "微信", "支付宝", "花呗")) compose.onAllNodesWithText(name).onFirst().assertExists()
+        // 每个资金账户都看得见（换行排开，不用横向滑动），并带上当前余额；花呗没有欠款时只写名字
+        for (name in listOf("现金 ¥0.00", "示例银行卡 ¥5,000.00", "微信 ¥0.00", "支付宝 ¥0.00", "花呗")) compose.onNodeWithText(name).assertExists()
+        compose.onNodeWithText("借入 = 我向别人借钱（我欠别人）").assertExists()
         compose.onNodeWithText(noFundHint(LoanAction.BORROW)).assertExists()
         compose.onNode(hasSetTextAction().and(hasText("对方（例如：小李）", substring = true))).performTextInput("老张")
         "3000".forEach(::key)
