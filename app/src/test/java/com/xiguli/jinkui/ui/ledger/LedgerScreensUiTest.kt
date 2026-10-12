@@ -148,16 +148,19 @@ class LedgerScreensUiTest {
             CalendarContent(homeUi(), day, { day = it; selected = it }, {}, {}, LedgerHomeActions())
         }
         // 2026-10-10 是农历九月初一，格子里显示月名；10 月 8 日寒露、10 月 18 日重阳、10 月 1 日国庆节
-        compose.onNodeWithContentDescription("10月10日，今天，农历九月初一，支 ¥50.50").assertExists()
+        compose.onNodeWithContentDescription("10月10日，今天，农历九月初一，支出 ¥50.50").assertExists()
         compose.onNodeWithText("九月").assertExists()
         compose.onNodeWithText("寒露").assertExists()
         compose.onNodeWithText("重阳").assertExists()
         compose.onNodeWithText("国庆节").assertExists()
+        // 1.5.0-alpha02：当月合计写全“支出 / 收入 / 结余”（与账本首页同一顺序）
+        compose.onNodeWithText("结余").assertExists()
+        compose.onAllNodesWithText("支出").onFirst().assertExists()
         scrollList(androidx.compose.ui.test.hasText("餐饮 · 午餐"))
         compose.onNodeWithText("餐饮 · 午餐").assertExists()
         snapshot(light, "calendar-light")
-        scrollList(androidx.compose.ui.test.hasContentDescription("10月8日，农历八月廿八，寒露，支 ¥3,800.00"))
-        compose.onNodeWithContentDescription("10月8日，农历八月廿八，寒露，支 ¥3,800.00").performClick()
+        scrollList(androidx.compose.ui.test.hasContentDescription("10月8日，农历八月廿八，寒露，支出 ¥3,800.00"))
+        compose.onNodeWithContentDescription("10月8日，农历八月廿八，寒露，支出 ¥3,800.00").performClick()
         compose.waitForIdle()
         assertEquals(java.time.LocalDate.of(2026, 10, 8), selected)
         scrollList(androidx.compose.ui.test.hasText("居住 · 房租房贷"))
@@ -169,8 +172,8 @@ class LedgerScreensUiTest {
     @Test
     fun calendarEmptyDayShowsIllustration() {
         val activity = show { CalendarContent(homeUi(), java.time.LocalDate.of(2026, 10, 2), {}, {}, {}, LedgerHomeActions()) }
-        scrollList(androidx.compose.ui.test.hasText("这一天你还没有任何记账"))
-        compose.onNodeWithText("这一天你还没有任何记账").assertExists()
+        scrollList(androidx.compose.ui.test.hasText("这一天还没有记账"))
+        compose.onNodeWithText("这一天还没有记账").assertExists()
         snapshot(activity, "calendar-empty-day")
     }
 

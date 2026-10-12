@@ -121,6 +121,15 @@ class SettingsScreenUiTest {
         assertEquals(listOf("export", "import"), calls)
     }
 
+    /** 1.5.0-alpha02：说明文字白话化（自动锁定、PIN、历史密码、清空全部数据）；深色顶部截图。 */
+    @Test
+    fun settingsPlainWordingDark() {
+        val activity = show(dark = true, content = settings())
+        compose.onNodeWithText("切到后台或一段时间不操作，就自动锁上").assertExists()
+        compose.onNodeWithText("指纹、面容用不了时，用", substring = true).assertExists()
+        snapshot(activity, "settings-dark")
+    }
+
     @Test
     fun backupNeverDoneDark() {
         val activity = show(dark = true, content = settings(value = AppSettings()))

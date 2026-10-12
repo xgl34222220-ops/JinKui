@@ -499,7 +499,7 @@ fun SettingsContent(
             JkCard(Modifier.fillMaxWidth(), padding = PaddingValues(vertical = Space.x05)) {
                 JkRow(
                     title = "自动锁定",
-                    subtitle = "切到后台或长时间无操作后锁定",
+                    subtitle = "切到后台或一段时间不操作，就自动锁上",
                     icon = Icons.Outlined.Timer,
                     value = SettingsRepository.autoLockLabel(settings.autoLockSeconds),
                     onClick = actions.onAutoLock,
@@ -520,7 +520,7 @@ fun SettingsContent(
                 JkDivider(inset = Space.x6 + Space.x05)
                 JkRow(
                     title = "PIN 解锁",
-                    subtitle = "生物识别不可用时的备用方式",
+                    subtitle = "指纹、面容用不了时，用 ${VaultManager.MIN_PIN_LENGTH}–${VaultManager.MAX_PIN_LENGTH} 位数字解锁",
                     icon = Icons.Outlined.Dialpad,
                     value = if (pinEnabled) "已设置" else "未设置",
                     onClick = actions.onPin,
@@ -557,7 +557,7 @@ fun SettingsContent(
                 JkDivider(inset = Space.x6 + Space.x05)
                 JkRow(
                     title = "记录历史密码",
-                    subtitle = "敏感字段被修改时保留旧值",
+                    subtitle = "改了密码、卡号这类打码的栏目时，保留旧值，需要时能找回",
                     icon = Icons.Outlined.History,
                     trailing = {
                         JkSwitch(
@@ -696,7 +696,7 @@ fun SettingsContent(
                 JkDivider(inset = Space.x6 + Space.x05)
                 JkRow(
                     title = "清空全部数据",
-                    subtitle = "删除本机所有卡片、附件、账本与密钥",
+                    subtitle = "删掉本机的全部卡片、照片、账本和密钥，无法恢复",
                     icon = Icons.Outlined.DeleteForever,
                     danger = true,
                     onClick = actions.onWipe,

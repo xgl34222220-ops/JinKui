@@ -330,7 +330,7 @@ internal fun RecurringEditSheet(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text("暂停", style = JkType.body, color = colors.textPrimary)
-                        Text("暂停期间不生成；恢复后会补记暂停期间到期的各期", style = JkType.caption, color = colors.textTertiary)
+                        Text("暂停时不自动记；恢复后，暂停期间该记的会一次补上", style = JkType.caption, color = colors.textTertiary)
                     }
                     JkSwitch(paused, { paused = it })
                 }

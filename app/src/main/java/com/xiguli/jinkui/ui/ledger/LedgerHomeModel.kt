@@ -152,10 +152,10 @@ fun buildLedgerUi(
     )
 }
 
-/** 当日收支：“支 ¥12.00　收 ¥3.00”，没有的一项不写。 */
+/** 当日收支：“支出 ¥12.00　收入 ¥3.00”，没有的一项不写（1.5.0-alpha02 起写全，读屏也读得明白）。 */
 fun dayTotals(summary: Summary): String = buildList {
-    if (summary.expense > 0) add("支 ${Money.format(summary.expense)}")
-    if (summary.income > 0) add("收 ${Money.format(summary.income)}")
+    if (summary.expense > 0) add("支出 ${Money.format(summary.expense)}")
+    if (summary.income > 0) add("收入 ${Money.format(summary.income)}")
 }.joinToString("　")
 
 fun txRow(
