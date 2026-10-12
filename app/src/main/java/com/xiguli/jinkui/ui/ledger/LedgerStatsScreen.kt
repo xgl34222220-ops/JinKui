@@ -394,7 +394,7 @@ private fun YearChips(years: List<Int>, selected: Int, thisYear: Int, onYear: (I
     }
 }
 
-/** 玻璃汇总卡：上面一行大号的“月 / 年支出”，下面支出、收入、结余三格。 */
+/** 玻璃汇总卡：上面一行大号的“月 / 年支出”，下面收入、结余两格（1.5.0-alpha01：支出不再出现两次）。 */
 @Composable
 private fun SummaryBanner(ui: StatsUi) {
     val colors = Jk.colors
@@ -407,7 +407,7 @@ private fun SummaryBanner(ui: StatsUi) {
         }
         Spacer(Modifier.height(Space.x2))
         Row(Modifier.fillMaxWidth()) {
-            for ((label, value) in listOf("${prefix}支出" to ui.summary.expense, "${prefix}收入" to ui.summary.income, "${prefix}结余" to ui.summary.balance)) {
+            for ((label, value) in listOf("${prefix}收入" to ui.summary.income, "${prefix}结余" to ui.summary.balance)) {
                 Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(label, style = JkType.small.copy(fontWeight = FontWeight.Medium), color = colors.textSecondary)
                     Spacer(Modifier.height(4.dp))

@@ -369,7 +369,7 @@ class DebtScreensUiTest {
         assertEquals(1, opened)
         h.snapshot(activity, "ledger-debt-banner-light")
     }
-    /** 回归（587b7ae）：首页经过 EntryHost.actions() 之后，“欠款 / 账单”快捷入口与到期提示条都要打开欠款页。 */
+    /** 回归（587b7ae）：首页经过 EntryHost.actions() 之后，“借钱 / 欠款”快捷入口与到期提示条都要打开欠款页。 */
     @Test
     fun debtEntriesWorkThroughEntryHostActions() {
         val reminders = debtReminders(data, today, zone)
@@ -379,7 +379,7 @@ class DebtScreensUiTest {
         h.show { LedgerHome(ui, TxFilter(), LazyListState(), actions, debtReminders = reminders, today = today) }
         compose.onNodeWithText("${reminders.size} 笔欠款 / 账单待处理，其中 ${reminders.count { it.overdue }} 笔已逾期").assertExists().performClick()
         assertEquals(1, opened)
-        compose.onAllNodesWithText("欠款 / 账单").onFirst().performSemanticsAction(SemanticsActions.OnClick)
+        compose.onAllNodesWithText("借钱 / 欠款").onFirst().performSemanticsAction(SemanticsActions.OnClick)
         compose.waitForIdle()
         assertEquals(2, opened)
     }

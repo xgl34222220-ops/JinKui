@@ -234,13 +234,17 @@ class DebtEntryUiTest {
 
     @Test
     fun ledgerHomeShowsDebtShortcuts() {
-        var loan = 0
+        // 1.5.0-alpha01：首页一排三个小入口；借出 / 借入在记一笔的“借贷”里（见上面的记一笔面板测试）
+        var assets = 0
         var debts = 0
-        val activity = h.show { DebtShortcuts(onLoan = { loan++ }, onDebts = { debts++ }) }
-        clickText("借出 / 借入")
-        clickText("欠款 / 账单")
-        assertEquals(1, loan)
+        var budget = 0
+        val activity = h.show { HomeShortcuts(onAssets = { assets++ }, onDebts = { debts++ }, onBudget = { budget++ }) }
+        clickText("资产")
+        clickText("借钱 / 欠款")
+        clickText("预算")
+        assertEquals(1, assets)
         assertEquals(1, debts)
+        assertEquals(1, budget)
         h.snapshot(activity, "ledger-debt-shortcuts-light")
     }
 }

@@ -346,52 +346,13 @@ fun EntrySheet(
             TemplateChips(data.templates, onPick = ::useTemplate)
         }
 
-        // 金额：整块最显眼。左边是这笔的类型与分类，右边等宽数字的大号金额（颜色随类型）
-        Spacer(Modifier.height(Space.x1_5))
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(Radius.control)
-                .background(txSoft(loanAction?.tone ?: type).copy(alpha = if (colors.isDark) 0.6f else 0.5f))
-                .animateContentSize(tween(200))
-                .padding(horizontal = Space.x2, vertical = Space.x1_5),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text(loanAction?.label ?: type.label, style = JkType.overline, color = txColor(loanAction?.tone ?: type))
-                Text(
-                    text = loanAction?.let { a -> (loanTarget?.person ?: loanPerson.takeIf { a.principal } ?: "").trim().ifEmpty { if (a.principal) "填写对方" else "选择一笔借贷" } }
-                        ?: if (type == TxType.TRANSFER) "账户之间" else (selectedCategory?.let { categoryLabel(it.id, byId) } ?: tops.firstOrNull()?.name ?: "未分类"),
-                    style = JkType.small,
-                    color = colors.textSecondary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            Column(horizontalAlignment = Alignment.End) {
-                Row(verticalAlignment = Alignment.Bottom) {
-                    Text("¥", style = JkType.title, color = colors.textTertiary, modifier = Modifier.padding(end = Space.x05, bottom = 4.dp))
-                    Text(
-                        text = amount.ifEmpty { "0" },
-                        style = JkType.amountHero,
-                        color = if (amount.isEmpty()) colors.textTertiary else amountColor(loanAction?.tone ?: type),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        textAlign = TextAlign.End,
-                        modifier = Modifier.semantics { contentDescription = "金额 ${amount.ifEmpty { "0" }}，用下方键盘输入" },
-                    )
-                }
-                if (AmountInput.hasOperator(amount)) {
-                    val value = Money.evaluate(amount)
-                    Text(
-                        text = if (value != null) "= ${Money.format(value)}" else "算式不完整",
-                        style = JkType.amountSmall,
-                        color = if (value != null && value > 0) colors.textSecondary else colors.danger,
-                    )
-                }
-            }
-        }
-
+        // 1.5.0-alpha01：类型下面一句白话，说清这一类是什么（转账、借贷不算收支）
+        Text(
+            entryTypeHint(loanAction != null, type),
+            style = JkType.caption,
+            color = colors.textTertiary,
+            modifier = Modifier.padding(start = Space.x05, top = Space.x05),
+        )
         Column(
             Modifier
                 .padding(top = Space.x1)
@@ -510,8 +471,54 @@ fun EntrySheet(
             }
         }
 
+        // 1.5.0-alpha01：金额条挪到键盘正上方（参考钱迹、一木记账：先选分类，再输金额）。金额：整块最显眼。左边是这笔的类型与分类，右边等宽数字的大号金额（颜色随类型）
+        Spacer(Modifier.height(Space.x1))
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(Radius.control)
+                .background(txSoft(loanAction?.tone ?: type).copy(alpha = if (colors.isDark) 0.6f else 0.5f))
+                .animateContentSize(tween(200))
+                .padding(horizontal = Space.x2, vertical = Space.x1_5),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(loanAction?.label ?: type.label, style = JkType.overline, color = txColor(loanAction?.tone ?: type))
+                Text(
+                    text = loanAction?.let { a -> (loanTarget?.person ?: loanPerson.takeIf { a.principal } ?: "").trim().ifEmpty { if (a.principal) "填写对方" else "选择一笔借贷" } }
+                        ?: if (type == TxType.TRANSFER) "账户之间" else (selectedCategory?.let { categoryLabel(it.id, byId) } ?: tops.firstOrNull()?.name ?: "未分类"),
+                    style = JkType.small,
+                    color = colors.textSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Column(horizontalAlignment = Alignment.End) {
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text("¥", style = JkType.title, color = colors.textTertiary, modifier = Modifier.padding(end = Space.x05, bottom = 4.dp))
+                    Text(
+                        text = amount.ifEmpty { "0" },
+                        style = JkType.amountHero,
+                        color = if (amount.isEmpty()) colors.textTertiary else amountColor(loanAction?.tone ?: type),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        textAlign = TextAlign.End,
+                        modifier = Modifier.semantics { contentDescription = "金额 ${amount.ifEmpty { "0" }}，用下方键盘输入" },
+                    )
+                }
+                if (AmountInput.hasOperator(amount)) {
+                    val value = Money.evaluate(amount)
+                    Text(
+                        text = if (value != null) "= ${Money.format(value)}" else "算式不完整",
+                        style = JkType.amountSmall,
+                        color = if (value != null && value > 0) colors.textSecondary else colors.danger,
+                    )
+                }
+            }
+        }
+
         // 数字键盘
-        Spacer(Modifier.height(Space.x1_5))
+        Spacer(Modifier.height(Space.x1))
         Keypad(
             onKey = ::press,
             onAgain = if (existing == null && loanAction == null) ({ submit(keepOpen = true) }) else null,
@@ -612,6 +619,14 @@ fun EntrySheet(
 }
 
 private const val LOAN_KEY = "loan"
+
+/** 1.5.0-alpha01：记一笔面板类型下面的白话说明。 */
+internal fun entryTypeHint(loan: Boolean, type: TxType): String = when {
+    loan -> "借钱给别人、向别人借钱，以及收回、还上；不算收支"
+    type == TxType.EXPENSE -> "花出去的钱"
+    type == TxType.INCOME -> "收到的钱，例如工资、红包、退款"
+    else -> "自己的账户之间挪钱，例如银行卡转到微信；不算收支"
+}
 
 private fun shortDate(date: LocalDate, today: LocalDate = LocalDate.now()): String = when (date) {
     today -> "今天"

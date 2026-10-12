@@ -395,11 +395,20 @@ class CardScreensUiTest {
             )
         }
         compose.onNodeWithText("完成").assertExists()
+        // 1.5.0-alpha01：类型下面一句白话
+        compose.onNodeWithText("花出去的钱").assertExists()
         compose.mainClock.advanceTimeBy(1_000)
         // 底部面板有进入动画，直接触发语义上的点击，不依赖手势坐标
         compose.onNodeWithContentDescription("保存").performSemanticsAction(SemanticsActions.OnClick)
         compose.waitForIdle()
         assertEquals(listOf("请输入大于 0 的金额"), messages)
         snapshot(activity, "entry-sheet", withDialog = true)
+        val dark = show(dark = true) {
+            EntrySheet(
+                data = LedgerSamples.data, existing = null, onDismiss = {}, onSave = { _, _, _ -> }, onDelete = {}, onMessage = {},
+                initialTime = LedgerSamples.at(10, 10, 12, 0),
+            )
+        }
+        snapshot(dark, "entry-sheet-dark", withDialog = true)
     }
 }

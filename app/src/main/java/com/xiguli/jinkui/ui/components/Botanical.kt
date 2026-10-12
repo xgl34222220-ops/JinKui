@@ -38,7 +38,11 @@ import kotlin.math.sin
  * [Layout.RIGHT]：叶丛在右下角（账本头图）；[Layout.BOTH]：左右两侧各一丛（“我的”头图）；
  * [Layout.SPRIG]：右上角一小枝（资产头图）。
  */
-enum class BotanicalLayout { RIGHT, BOTH, SPRIG }
+/**
+ * RIGHT：右下一大丛；BOTH：左右两丛；SPRIG：两角小丛（1.5.0-alpha01 起不再有从顶部中间垂下的蕨叶，它会压住中间一栏的标签）；
+ * TOP_RIGHT（1.5.0-alpha01）：只在右上角一小丛，下半部分留给一排数字（账本首页月度卡）。
+ */
+enum class BotanicalLayout { RIGHT, BOTH, SPRIG, TOP_RIGHT }
 
 @Composable
 fun BotanicalCard(
@@ -100,12 +104,17 @@ fun DrawScope.drawBotanical(colors: JkColors, layout: BotanicalLayout) {
             seeds(colors, Offset(w * 0.22f, h * 0.24f), unit * 0.07f)
         }
         BotanicalLayout.SPRIG -> {
-            fern(colors, Offset(w * 0.46f, h * 0.02f), unit * 0.30f, 200f)
             cluster(colors, Offset(w * 1.0f, h * 1.02f), unit * 0.42f, mirror = false)
             cluster(colors, Offset(w * 0.0f, h * 1.04f), unit * 0.30f, mirror = true)
             flower(colors, Offset(w * 0.92f, h * 0.80f), unit * 0.07f)
             seeds(colors, Offset(w * 0.93f, h * 0.30f), unit * 0.07f)
             seeds(colors, Offset(w * 0.10f, h * 0.10f), unit * 0.06f)
+        }
+        BotanicalLayout.TOP_RIGHT -> {
+            cluster(colors, Offset(w * 0.93f, h * 0.50f), unit * 0.40f, mirror = false)
+            fern(colors, Offset(w * 0.80f, h * 0.52f), unit * 0.22f, -24f)
+            flower(colors, Offset(w * 0.78f, h * 0.18f), unit * 0.055f)
+            seeds(colors, Offset(w * 0.64f, h * 0.14f), unit * 0.07f)
         }
     }
 }

@@ -121,7 +121,10 @@ class LedgerScreensUiTest {
         compose.onNodeWithText("今天").assertExists()
         compose.onNodeWithText("-¥32.50").assertExists()
         compose.onNodeWithText("餐饮 · 午餐").assertExists()
-        compose.onNodeWithText("添加一条新记账").assertExists()
+        compose.onNodeWithText("记一笔").assertExists()
+        // 1.5.0-alpha01：月度卡写明结余怎么算；首页三个小入口
+        compose.onNodeWithText("结余 = 收入 − 支出").assertExists()
+        for (entry in listOf("资产", "借钱 / 欠款", "预算")) compose.onNodeWithText(entry).assertExists()
         compose.onNodeWithText("常用").assertExists()
         compose.onNodeWithText("剩余预算").assertExists()
         snapshot(activity, "ledger-home-light")
@@ -316,8 +319,10 @@ class LedgerScreensUiTest {
     fun statsMonthLightAndDark() {
         val stats = buildStatsUi(LedgerSamples.data, StatsMode.MONTH, october, 2026, LedgerSamples.zone, LedgerSamples.today)
         val light = show { LedgerStatsContent(stats, {}, {}, {}) }
-        // 汇总卡里“月支出”出现两次：上面的大号标题与下面三格里的第一格，是设计如此
-        compose.onAllNodesWithText("月支出").assertCountEquals(2)
+        // 1.5.0-alpha01：汇总卡里“月支出”只出现一次（大号标题），下面是“月收入 / 月结余”两格
+        compose.onAllNodesWithText("月支出").assertCountEquals(1)
+        compose.onNodeWithText("月收入").assertExists()
+        compose.onNodeWithText("月结余").assertExists()
         compose.onNodeWithText("收支热力").assertExists()
         compose.onNodeWithText("居住").assertExists()
         snapshot(light, "stats-month-light")
@@ -332,7 +337,9 @@ class LedgerScreensUiTest {
         assertEquals(12, stats.heat.size)
         assertEquals(stats.summary.expense, stats.bars.sumOf { it.summary.expense })
         val light = show { LedgerStatsContent(stats, {}, {}, {}) }
-        compose.onAllNodesWithText("年支出").assertCountEquals(2)
+        // 1.5.0-alpha01：大号“年支出”只出现一次，下面是年收入 / 年结余
+        compose.onAllNodesWithText("年支出").assertCountEquals(1)
+        compose.onNodeWithText("年收入").assertExists()
         compose.onNodeWithText("今年").assertExists()
         compose.onNodeWithText("收支统计").assertExists()
         snapshot(light, "stats-year-light")
@@ -372,8 +379,14 @@ class LedgerScreensUiTest {
         compose.onAllNodesWithText("净资产", substring = true).onFirst().assertExists()
         // 1.3 起按 资金 / 信用 / 借贷 分组
         compose.onNodeWithText("资金账户").assertExists()
-        compose.onNodeWithText("信用账户").assertExists()
-        compose.onNodeWithText("信用欠款").assertExists()
+        // 1.5.0-alpha01：分组写成白话，头图写清资产 / 负债是什么、净资产怎么算
+        compose.onNodeWithText("信用卡 / 花呗").assertExists()
+        compose.onNodeWithText("一共欠 4,440.00").assertExists()
+        compose.onNodeWithText("负债（我欠的）").assertExists()
+        compose.onNodeWithText("净资产 = 资产 − 负债").assertExists()
+        for (jargon in listOf("负资产", "储蓄现金", "支付账户", "应收", "应付")) {
+            compose.onAllNodesWithText(jargon, substring = true).assertCountEquals(0)
+        }
         snapshot(light, "assets-light")
         val dark = show(dark = true) { LedgerAssetsContent(ui, {}, {}) }
         snapshot(dark, "assets-dark")
