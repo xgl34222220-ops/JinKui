@@ -499,12 +499,15 @@ fun LoanPersonContent(person: PersonDebt, today: LocalDate, actions: PersonActio
                             if (person.interestPaid > 0) "，另外利息 ${Money.format(person.interestPaid)}" else "",
                         style = JkType.small,
                         color = colors.textSecondary,
+                        // 右边是插画：小字只占左边 70%，长了就换行，不压在叶子上
+                        modifier = Modifier.fillMaxWidth(0.7f),
                     )
                     person.due?.takeIf { !person.settled }?.let { due ->
                         Text(
                             "约定 ${debtDate(due, today)} 还 · ${dueLabel(due, today)}",
                             style = JkType.small.copy(fontWeight = if (overdue) FontWeight.Bold else FontWeight.Normal),
                             color = if (overdue) colors.expense else colors.textSecondary,
+                            modifier = Modifier.fillMaxWidth(0.7f),
                         )
                     }
                 }
@@ -561,7 +564,9 @@ fun LoanPersonContent(person: PersonDebt, today: LocalDate, actions: PersonActio
                         Column(Modifier.weight(1f)) {
                             Text(label, style = JkType.bodyStrong, color = colors.textPrimary)
                             Text(
-                                debtDate(LedgerMath.dateOf(tx.occurredAt, zone), today) + (if (tx.note.isNotBlank() && !correction) " · ${tx.note}" else "") +
+                                debtDate(LedgerMath.dateOf(tx.occurredAt, zone), today) +
+                                    // 默认备注（“收款 · 小李”“利息 · 小李”）和标题重复，不再写一遍
+                                    (if (tx.note.isNotBlank() && !correction && !isDefaultNote(tx.note, person.person)) " · ${tx.note}" else "") +
                                     if (correction) " · 不计入收支" else "",
                                 style = JkType.caption,
                                 color = colors.textTertiary,
@@ -723,3 +728,8 @@ fun SettleSheet(person: PersonDebt, today: LocalDate, onDismiss: () -> Unit, onC
         JkButton(if (lend) "记为坏账 ${Money.format(person.remaining)}" else "记为免还 ${Money.format(person.remaining)}", { onConfirm(date) }, modifier = Modifier.fillMaxWidth())
     }
 }
+
+
+/** 记借贷时自动写上的备注（“借出 · 小李”“收款 · 小李”“利息 · 小李”……），来往记录里不重复显示。 */
+internal fun isDefaultNote(note: String, person: String): Boolean =
+    listOf("借出", "借入", "收款", "还款", "利息", "免除", "对方免还", "坏账", "免还").any { note == "$it · $person" }

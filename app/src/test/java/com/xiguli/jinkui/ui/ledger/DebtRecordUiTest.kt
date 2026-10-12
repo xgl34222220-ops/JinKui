@@ -126,7 +126,7 @@ class DebtRecordUiTest {
             DebtRecordSheet(record, people, DebtMath.loanFunds(data.accounts), balances, today, {}, {}, {}, relatedCount = 2, zone = zone)
         }
         // 已经收过钱：类型和对方锁定，提示用合并（同随手记）
-        compose.onNodeWithText("借出 · 小李").assertExists()
+        compose.onAllNodesWithText("借出 · 小李").onFirst().assertExists()
         compose.onNodeWithText("类型和对方不能改", substring = true).assertExists()
         h.snapshot(dark, "debt-record-edit-dark", withDialog = true)
     }
