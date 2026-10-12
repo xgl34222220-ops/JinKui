@@ -438,7 +438,8 @@ fun LoanPersonContent(person: PersonDebt, today: LocalDate, actions: PersonActio
                 .navigationBarsPadding()
                 .padding(bottom = Space.x4),
         ) {
-            BotanicalCard(Modifier.fillMaxWidth(), layout = BotanicalLayout.SPRIG) {
+            // 文字都在左边：插画只放右边（SPRIG 的顶部蕨叶与左下角叶子会压住“我还欠某某”和进度文字）
+            BotanicalCard(Modifier.fillMaxWidth(), layout = BotanicalLayout.RIGHT) {
                 Column(Modifier.padding(Space.x2_5)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Avatar(person.person, 44)
