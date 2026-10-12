@@ -407,6 +407,16 @@ class DebtMathTest {
         assertEquals(10_600_00L, loans.single().remaining)
     }
 
+    @Test
+    fun importedOpeningOnlyRepaidIsNotACard() {
+        // 对方账户只有一个期初“已还”、没有任何流水，又新记了一笔借入：只列新的那笔
+        val wang = borrowedWang.copy(openingBalance = 500_00)
+        val loan = LedgerLoan("ln-new", wang.id, LoanDirection.BORROW, d(2026, 10, 13))
+        val txs = listOf(tx(TxType.TRANSFER, 10_600_00, at(2026, 10, 13), wang.id, bank.id, debt = loan.id))
+        val loans = DebtMath.loans(LedgerData(accounts = listOf(bank, wang), transactions = txs, loans = listOf(loan)), zone)
+        assertEquals(listOf("ln-new"), loans.map { it.loan.id })
+    }
+
     // ── 总览 ──────────────────────────────────────────────────────
 
     @Test

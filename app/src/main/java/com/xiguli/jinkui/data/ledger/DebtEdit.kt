@@ -365,10 +365,16 @@ object DebtEdit {
         if (record.ownsLoan) record.loan.entries.count { it.id !in record.ids } else 0
 
     /** 删一整笔借款（卡片上的“删除这笔”）：它的全部流水 + 存下来的借贷记录（导入的借贷存过约定时也删）。 */
-    fun deleteLoanPlan(data: LedgerData, loan: LoanView): DebtChange = DebtChange(
-        deleteLoans = listOfNotNull(loan.loan.id.takeIf { id -> data.loans.any { it.id == id } }),
-        deleteTransactions = loan.entries.map { it.id }.distinct(),
-    )
+    fun deleteLoanPlan(data: LedgerData, loan: LoanView, now: Long = System.currentTimeMillis()): DebtChange {
+        // 导入的借贷还算上了这个人账户的期初数：删它时期初数一起清零，否则删完还在
+        val legacy = loan.loan.id == DebtMath.legacyLoanId(loan.account.id)
+        val account = data.accounts.firstOrNull { it.id == loan.account.id }
+        return DebtChange(
+            accounts = listOfNotNull(account?.takeIf { legacy && it.openingBalance != 0L }?.copy(openingBalance = 0L, updatedAt = now)),
+            deleteLoans = listOfNotNull(loan.loan.id.takeIf { id -> data.loans.any { it.id == id } }),
+            deleteTransactions = loan.entries.map { it.id }.distinct(),
+        )
+    }
 }
 
 /**
