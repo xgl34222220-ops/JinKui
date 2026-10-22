@@ -4,6 +4,9 @@ import com.xiguli.jinkui.ui.nav.transitionOrigin
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.ReceiptLong
 import androidx.compose.material.icons.outlined.Inbox
+import androidx.compose.material.icons.outlined.Handshake
+import androidx.compose.material.icons.outlined.RequestQuote
+import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.widthIn
@@ -210,8 +213,15 @@ class LedgerViewModel(private val container: AppContainer) : ViewModel() {
     fun save(tx: LedgerTransaction, onDone: () -> Unit) {
         viewModelScope.launch {
             try {
+                // 1.5.0-alpha03：改一笔已有的流水，保存后可以撤销（回到改之前的那一版）
+                val previous = container.ledger.data.value.transactions.firstOrNull { it.id == tx.id }
                 container.ledger.saveTransaction(tx)
                 onDone()
+                if (previous != null) {
+                    container.messages.show("已修改", "撤销") {
+                        container.scope.launch { runCatching { container.ledger.saveTransaction(previous) } }
+                    }
+                }
             } catch (e: LedgerInputException) {
                 container.messages.show(e.message ?: "保存失败")
             } catch (e: Exception) {
@@ -242,8 +252,13 @@ class LedgerViewModel(private val container: AppContainer) : ViewModel() {
 
     fun delete(tx: LedgerTransaction) {
         viewModelScope.launch {
-            runCatching { container.ledger.deleteTransaction(tx.id) }
-                .onSuccess { container.messages.show("已删除这笔记录") }
+            // 1.5.0-alpha03：删一笔也可以撤销（同多选删除）
+            runCatching { container.ledger.deleteTransactions(listOf(tx.id)) }
+                .onSuccess { gone ->
+                    container.messages.show("已删除这笔记录", "撤销") {
+                        container.scope.launch { runCatching { container.ledger.restoreTransactions(gone) } }
+                    }
+                }
                 .onFailure { container.messages.show("删除失败") }
         }
     }
@@ -260,6 +275,9 @@ fun LedgerScreen(
     onAssets: () -> Unit = {},
     onImport: () -> Unit = {},
     onPending: () -> Unit = {},
+    onDebts: () -> Unit = {},
+    onReimburse: () -> Unit = {},
+    onRules: () -> Unit = {},
 ) {
     val container = LocalContainer.current
     val pending by container.ledger.pending.collectAsStateWithLifecycle()
@@ -267,6 +285,11 @@ fun LedgerScreen(
     val ui by viewModel.ui.collectAsStateWithLifecycle()
     val filter by viewModel.filter.collectAsStateWithLifecycle()
     val data by container.ledger.data.collectAsStateWithLifecycle()
+    // 1.4：3 天内到期或已逾期的信用账单与借贷（首页玻璃提示条）
+    val debtToday = ui.today ?: java.time.LocalDate.now()
+    val debtReminders = remember(data, debtToday) {
+        debtReminders(data, debtToday, java.time.ZoneId.systemDefault())
+    }
 
     val host = rememberEntryHost()
     var showMore by remember { mutableStateOf(false) }
@@ -303,9 +326,12 @@ fun LedgerScreen(
                 onMore = { showMore = true },
                 onAssets = onAssets,
                 onPending = onPending,
+                onDebts = onDebts,
             ),
         ),
         pendingCount = pending.size,
+        debtReminders = debtReminders,
+        today = debtToday,
     )
 
     EntryHost(host, data, viewModel)
@@ -355,6 +381,9 @@ fun LedgerScreen(
         JkSheet(onDismiss = { showMore = false }, title = "账本") {
             val entries = listOf(
                 Triple("资产总览", "净资产、负债与信用账户", Icons.Outlined.Savings) to onAssets,
+                Triple("欠款 / 账单", "信用卡、花呗账单与分期，借出借入", Icons.Outlined.ReceiptLong) to onDebts,
+                Triple("报销", "待报销与已报销；退款在长按一笔支出里", Icons.Outlined.RequestQuote) to onReimburse,
+                Triple("规则与模板", "按关键词自动分类；常记的一笔一点就记", Icons.Outlined.AutoAwesome) to onRules,
                 Triple("账户与余额", "现金、银行卡、支付宝、微信、信用卡", Icons.Outlined.AccountBalanceWallet) to onAccounts,
                 Triple("预算", "每月总预算与分类预算", Icons.Outlined.BarChart) to onBudget,
                 Triple("周期记账", "房租、工资、订阅等固定收支自动记上", Icons.Outlined.Repeat) to onRecurring,
@@ -408,6 +437,10 @@ class LedgerHomeActions(
     val onRowMenu: (LedgerTransaction) -> Unit = {},
     /** “有 n 笔待确认”提示条。 */
     val onPending: () -> Unit = {},
+    /** 到期提示条（1.4）：打开欠款 / 账单。 */
+    val onDebts: () -> Unit = {},
+    /** 1.4.0-alpha04：“借出 / 借入”快捷入口，打开记账面板的借贷。 */
+    val onLoan: () -> Unit = {},
     /** 多选模式（1.3）：选中的流水 ID；null 表示不在多选模式。长按一行进入。 */
     val selection: Set<String>? = null,
     val onSelectStart: (LedgerTransaction) -> Unit = {},
@@ -420,7 +453,8 @@ class LedgerHomeActions(
 
 /**
  * 账本首页（无状态，1.1 薄荷）：标题栏（资产 / 搜索 / 更多）→ 带植物插画的月度头图（收入、结余、剩余预算、支出）
- * → 整行的“添加一条新记账” → 一行不抢眼的常用分类 → 月份与筛选 → 按天分组的流水（每天一块白色分组，头上是当天的收 / 支）。
+ * → 整行的“记一笔” → 资产 / 借钱·欠款 / 预算三个小入口 → 一行不抢眼的常用分类 → 月份与筛选 → 按天分组的流水（每天一块白色分组，头上是当天的支出 / 收入）。
+ * 1.5.0-alpha01：月度卡先写支出，再写收入 / 结余 / 剩余预算（参考钱迹、一木记账首页）。
  * 日历挪到了底栏的“日历”分区。
  */
 @Composable
@@ -430,8 +464,11 @@ fun LedgerHome(
     listState: LazyListState,
     actions: LedgerHomeActions,
     modifier: Modifier = Modifier,
-    /** 自动记账的待确认笔数；大于 0 时在“添加一条新记账”下面出现一条提示。 */
+    /** 自动记账的待确认笔数；大于 0 时在“记一笔”下面出现一条提示。 */
     pendingCount: Int = 0,
+    /** 1.4：3 天内到期或已逾期的欠款 / 账单；不为空时出现一条玻璃提示条。 */
+    debtReminders: List<com.xiguli.jinkui.data.ledger.DueItem> = emptyList(),
+    today: java.time.LocalDate = java.time.LocalDate.now(),
 ) {
     val colors = Jk.colors
     var showSearch by rememberSaveable { mutableStateOf(false) }
@@ -465,9 +502,21 @@ fun LedgerHome(
         item(key = "add", contentType = "add") {
             AddEntryButton(actions.onCreate, Modifier.padding(start = Space.x2, end = Space.x2, top = Space.x1_5))
         }
+        // 1.5.0-alpha01：两块借贷大按钮换成一排三个小入口（资产 / 借钱·欠款 / 预算），参考一木记账首页的数据小卡片；
+        // 借出 / 借入在“记一笔”的“借贷”里
+        if (selection == null) {
+            item(key = "debt-shortcuts", contentType = "debt-shortcuts") {
+                HomeShortcuts(actions.onAssets, actions.onDebts, actions.onBudget, Modifier.padding(start = Space.x2, end = Space.x2, top = Space.x1))
+            }
+        }
         if (pendingCount > 0) {
             item(key = "pending", contentType = "pending") {
                 PendingBanner(pendingCount, actions.onPending, Modifier.padding(start = Space.x2, end = Space.x2, top = Space.x1))
+            }
+        }
+        if (debtReminders.isNotEmpty() && selection == null) {
+            item(key = "debts", contentType = "debts") {
+                DebtBanner(debtReminders, today, actions.onDebts, Modifier.padding(start = Space.x2, end = Space.x2, top = Space.x1))
             }
         }
         if (ui.quickCategories.isNotEmpty() && !ui.filterActive) {
@@ -542,7 +591,7 @@ fun LedgerHome(
             item(key = "empty", contentType = "empty") {
                 JkEmpty(
                     title = if (ui.filterActive) "没有符合条件的记录" else "这个月还没有记账",
-                    message = if (ui.filterActive) "换个筛选条件试试" else "点上面的“添加一条新记账”，三秒记完一笔。",
+                    message = if (ui.filterActive) "换个筛选条件试试" else "点上面的“记一笔”，选分类、输金额，三秒记完。",
                     illustration = { LedgerIllustration(if (ui.filterActive) LedgerArt.NO_MATCH else LedgerArt.EMPTY_MONTH) },
                 )
             }
@@ -665,9 +714,9 @@ fun PendingBanner(count: Int, onClick: () -> Unit, modifier: Modifier = Modifier
     }
 }
 
-/** 整行的“添加一条新记账”：宽玻璃按钮、薄荷色的加号与文字，按下轻微缩小（弹簧）并有触感。 */
+/** 整行的“记一笔”：宽玻璃按钮、薄荷色的加号与文字，按下轻微缩小（弹簧）并有触感。 */
 @Composable
-fun AddEntryButton(onClick: () -> Unit, modifier: Modifier = Modifier, text: String = "添加一条新记账") {
+fun AddEntryButton(onClick: () -> Unit, modifier: Modifier = Modifier, text: String = "记一笔") {
     val colors = Jk.colors
     val view = LocalView.current
     val press = rememberJkPress(0.97f)
@@ -688,6 +737,39 @@ fun AddEntryButton(onClick: () -> Unit, modifier: Modifier = Modifier, text: Str
         Icon(Icons.Outlined.Add, contentDescription = null, tint = colors.accent, modifier = Modifier.size(26.dp))
         Spacer(Modifier.width(Space.x1_5))
         Text(text, style = JkType.heading.copy(fontSize = 17.sp, fontWeight = FontWeight.Bold), color = colors.accent)
+    }
+}
+
+/**
+ * 1.5.0-alpha01：首页“记一笔”下面一排三个小入口——资产（每个账户有多少钱）、借钱 / 欠款、预算。
+ * 参考一木记账首页的数据小卡片与钱迹左滑进资产，只借鉴交互。
+ */
+@Composable
+fun HomeShortcuts(onAssets: () -> Unit, onDebts: () -> Unit, onBudget: () -> Unit, modifier: Modifier = Modifier) {
+    Row(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.x1)) {
+        MiniShortcut(MintGlyph.ASSETS, "资产", onAssets, Modifier.weight(1f))
+        MiniShortcut(MintGlyph.BILL, "借钱 / 欠款", onDebts, Modifier.weight(1f))
+        MiniShortcut(MintGlyph.BUDGET, "预算", onBudget, Modifier.weight(1f))
+    }
+}
+
+@Composable
+private fun MiniShortcut(glyph: MintGlyph, title: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val colors = Jk.colors
+    val press = rememberJkPress(0.96f)
+    Row(
+        modifier
+            .heightIn(min = JkSize.touch)
+            .pressScale(press)
+            .jkSurface(Jk.surfaces.card, Radius.pill)
+            .clickable(interactionSource = press.interaction, indication = LocalIndication.current, role = Role.Button, onClick = onClick)
+            .padding(horizontal = Space.x1, vertical = Space.x1),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        MintIcon(glyph, size = 20.dp, tint = colors.accent)
+        Spacer(Modifier.width(6.dp))
+        Text(title, style = JkType.small.copy(fontWeight = FontWeight.Bold), color = colors.textPrimary, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
     }
 }
 
@@ -744,7 +826,7 @@ private fun SelectionBar(ui: LedgerUi, selection: Set<String>, actions: LedgerHo
     }
 }
 
-private fun rowShape(index: Int, count: Int): androidx.compose.ui.graphics.Shape {
+internal fun rowShape(index: Int, count: Int): androidx.compose.ui.graphics.Shape {
     val r = 22.dp
     return when {
         count == 1 -> RoundedCornerShape(r)
@@ -754,7 +836,7 @@ private fun rowShape(index: Int, count: Int): androidx.compose.ui.graphics.Shape
     }
 }
 
-/** 常用分类：一行小号文字胶囊，不抢“添加一条新记账”的风头；点一下带着这个分类打开记账面板。 */
+/** 常用分类：一行小号文字胶囊，不抢“记一笔”的风头；点一下带着这个分类打开记账面板。 */
 @Composable
 private fun QuickAddRow(categories: List<LedgerCategory>, onPick: (String) -> Unit) {
     val colors = Jk.colors
@@ -801,8 +883,17 @@ fun MonthSummaryCard(ui: LedgerUi, onBudget: () -> Unit, modifier: Modifier = Mo
         else -> "${ui.month.monthValue}月"
     }
     val roomy = androidx.compose.ui.platform.LocalDensity.current.fontScale <= 1.15f
-    BotanicalCard(modifier.fillMaxWidth().animateContentSize(tween(240)), layout = BotanicalLayout.RIGHT) {
+    BotanicalCard(modifier.fillMaxWidth().animateContentSize(tween(240)), layout = BotanicalLayout.TOP_RIGHT) {
         Column(Modifier.padding(horizontal = Space.x2_5, vertical = Space.x2_5)) {
+            // 1.5.0-alpha01：先回答“花了多少”（参考钱迹首页：月收入 / 月支出 / 本月结余），再是收入、结余、剩余预算
+            Text("${prefix}支出(元)", style = JkType.small.copy(fontWeight = FontWeight.Medium), color = colors.textSecondary)
+            Spacer(Modifier.height(2.dp))
+            RollingAmount(ui.summary.expense, JkType.amountHero, colors.accent, format = { Money.format(it, symbol = false) })
+            val average = ui.dailyAverage?.takeIf { !ui.filterActive && it > 0 }
+            if (average != null) {
+                Text("平均每天 ${Money.format(average, symbol = false)}", style = JkType.amountCaption, color = colors.textSecondary)
+            }
+            Spacer(Modifier.height(Space.x2))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.x1)) {
                 SummaryCell("${prefix}收入", ui.summary.income, colors.textPrimary, Modifier.weight(1f))
                 SummaryCell("${prefix}结余", ui.summary.balance, if (ui.summary.balance < 0) colors.danger else colors.textPrimary, Modifier.weight(1f))
@@ -812,14 +903,8 @@ fun MonthSummaryCard(ui: LedgerUi, onBudget: () -> Unit, modifier: Modifier = Mo
                 Spacer(Modifier.height(Space.x1))
                 BudgetCell(ui, onBudget)
             }
-            Spacer(Modifier.height(Space.x2))
-            Text("${prefix}支出(元)", style = JkType.small.copy(fontWeight = FontWeight.Medium), color = colors.textSecondary)
-            Spacer(Modifier.height(2.dp))
-            RollingAmount(ui.summary.expense, JkType.amountHero, colors.accent, format = { Money.format(it, symbol = false) })
-            val average = ui.dailyAverage?.takeIf { !ui.filterActive && it > 0 }
-            if (average != null) {
-                Text("日均 ${Money.format(average, symbol = false)}", style = JkType.amountCaption, color = colors.textSecondary)
-            }
+            Spacer(Modifier.height(Space.x05))
+            Text("结余 = 收入 − 支出", style = JkType.caption, color = colors.textTertiary)
         }
     }
 }
@@ -886,13 +971,18 @@ internal fun DayHeader(day: DayUi, selection: Set<String>? = null, onSelectDay: 
         Spacer(Modifier.width(Space.x1))
         Text(day.weekday, style = JkType.small, color = colors.textTertiary, maxLines = 1)
         Spacer(Modifier.weight(1f))
-        Text("收", style = JkType.small, color = colors.textTertiary)
-        Spacer(Modifier.width(4.dp))
-        Text(Money.format(day.income, symbol = false), style = JkType.amountSmall, color = colors.income, maxLines = 1)
-        Spacer(Modifier.width(Space.x1_5))
-        Text("支", style = JkType.small, color = colors.textTertiary)
-        Spacer(Modifier.width(4.dp))
-        Text(Money.format(day.expense, symbol = false), style = JkType.amountSmall, color = colors.expense, maxLines = 1)
+        // 1.5.0-alpha01：写全“支出 / 收入”，为 0 的一项不显示（参考钱迹每天单独汇总）
+        if (day.expense != 0L || day.income == 0L) {
+            Text("支出", style = JkType.small, color = colors.textTertiary)
+            Spacer(Modifier.width(4.dp))
+            Text(Money.format(day.expense, symbol = false), style = JkType.amountSmall, color = colors.expense, maxLines = 1)
+        }
+        if (day.income != 0L) {
+            Spacer(Modifier.width(Space.x1_5))
+            Text("收入", style = JkType.small, color = colors.textTertiary)
+            Spacer(Modifier.width(4.dp))
+            Text(Money.format(day.income, symbol = false), style = JkType.amountSmall, color = colors.income, maxLines = 1)
+        }
     }
 }
 

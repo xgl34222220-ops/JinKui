@@ -60,6 +60,28 @@ fun View.longPressHaptic() {
     performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
 }
 
+/** 拒绝类触感（输错 PIN / 主密码）：Android 11 起用系统的 REJECT，之前退回长按触感。 */
+fun View.rejectHaptic() {
+    performHapticFeedback(if (Build.VERSION.SDK_INT >= 30) HapticFeedbackConstants.REJECT else HapticFeedbackConstants.LONG_PRESS)
+}
+
+// ── 减少动态效果 ──────────────────────────────────────────────────
+
+/**
+ * 系统是否关闭了动画（开发者选项“动画时长缩放”为 0，或无障碍里的“移除动画”）。
+ * 为 true 时，摇头、弹跳、淡入这类纯装饰的动效直接跳到终点，只保留颜色与文字上的状态变化。
+ */
+@Composable
+fun rememberReduceMotion(): Boolean {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    return remember(context) {
+        val scale = runCatching {
+            android.provider.Settings.Global.getFloat(context.contentResolver, android.provider.Settings.Global.ANIMATOR_DURATION_SCALE, 1f)
+        }.getOrDefault(1f)
+        scale == 0f || !android.animation.ValueAnimator.areAnimatorsEnabled()
+    }
+}
+
 // ── 按压反馈 ──────────────────────────────────────────────────────
 
 /** 一个可按压元素的交互源与当前缩放；缩放用 [pressScale] 画出来，点击用 [pressClickable] 接上同一个交互源。 */

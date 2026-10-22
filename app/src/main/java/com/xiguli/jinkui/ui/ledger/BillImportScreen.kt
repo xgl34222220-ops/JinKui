@@ -115,6 +115,10 @@ sealed interface ImportStage {
 }
 
 class BillImportViewModel(private val container: AppContainer) : ViewModel() {
+    /** 1.4.0-alpha04：预览后套用用户的自动分类规则（解析与预览本身不变）。 */
+    private fun withRules(preview: com.xiguli.jinkui.data.importer.ImportPreview): com.xiguli.jinkui.data.importer.ImportPreview =
+        com.xiguli.jinkui.data.importer.ImportRules.applyToPreview(preview, container.ledger.data.value)
+
     var stage by mutableStateOf<ImportStage>(ImportStage.Intro)
         private set
     var error by mutableStateOf<String?>(null)
@@ -149,7 +153,7 @@ class BillImportViewModel(private val container: AppContainer) : ViewModel() {
                     // 记账 App 导出没有固定的账户来源：和通用表格一样，预览里可以换默认账户
                     parsedCsv = parsed.takeIf { source == BillSource.APP }
                     fileName = name
-                    ImportStage.Preview(withContext(Dispatchers.Default) { BillImport.preview(parsed, container.ledger.data.value, zone, fileName = name) })
+                    ImportStage.Preview(withContext(Dispatchers.Default) { withRules(BillImport.preview(parsed, container.ledger.data.value, zone, fileName = name)) })
                 } else {
                     if (table.rows.size < 2) throw BillFormatException("这个文件里没有可以导入的表格")
                     ImportStage.Mapping(table, BillParser.guessMapping(table), name)
@@ -179,7 +183,7 @@ class BillImportViewModel(private val container: AppContainer) : ViewModel() {
             }
             parsedCsv = parsed
             fileName = current.fileName
-            stage = ImportStage.Preview(BillImport.preview(parsed, container.ledger.data.value, zone, fileName = current.fileName))
+            stage = ImportStage.Preview(withRules(BillImport.preview(parsed, container.ledger.data.value, zone, fileName = current.fileName)))
         } catch (e: BillFormatException) {
             error = e.message
         }
@@ -204,7 +208,7 @@ class BillImportViewModel(private val container: AppContainer) : ViewModel() {
     fun setAccount(accountId: String) {
         val current = stage as? ImportStage.Preview ?: return
         val parsed = parsedCsv ?: return
-        val fresh = BillImport.preview(parsed, container.ledger.data.value, zone, preferredAccount = accountId, fileName = fileName)
+        val fresh = withRules(BillImport.preview(parsed, container.ledger.data.value, zone, preferredAccount = accountId, fileName = fileName))
         val old = current.preview.candidates.associateBy { it.id }
         stage = ImportStage.Preview(
             fresh.copy(candidates = fresh.candidates.map { c -> old[c.id]?.let { o -> c.copy(checked = o.checked, categoryId = o.categoryId) } ?: c }),
@@ -226,7 +230,7 @@ class BillImportViewModel(private val container: AppContainer) : ViewModel() {
                     source = preview.source.label,
                     fileName = preview.fileName.take(80),
                 )
-                val txs = BillImport.transactions(preview, zone, now, batch.id)
+                val txs = com.xiguli.jinkui.data.importer.ImportRules.tag(BillImport.transactions(preview, zone, now, batch.id), preview, container.ledger.data.value)
                 val saved = container.ledger.importTransactions(txs, preview.usedNewAccounts, batch, preview.usedNewCategories)
                 stage = ImportStage.Done(BillImport.result(preview, saved, before, batch.id.takeIf { saved.isNotEmpty() }))
             } catch (e: LedgerInputException) {
@@ -677,6 +681,16 @@ fun BillPreviewContent(preview: ImportPreview, data: LedgerData, saving: Boolean
                     GroupsCard(groups, actions)
                 }
             }
+            debtLine(preview.creditAccountCount, preview.loanAccountCount)?.let { line ->
+                item(key = "debts", contentType = "debts") {
+                    Text(
+                        line,
+                        style = JkType.small,
+                        color = colors.textSecondary,
+                        modifier = Modifier.padding(start = Space.x05, top = Space.x1_5, end = Space.x05),
+                    )
+                }
+            }
             for (group in groups) {
                 val rows = preview.candidates.filter { it.klass == group.klass }
                 if (grouped) {
@@ -939,6 +953,8 @@ fun BillImportDone(result: ImportResult, onFinish: () -> Unit, onAgain: () -> Un
                     add("支出 ${result.expenseCount} 笔" to Money.format(result.expenseTotal))
                     add("收入 ${result.incomeCount} 笔" to Money.format(result.incomeTotal))
                     if (result.transferCount > 0) add("转账 / 借贷 / 校准（不计收支）" to "${result.transferCount} 笔")
+                    if (result.creditAccounts > 0) add("识别到信用账户" to "${result.creditAccounts} 个")
+                    if (result.loanAccounts > 0) add("识别到借贷对象" to "${result.loanAccounts} 个")
                     if (result.unchecked > 0) add("没有勾选" to "${result.unchecked} 笔")
                     if (result.alreadyImported > 0) add("以前导入过" to "${result.alreadyImported} 笔")
                     for ((reason, n) in result.skipped) add(reason.label to "$n 笔")
@@ -1026,3 +1042,13 @@ private fun Modifier.bottomFade(scroll: androidx.compose.foundation.ScrollState)
             )
         }
     }
+
+/** 预览里“认出了哪些欠款”的一句话；都没有时为 null。 */
+internal fun debtLine(credits: Int, loans: Int): String? {
+    if (credits <= 0 && loans <= 0) return null
+    val parts = listOfNotNull(
+        credits.takeIf { it > 0 }?.let { "$it 个信用账户" },
+        loans.takeIf { it > 0 }?.let { "$it 个借贷对象" },
+    )
+    return "识别到欠款：${parts.joinToString("、")}，导入后在“欠款 / 账单”里查看。"
+}

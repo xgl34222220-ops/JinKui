@@ -21,6 +21,10 @@ import androidx.compose.ui.unit.dp
 import com.xiguli.jinkui.data.ledger.LedgerData
 import com.xiguli.jinkui.data.ledger.LedgerTransaction
 import com.xiguli.jinkui.data.ledger.Money
+import com.xiguli.jinkui.data.ledger.RefundMath
+import com.xiguli.jinkui.data.ledger.Reimburse
+import androidx.compose.material.icons.automirrored.outlined.Undo
+import androidx.compose.material.icons.outlined.RequestQuote
 import com.xiguli.jinkui.data.ledger.TxType
 import com.xiguli.jinkui.ui.LocalContainer
 import com.xiguli.jinkui.ui.components.JkDialog
@@ -28,6 +32,7 @@ import com.xiguli.jinkui.ui.components.JkRow
 import com.xiguli.jinkui.ui.components.JkSheet
 import com.xiguli.jinkui.ui.theme.JkType
 import com.xiguli.jinkui.ui.theme.Radius
+import kotlinx.coroutines.launch
 
 /**
  * “记一笔”面板、长按菜单与删除确认的状态。账本首页与日历分区共用一套，
@@ -40,7 +45,14 @@ class EntryHostState {
     var presetCategory by mutableStateOf<String?>(null)
     var template by mutableStateOf<LedgerTransaction?>(null)
     var initialTime by mutableStateOf<Long?>(null)
+    /** 1.4.0-alpha04：打开时直接进入借贷的某一类。 */
+    var loanAction by mutableStateOf<LoanAction?>(null)
+    /** 1.5.0-alpha02：账户详情页预选的账户与类型。 */
+    var presetAccount by mutableStateOf<String?>(null)
+    var presetType by mutableStateOf<TxType?>(null)
     var confirmDelete by mutableStateOf<LedgerTransaction?>(null)
+    /** 1.4.0-alpha04：给这笔支出记退款。 */
+    var refundFor by mutableStateOf<LedgerTransaction?>(null)
     var menuFor by mutableStateOf<LedgerTransaction?>(null)
     /** 多选模式（长按一行进入）：选中的流水 ID；null 表示不在多选模式。 */
     var selection by mutableStateOf<Set<String>?>(null)
@@ -58,10 +70,13 @@ class EntryHostState {
         selection = if (on) current + ids else current - ids.toSet()
     }
 
-    fun create(category: String? = null, from: LedgerTransaction? = null, time: Long? = null) {
+    fun create(category: String? = null, from: LedgerTransaction? = null, time: Long? = null, loan: LoanAction? = null, account: String? = null, type: TxType? = null) {
+        presetAccount = account
+        presetType = type
         presetCategory = category
         template = from
         initialTime = time
+        loanAction = loan
         creating = true
     }
 
@@ -71,6 +86,9 @@ class EntryHostState {
         presetCategory = null
         template = null
         initialTime = null
+        loanAction = null
+        presetAccount = null
+        presetType = null
     }
 
     /** 首页 / 日历用的那组行操作。 */
@@ -93,6 +111,8 @@ class EntryHostState {
         onDelete = { confirmDelete = it },
         onRowMenu = { menuFor = it },
         onPending = base.onPending,
+        onDebts = base.onDebts,
+        onLoan = { create(loan = LoanAction.LEND) },
         selection = selection.takeIf { multiSelect },
         onSelectStart = { if (multiSelect) selection = setOf(it.id) else menuFor = it },
         onSelectToggle = { toggle(it.id) },
@@ -112,7 +132,26 @@ fun EntryHost(
     viewModel: LedgerViewModel,
 ) {
     val container = LocalContainer.current
-    if (state.creating || state.editing != null) {
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    fun reimburse(ids: List<String>, to: Reimburse, done: String) {
+        scope.launch {
+            try {
+                container.ledger.setReimburse(ids, to)
+                container.messages.show(done)
+            } catch (e: com.xiguli.jinkui.data.repo.LedgerInputException) {
+                container.messages.show(e.message ?: "保存失败")
+            } catch (e: Exception) {
+                container.messages.show("保存失败：${e.message ?: "未知错误"}")
+            }
+        }
+    }
+    // 1.5.0-alpha03：点开的是借贷记录（借出 / 借入 / 收款 / 还款 / 结清、以及它们的利息）时，打开借贷记录面板——
+    // 类型、对方、金额、利息、日期时间、账户、预计还款日都能改；信用卡还款、分期等普通流水照旧用记一笔面板。
+    val editingId = state.editing?.id
+    val debtRecord = remember(data, editingId) { editingId?.let { com.xiguli.jinkui.data.ledger.DebtEdit.recordOf(data, it) } }
+    if (editingId != null && debtRecord != null) {
+        DebtRecordHost(editingId, data) { state.close() }
+    } else if (state.creating || state.editing != null) {
         EntrySheet(
             data = data,
             existing = state.editing,
@@ -134,6 +173,27 @@ fun EntryHost(
                 viewModel.delete(tx)
                 state.editing = null
             },
+            initialLoan = state.loanAction,
+            initialAccount = state.presetAccount,
+            initialType = state.presetType,
+            onLoan = { r ->
+                scope.launch {
+                    try {
+                        val ledger = container.ledger
+                        if (r.action.principal) {
+                            ledger.createLoan(r.action.direction, r.person, r.accountId, r.amount, r.fundId, r.date, r.due, r.interest, r.note)
+                        } else {
+                            ledger.loanPayment(r.loanId!!, r.accountId!!, r.amount, r.interest, r.fundId, r.date, r.note)
+                        }
+                        state.close()
+                        container.messages.show("已记一笔${r.action.label} ${Money.format(r.amount + if (r.action.principal) 0 else r.interest)}")
+                    } catch (e: com.xiguli.jinkui.data.repo.LedgerInputException) {
+                        container.messages.show(e.message ?: "保存失败")
+                    } catch (e: Exception) {
+                        container.messages.show("保存失败：${e.message ?: "未知错误"}")
+                    }
+                }
+            },
         )
     }
 
@@ -151,10 +211,69 @@ fun EntryHost(
                     state.menuFor = null
                     state.create(from = tx)
                 })
+                // 1.4.0-alpha04：退款与报销（只对普通支出；分期、借贷的流水不行）
+                if (tx.type == TxType.EXPENSE && tx.debtId == null) {
+                    val refund = RefundMath.status(tx, data.transactions)
+                    if (tx.reimburse == Reimburse.NONE && refund.remaining > 0) {
+                        JkRow(
+                            title = "退款",
+                            subtitle = if (refund.refunded > 0) "已退 ${Money.format(refund.refunded)}，还能退 ${Money.format(refund.remaining)}" else "全额或部分退款，统计里冲减这笔支出",
+                            icon = Icons.AutoMirrored.Outlined.Undo, modifier = Modifier.clip(Radius.control), trailing = {},
+                            onClick = {
+                                state.menuFor = null
+                                state.refundFor = tx
+                            },
+                        )
+                    }
+                    if (refund.refunds.isEmpty()) {
+                        when (tx.reimburse) {
+                            Reimburse.NONE -> JkRow(
+                                title = "标记待报销", subtitle = "替单位或别人垫付的钱，不算你的支出",
+                                icon = Icons.Outlined.RequestQuote, modifier = Modifier.clip(Radius.control), trailing = {},
+                                onClick = {
+                                    state.menuFor = null
+                                    reimburse(listOf(tx.id), Reimburse.PENDING, "已标记待报销，可在“我的 · 报销”里查看")
+                                },
+                            )
+                            Reimburse.PENDING -> JkRow(
+                                title = "取消待报销", subtitle = "重新算作你的支出",
+                                icon = Icons.Outlined.RequestQuote, modifier = Modifier.clip(Radius.control), trailing = {},
+                                onClick = {
+                                    state.menuFor = null
+                                    reimburse(listOf(tx.id), Reimburse.NONE, "已取消报销标记")
+                                },
+                            )
+                            Reimburse.DONE -> Unit
+                        }
+                    }
+                }
                 JkRow(title = "删除", icon = Icons.Outlined.DeleteOutline, danger = true, modifier = Modifier.clip(Radius.control), onClick = {
                     state.menuFor = null
                     state.confirmDelete = tx
                 })
+            }
+        }
+    }
+
+    state.refundFor?.let { tx ->
+        val status = RefundMath.status(tx, data.transactions)
+        RefundSheet(
+            status = status,
+            category = categoryLabel(tx.categoryId, data.categories.associateBy { it.id }),
+            accounts = refundAccounts(data),
+            today = java.time.LocalDate.now(),
+            onDismiss = { state.refundFor = null },
+        ) { amount, accountId, date, note ->
+            state.refundFor = null
+            scope.launch {
+                try {
+                    container.ledger.refund(tx.id, amount, accountId, date, note)
+                    container.messages.show(if (amount >= status.remaining) "已记全额退款 ${Money.format(amount)}" else "已记退款 ${Money.format(amount)}")
+                } catch (e: com.xiguli.jinkui.data.repo.LedgerInputException) {
+                    container.messages.show(e.message ?: "保存失败")
+                } catch (e: Exception) {
+                    container.messages.show("保存失败：${e.message ?: "未知错误"}")
+                }
             }
         }
     }
@@ -184,10 +303,29 @@ fun EntryHost(
             danger = true,
             onConfirm = {
                 state.confirmDelete = null
-                viewModel.delete(tx)
+                val record = com.xiguli.jinkui.data.ledger.DebtEdit.recordOf(data, tx.id)
+                if (record == null) {
+                    viewModel.delete(tx)
+                } else {
+                    // 借贷记录：连同同一次记下的利息一起删（借出 / 借入时连同它名下的收款 / 还款），可以撤销
+                    scope.launch {
+                        try {
+                            val undo = container.ledger.deleteDebtRecord(tx.id)
+                            container.messages.show("已删除", "撤销") { container.scope.launch { runCatching { container.ledger.undoDebtChange(undo) } } }
+                        } catch (e: Exception) {
+                            container.messages.show(e.message ?: "删除失败")
+                        }
+                    }
+                }
             },
         ) {
-            Text("${Money.format(tx.amount)}，删除后账户余额会随之调整，无法撤销。", style = JkType.body)
+            val related = com.xiguli.jinkui.data.ledger.DebtEdit.recordOf(data, tx.id)?.let(com.xiguli.jinkui.data.ledger.DebtEdit::relatedCount) ?: 0
+            Text(
+                "${Money.format(tx.amount)}，删除后账户余额会随之调整。" +
+                    (if (related > 0) "这笔借出 / 借入下面的 $related 条收款 / 还款会一起删除。" else "") +
+                    "删除后几秒内可以点“撤销”恢复。",
+                style = JkType.body,
+            )
         }
     }
 }

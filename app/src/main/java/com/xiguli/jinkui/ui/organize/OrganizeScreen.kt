@@ -93,7 +93,7 @@ class OrganizeViewModel(private val container: AppContainer) : ViewModel() {
         if (!everything) selected.addAll(all)
     }
 
-    fun deleteSelected() = batch("已删除 ${selected.size} 张卡片") { targets ->
+    fun deleteSelected() = batch("已将 ${selected.size} 张卡片移到回收站，30 天内可以还原") { targets ->
         targets.forEach { repository.delete(it.id) }
     }
 
@@ -247,7 +247,7 @@ fun OrganizeScreen(onBack: () -> Unit) {
                 viewModel.deleteSelected()
             },
         ) {
-            Text("卡片、附件照片和历史密码会一起删除，无法恢复。", style = JkType.body, color = colors.textSecondary)
+            Text(com.xiguli.jinkui.ui.card.DELETE_EXPLAIN, style = JkType.body, color = colors.textSecondary)
         }
     }
 

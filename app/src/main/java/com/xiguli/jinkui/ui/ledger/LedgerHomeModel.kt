@@ -10,6 +10,8 @@ import com.xiguli.jinkui.data.ledger.LedgerData
 import com.xiguli.jinkui.data.ledger.LedgerMath
 import com.xiguli.jinkui.data.ledger.LedgerTransaction
 import com.xiguli.jinkui.data.ledger.Money
+import com.xiguli.jinkui.data.ledger.RefundMath
+import com.xiguli.jinkui.data.ledger.Reimburse
 import com.xiguli.jinkui.data.ledger.Summary
 import com.xiguli.jinkui.data.ledger.TxFilter
 import com.xiguli.jinkui.data.ledger.TxType
@@ -105,24 +107,34 @@ fun buildLedgerUi(
     val filtered = LedgerMath.filter(inMonth, filter, data.categories)
     val accountsById = data.accounts.associateBy { it.id }
     val categoriesById = data.categories.associateBy { it.id }
+    // 1.4.0-alpha04：收支汇总、每天的收 / 支与预算用统计口径（退款冲减原支出，报销的支出与报销到账不计）；
+    // 列表里每一笔仍然显示原始金额
+    val statsMonth = LedgerMath.filter(LedgerMath.inMonth(RefundMath.forStats(data.transactions), month, zone), filter, data.categories)
     // 汇总跟随筛选：筛了某个分类，就看这个分类的收支
-    val summary = LedgerMath.summary(filtered)
+    val summary = LedgerMath.summary(statsMonth)
+    val dayStats = statsMonth.groupBy { LedgerMath.dateOf(it.occurredAt, zone) }.mapValues { LedgerMath.summary(it.value) }
+    val refunds = RefundMath.refundTotals(data.transactions)
     val days = LedgerMath.groupByDay(filtered, zone).map { day ->
+        val sum = dayStats[day.date] ?: Summary.ZERO
         DayUi(
             date = day.date,
             label = shortDayLabel(day.date, today),
             weekday = weekdayLabel(day.date),
-            totals = dayTotals(day.summary),
-            rows = day.items.map { txRow(it, accountsById, categoriesById, zone) },
-            expense = day.summary.expense,
-            income = day.summary.income,
+            totals = dayTotals(sum),
+            rows = day.items.map { txRow(it, accountsById, categoriesById, zone, refunds[it.id] ?: 0L) },
+            expense = sum.expense,
+            income = sum.income,
         )
     }
     return LedgerUi(
         month = month,
         summary = summary,
         days = days,
-        totalBudget = LedgerMath.budgetProgress(data.budgets.filter { it.categoryId == null }, inMonth, data.categories).firstOrNull(),
+        totalBudget = LedgerMath.budgetProgress(
+            data.budgets.filter { it.categoryId == null },
+            LedgerMath.inMonth(RefundMath.forStats(data.transactions), month, zone),
+            data.categories,
+        ).firstOrNull(),
         accounts = data.accounts,
         accountsById = accountsById,
         categoriesById = categoriesById,
@@ -140,10 +152,10 @@ fun buildLedgerUi(
     )
 }
 
-/** 当日收支：“支 ¥12.00　收 ¥3.00”，没有的一项不写。 */
+/** 当日收支：“支出 ¥12.00　收入 ¥3.00”，没有的一项不写（1.5.0-alpha02 起写全，读屏也读得明白）。 */
 fun dayTotals(summary: Summary): String = buildList {
-    if (summary.expense > 0) add("支 ${Money.format(summary.expense)}")
-    if (summary.income > 0) add("收 ${Money.format(summary.income)}")
+    if (summary.expense > 0) add("支出 ${Money.format(summary.expense)}")
+    if (summary.income > 0) add("收入 ${Money.format(summary.income)}")
 }.joinToString("　")
 
 fun txRow(
@@ -151,12 +163,28 @@ fun txRow(
     accountsById: Map<String, LedgerAccount>,
     categoriesById: Map<String, LedgerCategory>,
     zone: ZoneId,
+    /** 1.4.0-alpha04：这笔支出已经退了多少。 */
+    refunded: Long = 0L,
 ): TxRowUi {
     val account = accountsById[tx.accountId]
     val title: String
     val where: String
     val iconKey: String?
-    if (tx.type == TxType.TRANSFER) {
+    // 1.5.0-alpha01：“修改余额”记下的差额（真实账户与内部“余额调整”之间）显示成“余额调整 ±金额”
+    val adjust = com.xiguli.jinkui.data.ledger.BalanceAdjust.adjustmentOf(tx, accountsById)
+    // 1.5.0-alpha03：借贷的流水写成“借出 · 小李”“收款 · 小李”，不再是“转账 招商银行 → 小李”
+    val loan = loanRowOf(tx, accountsById)
+    var loanSign = ""
+    if (adjust != null) {
+        title = "余额调整"
+        where = adjust.first.name
+        iconKey = null
+    } else if (loan != null) {
+        title = loan.first
+        where = loan.second
+        loanSign = loan.third
+        iconKey = null
+    } else if (tx.type == TxType.TRANSFER) {
         val to = tx.toAccountId?.let { accountsById[it] }
         title = "转账"
         where = "${account?.name ?: "未知账户"} → ${to?.name ?: "未知账户"}"
@@ -167,13 +195,51 @@ fun txRow(
         where = account?.name ?: "未知账户"
         iconKey = category?.icon ?: category?.parentId?.let { categoriesById[it]?.icon }
     }
-    val detail = listOf(tx.note, tx.tags.joinToString(" ") { "#$it" }).filter { it.isNotBlank() }.joinToString("　")
+    // 1.4.0-alpha04：退款 / 报销的标记放在备注前面
+    val mark = when {
+        tx.type == TxType.EXPENSE && refunded >= tx.amount && refunded > 0 -> "已全额退款"
+        tx.type == TxType.EXPENSE && refunded > 0 -> "已退 ${Money.format(refunded)}"
+        tx.reimburse == Reimburse.PENDING -> "待报销"
+        tx.reimburse == Reimburse.DONE -> "已报销"
+        tx.refundOf != null -> "退款"
+        tx.reimburseOf.isNotEmpty() -> "报销到账"
+        else -> ""
+    }
+    val detail = listOf(mark, tx.note.takeUnless { (adjust != null && it == com.xiguli.jinkui.data.ledger.BalanceAdjust.NOTE) || (loan != null && (it == loan.first || it == com.xiguli.jinkui.data.ledger.PersonEdit.CORRECTION_NOTE)) }.orEmpty(), tx.tags.joinToString(" ") { "#$it" }).filter { it.isNotBlank() }.joinToString("　")
     val time = Instant.ofEpochMilli(tx.occurredAt).atZone(zone).toLocalTime()
     val subtitle = "%02d:%02d　%s".format(time.hour, time.minute, where) + if (detail.isNotEmpty()) "　$detail" else ""
-    val amountText = when (tx.type) {
+    val amountText = if (adjust != null) Money.format(adjust.second, signed = true) else when (tx.type) {
         TxType.EXPENSE -> "-" + Money.format(tx.amount)
         TxType.INCOME -> "+" + Money.format(tx.amount)
-        TxType.TRANSFER -> Money.format(tx.amount)
+        TxType.TRANSFER -> loanSign + Money.format(tx.amount)
     }
     return TxRowUi(tx.id, tx.type, title, subtitle, iconKey, amountText, tx, "%02d:%02d".format(time.hour, time.minute), where, detail)
+}
+
+
+/**
+ * 借贷流水在列表里的写法：（标题, 账户一栏, 转账的正负号）。不是借贷的返回 null。
+ * 借出 / 还款是钱从资金账户出去（−），借入 / 收款是进来（+）；不经过账户时写“只记欠款”。
+ */
+internal fun loanRowOf(tx: LedgerTransaction, accountsById: Map<String, LedgerAccount>): Triple<String, String, String>? {
+    val from = accountsById[tx.accountId] ?: return null
+    val to = tx.toAccountId?.let { accountsById[it] }
+    fun person(a: LedgerAccount) = com.xiguli.jinkui.data.ledger.DebtMath.personOf(a)
+    fun fundName(a: LedgerAccount?) = if (a == null || a.kind == com.xiguli.jinkui.data.ledger.AccountKind.ADJUST) "只记欠款" else a.name
+    val correction = tx.note == com.xiguli.jinkui.data.ledger.PersonEdit.CORRECTION_NOTE
+    return when (tx.type) {
+        TxType.TRANSFER -> {
+            val fromDir = com.xiguli.jinkui.data.ledger.LoanDirection.of(from.kind)
+            val toDir = to?.let { com.xiguli.jinkui.data.ledger.LoanDirection.of(it.kind) }
+            when {
+                toDir == com.xiguli.jinkui.data.ledger.LoanDirection.LEND && fromDir == null -> Triple((if (correction) "修改欠款 · " else "借出 · ") + person(to), fundName(from), if (correction) "" else "-")
+                fromDir == com.xiguli.jinkui.data.ledger.LoanDirection.LEND && toDir == null -> Triple((if (correction) "修改欠款 · " else "收款 · ") + person(from), fundName(to), if (correction) "" else "+")
+                fromDir == com.xiguli.jinkui.data.ledger.LoanDirection.BORROW && toDir == null -> Triple((if (correction) "修改欠款 · " else "借入 · ") + person(from), fundName(to), if (correction) "" else "+")
+                toDir == com.xiguli.jinkui.data.ledger.LoanDirection.BORROW && fromDir == null -> Triple((if (correction) "修改欠款 · " else "还款 · ") + person(to), fundName(from), if (correction) "" else "-")
+                else -> null
+            }
+        }
+        TxType.EXPENSE -> if (com.xiguli.jinkui.data.ledger.LoanDirection.of(from.kind) == com.xiguli.jinkui.data.ledger.LoanDirection.LEND) Triple("坏账 · " + person(from), "收不回了", "") else null
+        TxType.INCOME -> if (com.xiguli.jinkui.data.ledger.LoanDirection.of(from.kind) == com.xiguli.jinkui.data.ledger.LoanDirection.BORROW) Triple("免还 · " + person(from), "不用还了", "") else null
+    }
 }

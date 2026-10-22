@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""把 jinkui-icon-b.svg 渲染成旧式（非自适应）图标：mipmap-*/ic_launcher.png（圆角方形）与 ic_launcher_round.png（圆形）。
+"""把 jinkui-icon-b.svg 渲染成旧式（非自适应）图标：mipmap-*/ic_launcher_b.png（圆角方形）与 ic_launcher_b_round.png（圆形）。
 
 自适应图标的 108dp 画布里只有中间 72dp 可见，所以先裁出中间 2/3，再按密度缩放。
 需要 Python 的 CairoSVG 与 Pillow。用法：python3 tools/icon/render_legacy.py
@@ -40,6 +40,6 @@ for name, px in SIZES.items():
     folder = os.path.join(RES, "mipmap-" + name)
     os.makedirs(folder, exist_ok=True)
     im = render(px)
-    masked(im, False).save(os.path.join(folder, "ic_launcher.png"), optimize=True)
-    masked(im, True).save(os.path.join(folder, "ic_launcher_round.png"), optimize=True)
+    masked(im, False).save(os.path.join(folder, "ic_launcher_b.png"), optimize=True)
+    masked(im, True).save(os.path.join(folder, "ic_launcher_b_round.png"), optimize=True)
     print(name, px)

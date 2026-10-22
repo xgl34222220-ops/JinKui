@@ -97,7 +97,7 @@ fun JinKuiRoot(container: AppContainer) {
                 when (state) {
                     VaultState.Uninitialized -> SetupScreen()
                     VaultState.Locked -> LockScreen()
-                    VaultState.Unlocked -> {
+                    VaultState.Unlocked -> UnlockEnter {
                         if (container.showQuickUnlockIntro.value) {
                             QuickUnlockIntro(onDone = { container.showQuickUnlockIntro.value = false })
                         } else {
@@ -110,6 +110,30 @@ fun JinKuiRoot(container: AppContainer) {
             }
         }
     }
+}
+
+/**
+ * 解锁后的进入动画（1.4.0-alpha03）：主界面从 96% 轻轻放大并淡入，像锁屏“打开”了一样。
+ * 只做进入：锁定时整棵界面树立即离开组合，不做任何退出动画；系统关闭了动画时直接显示。
+ */
+@Composable
+private fun UnlockEnter(content: @Composable () -> Unit) {
+    val reduceMotion = com.xiguli.jinkui.ui.components.rememberReduceMotion()
+    val progress = remember { androidx.compose.animation.core.Animatable(if (reduceMotion) 1f else 0f) }
+    LaunchedEffect(Unit) {
+        progress.animateTo(1f, androidx.compose.animation.core.spring(dampingRatio = 0.9f, stiffness = 380f))
+    }
+    Box(
+        Modifier
+            .fillMaxSize()
+            .graphicsLayer {
+                val p = progress.value.coerceIn(0f, 1f)
+                alpha = p
+                val k = 0.96f + 0.04f * p
+                scaleX = k
+                scaleY = k
+            },
+    ) { content() }
 }
 
 @Composable
@@ -155,6 +179,9 @@ private fun MainNavigation() {
                             onAssets = { navigator.push(Screen.LedgerAssets) },
                             onImport = { navigator.push(Screen.BillImport) },
                             onPending = { navigator.push(Screen.PendingInbox) },
+                            onDebts = { navigator.push(Screen.Debts) },
+                            onReimburse = { navigator.push(Screen.Reimburse) },
+                            onRules = { navigator.push(Screen.LedgerRules) },
                         )
                         HomeTab.CALENDAR -> CalendarScreen()
                         HomeTab.CARDS -> HomeScreen(
@@ -163,6 +190,7 @@ private fun MainNavigation() {
                             onSettings = { navigator.push(Screen.Settings) },
                             onHealth = { navigator.push(Screen.Health) },
                             onOrganize = { navigator.push(Screen.Organize) },
+                            onTrash = { navigator.push(Screen.CardTrash) },
                         )
                         HomeTab.STATS -> LedgerStatsScreen()
                         HomeTab.ME -> MeScreen(
@@ -179,6 +207,10 @@ private fun MainNavigation() {
                                 onImport = { navigator.push(Screen.BillImport) },
                                 onImportHistory = { navigator.push(Screen.ImportHistory) },
                                 onAuto = { navigator.push(Screen.AutoBookkeeping) },
+                                onDebts = { navigator.push(Screen.Debts) },
+                                onReimburse = { navigator.push(Screen.Reimburse) },
+                                onRules = { navigator.push(Screen.LedgerRules) },
+                                onTrash = { navigator.push(Screen.CardTrash) },
                             ),
                         )
                     }
@@ -192,6 +224,10 @@ private fun MainNavigation() {
                     cardId = screen.cardId,
                     newType = screen.type,
                     onClose = { navigator.pop() },
+                    onRetype = { type ->
+                        navigator.pop()
+                        navigator.push(Screen.Edit(null, type))
+                    },
                 )
                 Screen.Settings -> SettingsScreen(
                     onBack = { navigator.pop() },
@@ -220,12 +256,65 @@ private fun MainNavigation() {
                     onSettings = { navigator.push(Screen.Settings) },
                 )
                 Screen.Organize -> OrganizeScreen(onBack = { navigator.pop() })
-                Screen.LedgerAccounts -> LedgerAccountsScreen(onBack = { navigator.pop() })
+                Screen.LedgerAccounts -> LedgerAccountsScreen(
+                    onBack = { navigator.pop() },
+                    onDebt = { account ->
+                        navigator.push(if (account.kind == com.xiguli.jinkui.data.ledger.AccountKind.CREDIT) Screen.CreditStatement(account.id) else Screen.LoanPerson(account.id))
+                    },
+                    onOpen = { account -> navigator.push(Screen.AccountDetail(account.id)) },
+                )
+                is Screen.AccountDetail -> com.xiguli.jinkui.ui.ledger.AccountDetailScreen(
+                    screen.accountId,
+                    onBack = { navigator.pop() },
+                    onStatements = { navigator.push(Screen.CreditStatement(it)) },
+                )
                 Screen.LedgerAssets -> LedgerAssetsScreen(
                     onBack = { navigator.pop() },
                     onAccounts = { navigator.push(Screen.LedgerAccounts) },
+                    onDebts = { navigator.push(Screen.Debts) },
+                    onCredit = { navigator.push(Screen.CreditStatement(it)) },
+                    onLoans = { navigator.push(Screen.Debts) },
+                    onNewLoan = { navigator.push(Screen.LoansNew(it)) },
+                    onPerson = { navigator.push(Screen.LoanPerson(it)) },
+                    onAccount = { navigator.push(Screen.AccountDetail(it)) },
+                )
+                Screen.Debts -> com.xiguli.jinkui.ui.ledger.DebtOverviewScreen(
+                    onBack = { navigator.pop() },
+                    onCredit = { navigator.push(Screen.CreditStatement(it)) },
+                    onLoans = {},
+                    onAccounts = { navigator.push(Screen.LedgerAccounts) },
+                    onAddCredit = { navigator.push(Screen.LedgerAddCredit) },
+                    onPerson = { navigator.push(Screen.LoanPerson(it)) },
+                )
+                is Screen.LoanPerson -> com.xiguli.jinkui.ui.ledger.LoanPersonScreen(screen.accountId, onBack = { navigator.pop() })
+                // 1.5.0-alpha03：旧的“借给别人 / 欠别人”列表并进“欠款 / 借贷”（全 App 只剩一种借贷列表）
+                is Screen.LoansNew -> com.xiguli.jinkui.ui.ledger.DebtOverviewScreen(
+                    onBack = { navigator.pop() },
+                    onCredit = { navigator.push(Screen.CreditStatement(it)) },
+                    onLoans = {},
+                    onAccounts = { navigator.push(Screen.LedgerAccounts) },
+                    onAddCredit = { navigator.push(Screen.LedgerAddCredit) },
+                    onPerson = { navigator.push(Screen.LoanPerson(it)) },
+                    startNew = screen.direction,
+                )
+                Screen.LedgerAddCredit -> LedgerAccountsScreen(
+                    onBack = { navigator.pop() },
+                    onDebt = { account -> navigator.push(Screen.CreditStatement(account.id)) },
+                    startNew = com.xiguli.jinkui.data.ledger.AccountKind.CREDIT,
+                )
+                is Screen.CreditStatement -> com.xiguli.jinkui.ui.ledger.CreditStatementScreen(screen.accountId, onBack = { navigator.pop() })
+                Screen.Loans -> com.xiguli.jinkui.ui.ledger.DebtOverviewScreen(
+                    onBack = { navigator.pop() },
+                    onCredit = { navigator.push(Screen.CreditStatement(it)) },
+                    onLoans = {},
+                    onAccounts = { navigator.push(Screen.LedgerAccounts) },
+                    onAddCredit = { navigator.push(Screen.LedgerAddCredit) },
+                    onPerson = { navigator.push(Screen.LoanPerson(it)) },
                 )
                 Screen.LedgerBudget -> LedgerBudgetScreen(onBack = { navigator.pop() })
+                Screen.Reimburse -> com.xiguli.jinkui.ui.ledger.ReimburseScreen(onBack = { navigator.pop() })
+                Screen.LedgerRules -> com.xiguli.jinkui.ui.ledger.LedgerRulesScreen(onBack = { navigator.pop() })
+                Screen.CardTrash -> com.xiguli.jinkui.ui.card.CardTrashScreen(onBack = { navigator.pop() })
                 Screen.LedgerCategories -> LedgerCategoriesScreen(onBack = { navigator.pop() })
                 Screen.LedgerRecurring -> LedgerRecurringScreen(onBack = { navigator.pop() })
             }

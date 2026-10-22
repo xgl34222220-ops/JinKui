@@ -77,6 +77,15 @@ object LedgerMath {
     /** 净资产：所有账户余额之和（信用卡欠款为负）。 */
     fun netWorth(balances: Map<String, Long>): Long = balances.values.sum()
 
+    /**
+     * 1.5.0-alpha03：全 App 唯一的“净资产”口径（资产页、账户与余额都用它）：
+     * 全部计入资产的账户余额之和 = 资金 + 别人欠我 − 信用卡 / 花呗欠款 − 我欠别人；内部“余额调整”不算。
+     */
+    fun netWorth(data: LedgerData): Long {
+        val balances = balances(data.accounts, data.transactions)
+        return data.accounts.filter { it.kind.countsInAssets }.sumOf { balances[it.id] ?: it.openingBalance }
+    }
+
     /** [month] 在 [zone] 时区里的起止时间：[start, end)。 */
     fun monthRange(month: YearMonth, zone: ZoneId): LongRange {
         val start = month.atDay(1).atStartOfDay(zone).toInstant().toEpochMilli()
@@ -121,19 +130,32 @@ object LedgerMath {
         transactions: List<LedgerTransaction>,
         filter: TxFilter,
         categories: List<LedgerCategory>,
+        accounts: List<LedgerAccount> = emptyList(),
     ): List<LedgerTransaction> {
         if (!filter.isActive) return transactions
         val categoryIds = filter.categoryId?.let { withChildren(it, categories) }
         val tokens = filter.query.trim().lowercase().split(Regex("\\s+")).filter { it.isNotEmpty() }
+        val categoryNames = categories.associateBy { it.id }
+        val accountNames = accounts.associateBy { it.id }
         return transactions.filter { tx ->
             (filter.accountId == null || tx.accountId == filter.accountId || tx.toAccountId == filter.accountId) &&
                 (categoryIds == null || tx.categoryId in categoryIds) &&
-                (tokens.isEmpty() || matches(tx, tokens))
+                (tokens.isEmpty() || matches(tx, tokens, categoryNames, accountNames))
         }
     }
 
-    private fun matches(tx: LedgerTransaction, tokens: List<String>): Boolean {
+    private fun matches(
+        tx: LedgerTransaction, tokens: List<String>,
+        categories: Map<String, LedgerCategory>, accounts: Map<String, LedgerAccount>,
+    ): Boolean {
         val haystack = buildString {
+            append(Money.format(tx.amount, symbol = false)).append('\n')
+            append(Money.format(tx.amount, symbol = false).replace(",", "")).append('\n')
+            append(accounts[tx.accountId]?.name.orEmpty()).append('\n')
+            append(accounts[tx.toAccountId]?.name.orEmpty()).append('\n')
+            val category = categories[tx.categoryId]
+            append(category?.name.orEmpty()).append('\n')
+            append(categories[category?.parentId]?.name.orEmpty()).append('\n')
             append(tx.note).append('\n')
             tx.tags.forEach { append(it).append('\n') }
         }.lowercase()
@@ -287,7 +309,7 @@ class LedgerMergePlan(
  * 账本合并规则，与卡片一致：本机没有的记录直接加入；两边都有时保留更新时间较新的一份；
  * 不会删除本机已有的任何记录。同一份备份里重复的 ID 以更新时间最新的为准。
  *
- * 删除标记（0.9.0 起）：本机或备份任一边标记为已删除的周期生成流水 / 周期规则不会被加回来；
+ * 删除标记（0.9.0 起）：本机或备份任一边标记为已删除的周期生成流水 / 周期规则（1.4 起还有分期与借贷）不会被加回来；
  * 备份里的删除标记一并记到本机，但本机仍然存在的记录不受影响（导入从不删除本机记录），
  * 也不为它记标记。写入的标记在 [LedgerMergePlan.toWrite] 的 tombstones 里。
  */
@@ -316,6 +338,10 @@ object LedgerMerge {
         val localIds = HashSet<String>().apply {
             local.transactions.forEach { add(it.id) }
             local.recurring.forEach { add(it.id) }
+            local.installments.forEach { add(it.id) }
+            local.loans.forEach { add(it.id) }
+            local.rules.forEach { add(it.id) }
+            local.templates.forEach { add(it.id) }
         }
         val known = local.tombstones.mapTo(HashSet()) { it.id }
         val newTombstones = incoming.tombstones
@@ -328,6 +354,10 @@ object LedgerMerge {
             budgets = pick(local.budgets, incoming.budgets, { it.id }, { it.updatedAt }),
             recurring = pick(local.recurring, incoming.recurring, { it.id }, { it.updatedAt }, honorTombstones = true),
             tombstones = newTombstones,
+            installments = pick(local.installments, incoming.installments, { it.id }, { it.updatedAt }, honorTombstones = true),
+            loans = pick(local.loans, incoming.loans, { it.id }, { it.updatedAt }, honorTombstones = true),
+            rules = pick(local.rules, incoming.rules, { it.id }, { it.updatedAt }, honorTombstones = true),
+            templates = pick(local.templates, incoming.templates, { it.id }, { it.updatedAt }, honorTombstones = true),
         )
         return LedgerMergePlan(write, added, updated, skipped, suppressed)
     }

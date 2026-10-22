@@ -21,9 +21,10 @@ object LedgerJson {
         .put("kind", account.kind.key)
         .put("opening", account.openingBalance)
         .put("cardId", account.cardId ?: JSONObject.NULL)
+        .also { json -> account.credit?.let { json.put("credit", creditJson(it)) } }
         .toString()
 
-    class AccountPayload(val name: String, val kind: AccountKind, val opening: Long, val cardId: String?)
+    class AccountPayload(val name: String, val kind: AccountKind, val opening: Long, val cardId: String?, val credit: CreditSettings? = null)
 
     fun readAccountPayload(text: String): AccountPayload {
         val json = JSONObject(text)
@@ -32,8 +33,107 @@ object LedgerJson {
             kind = AccountKind.of(json.optString("kind")),
             opening = json.optLong("opening", 0L),
             cardId = json.optNullableString("cardId"),
+            // 设置损坏时当作没有设置，不让整个账户读不出来
+            credit = json.optJSONObject("credit")?.let { runCatching { readCredit(it) }.getOrNull() },
         )
     }
+
+    /** 信用账户的账单设置（1.4 起）：数据库载荷与备份共用。 */
+    fun creditJson(credit: CreditSettings): JSONObject = JSONObject()
+        .put("statementDay", credit.statementDay)
+        .put("dueDay", credit.dueDay)
+        .put("dueMode", credit.dueMode.key)
+        .put("limit", credit.limit)
+
+    fun readCredit(json: JSONObject): CreditSettings {
+        val settings = CreditSettings(
+            statementDay = json.getInt("statementDay"),
+            dueDay = json.getInt("dueDay"),
+            dueMode = DueMode.of(json.optString("dueMode")),
+            limit = json.optLong("limit", 0L),
+        )
+        require(settings.problem() == null) { "账单设置无效" }
+        return settings
+    }
+
+    /**
+     * 分期与借贷（1.4 起）：除 ID 与更新时间外的一切都在这里，数据库载荷与备份共用同一形态。
+     * 日期写成 ISO 字符串。
+     */
+    fun installmentJson(plan: LedgerInstallment): JSONObject = JSONObject()
+        .put("accountId", plan.accountId)
+        .put("title", plan.title)
+        .put("total", plan.total)
+        .put("periods", plan.periods)
+        .put("fee", plan.feePerPeriod)
+        .put("rateBp", plan.feeRateBp ?: JSONObject.NULL)
+        .put("first", plan.firstDate.toString())
+        .put("start", plan.startDate.toString())
+        .put("payoff", plan.payoffDate?.toString() ?: JSONObject.NULL)
+        .put("note", plan.note)
+        .put("createdAt", plan.createdAt)
+
+    fun readInstallment(id: String, updatedAt: Long, json: JSONObject): LedgerInstallment = parsingDates {
+        val first = java.time.LocalDate.parse(json.getString("first"))
+        val plan = LedgerInstallment(
+            id = id,
+            accountId = json.getString("accountId").also(::requireId),
+            title = json.optString("title", "分期"),
+            total = json.getLong("total"),
+            periods = json.getInt("periods"),
+            feePerPeriod = json.optLong("fee", 0L),
+            feeRateBp = if (json.has("rateBp") && !json.isNull("rateBp")) json.getInt("rateBp") else null,
+            firstDate = first,
+            startDate = json.optNullableString("start")?.let(java.time.LocalDate::parse) ?: first,
+            payoffDate = json.optNullableString("payoff")?.let(java.time.LocalDate::parse),
+            note = json.optString("note", ""),
+            createdAt = json.optLong("createdAt", 0L),
+            updatedAt = updatedAt,
+        )
+        require(plan.problem() == null) { "分期无效" }
+        plan
+    }
+
+    fun loanJson(loan: LedgerLoan): JSONObject = JSONObject()
+        .put("accountId", loan.accountId)
+        .put("direction", loan.direction.key)
+        .put("date", loan.date.toString())
+        .put("due", loan.dueDate?.toString() ?: JSONObject.NULL)
+        .put("interest", loan.interest)
+        .put("note", loan.note)
+        .put("legacy", loan.legacy)
+        .put("createdAt", loan.createdAt)
+
+    fun readLoan(id: String, updatedAt: Long, json: JSONObject): LedgerLoan = parsingDates {
+        val interest = json.optLong("interest", 0L)
+        require(interest in 0..Money.MAX_CENTS) { "金额越界" }
+        LedgerLoan(
+            id = id,
+            accountId = json.getString("accountId").also(::requireId),
+            direction = LoanDirection.of(json.optString("direction")),
+            date = java.time.LocalDate.parse(json.getString("date")),
+            dueDate = json.optNullableString("due")?.let(java.time.LocalDate::parse),
+            interest = interest,
+            note = json.optString("note", ""),
+            legacy = json.optBoolean("legacy", false),
+            createdAt = json.optLong("createdAt", 0L),
+            updatedAt = updatedAt,
+        )
+    }
+
+    const val DEBT_INSTALLMENT = "installment"
+    const val DEBT_LOAN = "loan"
+
+    /** 数据库 ledger_debts 一行的载荷（kind 在明文列）。 */
+    fun debtPayload(plan: LedgerInstallment): String = installmentJson(plan).toString()
+    fun debtPayload(loan: LedgerLoan): String = loanJson(loan).toString()
+
+    private inline fun <T> parsingDates(block: () -> T): T =
+        try {
+            block()
+        } catch (e: java.time.format.DateTimeParseException) {
+            throw IllegalArgumentException("日期无效", e)
+        }
 
     fun categoryPayload(category: LedgerCategory): String = JSONObject()
         .put("name", category.name)
@@ -51,13 +151,36 @@ object LedgerJson {
         .put("amount", tx.amount)
         .put("note", tx.note)
         .put("tags", JSONArray(tx.tags))
+        .also { json -> tx.debtId?.let { json.put("debt", it) } }
+        .also { json -> putRefund(json, tx) }
         .toString()
 
-    class TransactionPayload(val amount: Long, val note: String, val tags: List<String>)
+    /** 退款 / 报销（1.4.0-alpha04 起）：没有时不写，旧载荷读出来就是“没有”。 */
+    private fun putRefund(json: JSONObject, tx: LedgerTransaction) {
+        tx.refundOf?.let { json.put("refundOf", it) }
+        if (tx.reimburse != Reimburse.NONE) json.put("reimburse", tx.reimburse.key)
+        if (tx.reimburseOf.isNotEmpty()) json.put("reimburseOf", JSONArray(tx.reimburseOf))
+    }
+
+    class TransactionPayload(
+        val amount: Long,
+        val note: String,
+        val tags: List<String>,
+        val debtId: String? = null,
+        val refundOf: String? = null,
+        val reimburse: Reimburse = Reimburse.NONE,
+        val reimburseOf: List<String> = emptyList(),
+    )
 
     fun readTransactionPayload(text: String): TransactionPayload {
         val json = JSONObject(text)
-        return TransactionPayload(json.getLong("amount"), json.optString("note", ""), json.optStringList("tags"))
+        return TransactionPayload(
+            json.getLong("amount"), json.optString("note", ""), json.optStringList("tags"),
+            json.optNullableString("debt")?.takeIf { ID_PATTERN.matches(it) },
+            json.optNullableString("refundOf")?.takeIf { ID_PATTERN.matches(it) },
+            Reimburse.of(json.optString("reimburse")),
+            json.optStringList("reimburseOf").filter { ID_PATTERN.matches(it) },
+        )
     }
 
     /** 导入批次（1.3 起）：来源、文件名、笔数、自动新建的账户。 */
@@ -156,6 +279,7 @@ object LedgerJson {
                     .put("kind", a.kind.key)
                     .put("opening", a.openingBalance)
                     .put("cardId", a.cardId ?: JSONObject.NULL)
+                    .put("credit", a.credit?.let(::creditJson) ?: JSONObject.NULL)
                     .put("archived", a.archived)
                     .put("position", a.position)
                     .put("createdAt", a.createdAt)
@@ -189,8 +313,10 @@ object LedgerJson {
                     .put("categoryId", t.categoryId ?: JSONObject.NULL)
                     .put("note", t.note)
                     .put("tags", JSONArray(t.tags))
+                    .put("debtId", t.debtId ?: JSONObject.NULL)
                     .put("createdAt", t.createdAt)
-                    .put("updatedAt", t.updatedAt),
+                    .put("updatedAt", t.updatedAt)
+                    .also { putRefund(it, t) },
             )
         }
         val budgets = JSONArray()
@@ -211,7 +337,21 @@ object LedgerJson {
         for (t in data.tombstones) {
             tombstones.put(JSONObject().put("id", t.id).put("kind", t.kind).put("deletedAt", t.deletedAt))
         }
+        // 1.4 起（备份 schema 5）：分期与借贷
+        val installments = JSONArray()
+        for (p in data.installments) installments.put(installmentJson(p).put("id", p.id).put("updatedAt", p.updatedAt))
+        val loans = JSONArray()
+        for (l in data.loans) loans.put(loanJson(l).put("id", l.id).put("updatedAt", l.updatedAt))
+        // 1.4.0-alpha04 起（备份 schema 6）：自动分类规则与记账模板
+        val rules = JSONArray()
+        for (r in data.rules) rules.put(RuleMath.ruleJson(r).put("id", r.id).put("updatedAt", r.updatedAt))
+        val templates = JSONArray()
+        for (t in data.templates) templates.put(RuleMath.templateJson(t).put("id", t.id).put("updatedAt", t.updatedAt))
         return JSONObject()
+            .put("rules", rules)
+            .put("templates", templates)
+            .put("installments", installments)
+            .put("loans", loans)
             .put("tombstones", tombstones)
             .put("accounts", accounts)
             .put("categories", categories)
@@ -229,6 +369,7 @@ object LedgerJson {
                 kind = AccountKind.of(a.optString("kind")),
                 openingBalance = a.optLong("opening", 0L).also { require(kotlin.math.abs(it) <= Money.MAX_CENTS) { "金额越界" } },
                 cardId = a.optNullableString("cardId")?.also(::requireId),
+                credit = a.optJSONObject("credit")?.let(::readCredit),
                 archived = a.optBoolean("archived", false),
                 position = a.optInt("position", 0),
                 createdAt = a.optLong("createdAt", 0L),
@@ -262,6 +403,10 @@ object LedgerJson {
                 tags = t.optStringList("tags"),
                 createdAt = t.optLong("createdAt", 0L),
                 updatedAt = t.optLong("updatedAt", 0L),
+                debtId = t.optNullableString("debtId")?.also(::requireId),
+                refundOf = t.optNullableString("refundOf")?.also(::requireId),
+                reimburse = Reimburse.of(t.optString("reimburse")),
+                reimburseOf = t.optStringList("reimburseOf").onEach(::requireId),
             )
         }
         val budgets = json.optJSONArray("budgets").objects().map { b ->
@@ -286,8 +431,26 @@ object LedgerJson {
             if (kind !in LedgerTombstone.KINDS) return@mapNotNull null
             LedgerTombstone(t.getString("id").also(::requireId), kind, t.optLong("deletedAt", 0L))
         }
-        require(accounts.size + categories.size + transactions.size + budgets.size + recurring.size + tombstones.size <= MAX_RECORDS) { "账本记录数量异常" }
-        return LedgerData(accounts, categories, transactions, budgets, recurring, tombstones = tombstones)
+        // schema 5 之前的备份没有分期与借贷，按空处理
+        val installments = json.optJSONArray("installments").objects().map { p ->
+            readInstallment(p.getString("id").also(::requireId), p.optLong("updatedAt", 0L), p)
+        }
+        val loans = json.optJSONArray("loans").objects().map { l ->
+            readLoan(l.getString("id").also(::requireId), l.optLong("updatedAt", 0L), l)
+        }
+        // schema 6 之前的备份没有规则与模板，按空处理
+        val rules = json.optJSONArray("rules").objects().map { r ->
+            RuleMath.readRule(r.getString("id").also(::requireId), r.optLong("updatedAt", 0L), r)
+        }
+        val templates = json.optJSONArray("templates").objects().map { t ->
+            RuleMath.readTemplate(t.getString("id").also(::requireId), t.optLong("updatedAt", 0L), t)
+        }
+        require(rules.size <= RuleMath.MAX_RULES && templates.size <= RuleMath.MAX_TEMPLATES * 5) { "规则数量异常" }
+        require(accounts.size + categories.size + transactions.size + budgets.size + recurring.size + tombstones.size + installments.size + loans.size <= MAX_RECORDS) { "账本记录数量异常" }
+        return LedgerData(
+            accounts, categories, transactions, budgets, recurring, tombstones = tombstones, installments = installments, loans = loans,
+            rules = rules, templates = templates,
+        )
     }
 
     private fun requireId(id: String) {

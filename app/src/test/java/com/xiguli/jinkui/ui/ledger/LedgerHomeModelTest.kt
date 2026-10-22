@@ -21,9 +21,9 @@ class LedgerHomeModelTest {
         assertFalse(ui.loading)
         assertEquals(listOf("今天", "昨天", "10月8日", "10月6日", "10月3日"), ui.days.map { it.label })
         assertEquals("周六", ui.days.first().weekday)
-        assertEquals("支 ¥50.50", ui.days.first().totals)
+        assertEquals("支出 ¥50.50", ui.days.first().totals)
         // 转账不计入当日收支
-        assertEquals("收 ¥18,500.00", ui.days[1].totals)
+        assertEquals("收入 ¥18,500.00", ui.days[1].totals)
     }
 
     @Test

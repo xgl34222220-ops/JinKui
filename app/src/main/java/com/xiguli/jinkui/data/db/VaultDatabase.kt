@@ -18,6 +18,8 @@ class CardRow(
     val createdAt: Long,
     val updatedAt: Long,
     val lastUsedAt: Long,
+    /** 版本 8 起：放进回收站的时间；null 表示不在回收站。 */
+    val deletedAt: Long? = null,
 )
 
 class FieldRow(
@@ -96,6 +98,12 @@ class LedgerRecurringRow(
     val dataEnc: String,
 )
 
+/** 一笔分期或借贷（版本 7 起）。[kind] 是 installment / loan，其余都在 data_enc 里。 */
+class LedgerDebtRow(val id: String, val kind: String, val updatedAt: Long, val dataEnc: String)
+
+/** 自动分类规则 / 记账模板（版本 8 起）。[kind] 是 rule / template，其余都在 data_enc 里。 */
+class LedgerRuleRow(val id: String, val kind: String, val updatedAt: Long, val dataEnc: String)
+
 /** 自动记账的一笔待确认（data_enc 是字段级密文）。 */
 class LedgerPendingRow(val id: String, val createdAt: Long, val dataEnc: String)
 
@@ -109,6 +117,8 @@ class LedgerBatch(
     val budgets: List<LedgerBudgetRow> = emptyList(),
     val recurring: List<LedgerRecurringRow> = emptyList(),
     val tombstones: List<LedgerTombstoneRow> = emptyList(),
+    val debts: List<LedgerDebtRow> = emptyList(),
+    val rules: List<LedgerRuleRow> = emptyList(),
 )
 
 /**
@@ -155,7 +165,7 @@ class VaultDatabase(private val context: Context) {
         }
     }
 
-    fun cards(): List<CardRow> = read("SELECT id,type,title,tags,color,note_enc,pinned,created_at,updated_at,last_used_at FROM cards") {
+    fun cards(): List<CardRow> = read("SELECT id,type,title,tags,color,note_enc,pinned,created_at,updated_at,last_used_at,deleted_at FROM cards") {
         CardRow(
             id = it.getString(0),
             type = it.getString(1),
@@ -167,6 +177,7 @@ class VaultDatabase(private val context: Context) {
             createdAt = it.getLong(7),
             updatedAt = it.getLong(8),
             lastUsedAt = it.getLong(9),
+            deletedAt = if (it.isNull(10)) null else it.getLong(10),
         )
     }
 
@@ -240,10 +251,10 @@ class VaultDatabase(private val context: Context) {
         newHistory: List<HistoryRow>,
     ) {
         db.execSQL(
-            "INSERT OR REPLACE INTO cards(id,type,title,tags,color,note_enc,pinned,created_at,updated_at,last_used_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+            "INSERT OR REPLACE INTO cards(id,type,title,tags,color,note_enc,pinned,created_at,updated_at,last_used_at,deleted_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
             arrayOf<Any?>(
                 card.id, card.type, card.title, card.tags, card.color, card.noteEnc,
-                if (card.pinned) 1 else 0, card.createdAt, card.updatedAt, card.lastUsedAt,
+                if (card.pinned) 1 else 0, card.createdAt, card.updatedAt, card.lastUsedAt, card.deletedAt,
             ),
         )
         db.execSQL("DELETE FROM fields WHERE card_id = ?", arrayOf<Any?>(card.id))
@@ -276,7 +287,15 @@ class VaultDatabase(private val context: Context) {
         }
     }
 
+    /** 彻底删除（回收站里“彻底删除”、清空回收站、30 天自动清理）。 */
     fun deleteCard(id: String) = transaction { db -> deleteCardRows(db, id) }
+
+    fun deleteCards(ids: Collection<String>) = transaction { db -> ids.forEach { deleteCardRows(db, it) } }
+
+    /** 放进回收站（[time] 为删除时间）或从回收站还原（[time] 为 null）。字段、附件与历史都不动。 */
+    fun setCardDeleted(id: String, time: Long?) = transaction { db ->
+        db.execSQL("UPDATE cards SET deleted_at = ? WHERE id = ?", arrayOf<Any?>(time, id))
+    }
 
     private fun deleteCardRows(db: SupportSQLiteDatabase, id: String) {
         db.execSQL("DELETE FROM fields WHERE card_id = ?", arrayOf<Any?>(id))
@@ -403,6 +422,79 @@ class VaultDatabase(private val context: Context) {
         batch.budgets.forEach { writeBudget(db, it) }
         batch.recurring.forEach { writeRecurring(db, it) }
         batch.tombstones.forEach { writeTombstone(db, it) }
+        batch.debts.forEach { writeDebt(db, it) }
+        batch.rules.forEach { writeRule(db, it) }
+    }
+
+    // ── 自动分类规则与记账模板（版本 8 起）──────────────────────────
+
+    fun ledgerRules(): List<LedgerRuleRow> =
+        read("SELECT id,kind,updated_at,data_enc FROM ledger_rules") {
+            LedgerRuleRow(it.getString(0), it.getString(1), it.getLong(2), it.getString(3))
+        }
+
+    fun saveLedgerRules(rows: List<LedgerRuleRow>) = transaction { db -> rows.forEach { writeRule(db, it) } }
+
+    /** 删除一条规则 / 模板并记下删除标记（导入旧备份不会加回来）。 */
+    fun deleteLedgerRule(id: String, tombstone: LedgerTombstoneRow) = transaction { db ->
+        db.execSQL("DELETE FROM ledger_rules WHERE id = ?", arrayOf<Any?>(id))
+        writeTombstone(db, tombstone)
+    }
+
+    private fun writeRule(db: SupportSQLiteDatabase, row: LedgerRuleRow) {
+        db.execSQL(
+            "INSERT OR REPLACE INTO ledger_rules(id,kind,updated_at,data_enc) VALUES(?,?,?,?)",
+            arrayOf<Any?>(row.id, row.kind, row.updatedAt, row.dataEnc),
+        )
+    }
+
+    /**
+     * 退款 / 报销的一次改动，一个事务：写入（新的或改过的）流水，删除流水并记删除标记。
+     */
+    fun writeTransactions(rows: List<LedgerTxRow>, delete: Collection<String> = emptyList(), tombstones: List<LedgerTombstoneRow> = emptyList()) = transaction { db ->
+        delete.forEach { db.execSQL("DELETE FROM ledger_transactions WHERE id = ?", arrayOf<Any?>(it)) }
+        rows.forEach { writeTransaction(db, it) }
+        tombstones.forEach { writeTombstone(db, it) }
+    }
+
+    // ── 欠款：分期与借贷（版本 7 起）────────────────────────────────
+
+    fun ledgerDebts(): List<LedgerDebtRow> =
+        read("SELECT id,kind,updated_at,data_enc FROM ledger_debts") {
+            LedgerDebtRow(it.getString(0), it.getString(1), it.getLong(2), it.getString(3))
+        }
+
+    /**
+     * 欠款的一次改动，一个事务：新建 / 更新账户（借贷的对方）、写入欠款记录与流水（还款、利息、手续费等）、
+     * 删除欠款记录与流水并记下删除标记。任何一步失败整体回滚。
+     */
+    fun writeDebtChange(
+        accounts: List<LedgerAccountRow> = emptyList(),
+        debts: List<LedgerDebtRow> = emptyList(),
+        transactions: List<LedgerTxRow> = emptyList(),
+        deleteDebts: Collection<String> = emptyList(),
+        deleteTransactions: Collection<String> = emptyList(),
+        tombstones: List<LedgerTombstoneRow> = emptyList(),
+        /** 1.5.0-alpha03：写回的记录（撤销、改动）去掉删除标记。 */
+        clearTombstones: Collection<String> = emptyList(),
+        /** 1.5.0-alpha03：合并对方后删掉的账户（调用方保证它已经没有流水）。 */
+        deleteAccounts: Collection<String> = emptyList(),
+    ) = transaction { db ->
+        accounts.forEach { writeAccount(db, it) }
+        deleteTransactions.forEach { db.execSQL("DELETE FROM ledger_transactions WHERE id = ?", arrayOf<Any?>(it)) }
+        deleteDebts.forEach { db.execSQL("DELETE FROM ledger_debts WHERE id = ?", arrayOf<Any?>(it)) }
+        debts.forEach { writeDebt(db, it) }
+        transactions.forEach { writeTransaction(db, it) }
+        clearTombstones.forEach { db.execSQL("DELETE FROM ledger_tombstones WHERE id = ?", arrayOf<Any?>(it)) }
+        tombstones.forEach { writeTombstone(db, it) }
+        deleteAccounts.forEach { db.execSQL("DELETE FROM ledger_accounts WHERE id = ?", arrayOf<Any?>(it)) }
+    }
+
+    private fun writeDebt(db: SupportSQLiteDatabase, row: LedgerDebtRow) {
+        db.execSQL(
+            "INSERT OR REPLACE INTO ledger_debts(id,kind,updated_at,data_enc) VALUES(?,?,?,?)",
+            arrayOf<Any?>(row.id, row.kind, row.updatedAt, row.dataEnc),
+        )
     }
 
     fun saveLedgerTransaction(row: LedgerTxRow) = transaction { db -> writeTransaction(db, row) }

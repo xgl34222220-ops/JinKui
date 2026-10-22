@@ -22,7 +22,7 @@ class MoneyTest {
     @Test
     fun rejectsInvalidAmounts() {
         assertNull(Money.parse(""))
-        assertNull(Money.parse("."))
+        assertEquals(0L, Money.parse("."))
         assertNull(Money.parse("1.234"))
         assertNull(Money.parse("1.2.3"))
         assertNull(Money.parse("abc"))

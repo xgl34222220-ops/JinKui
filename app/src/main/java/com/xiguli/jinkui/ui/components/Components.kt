@@ -12,6 +12,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.ui.text.font.FontWeight
@@ -21,6 +24,7 @@ import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -380,7 +384,8 @@ fun JkTextField(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     if (leading != null) {
-                        Icon(leading, contentDescription = null, tint = colors.textTertiary, modifier = Modifier.size(18.dp))
+                        // 聚焦时前置图标跟着描边一起变成品牌色
+                        Icon(leading, contentDescription = null, tint = if (focused) colors.accent else colors.textTertiary, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(Space.x1_5))
                     }
                     Box(
@@ -466,12 +471,21 @@ fun JkRow(
     danger: Boolean = false,
     onClick: (() -> Unit)? = null,
     trailing: (@Composable () -> Unit)? = null,
+    /** 1.5.0-alpha01：长按（例如账户行长按“修改余额”）。 */
+    onLongClick: (() -> Unit)? = null,
+    onLongClickLabel: String? = null,
 ) {
     val colors = Jk.colors
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .then(
+                when {
+                    onLongClick != null -> Modifier.combinedClickable(onClick = onClick ?: {}, onLongClick = onLongClick, onLongClickLabel = onLongClickLabel)
+                    onClick != null -> Modifier.clickable(onClick = onClick)
+                    else -> Modifier
+                },
+            )
             .heightIn(min = 56.dp)
             .padding(horizontal = Space.x2, vertical = Space.x1_5),
         verticalAlignment = Alignment.CenterVertically,
@@ -797,11 +811,28 @@ fun JkEmpty(
             .padding(horizontal = Space.x4, vertical = Space.x6),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        illustration()
+        // 1.4.0-alpha03：插画后面垫一圈很淡的薄荷光晕（与锁屏品牌徽记同一种），标题读作小节标题
+        val glow = Jk.colors.primary.copy(alpha = if (Jk.colors.isDark) 0.16f else 0.12f)
+        Box(
+            Modifier.drawBehind {
+                val r = size.maxDimension * 0.62f
+                drawCircle(
+                    brush = androidx.compose.ui.graphics.Brush.radialGradient(
+                        0f to glow,
+                        1f to glow.copy(alpha = 0f),
+                        center = center,
+                        radius = r,
+                    ),
+                    radius = r,
+                    center = center,
+                )
+            },
+            contentAlignment = Alignment.Center,
+        ) { illustration() }
         Spacer(Modifier.height(Space.x2_5))
-        Text(title, style = JkType.heading, color = Jk.colors.textPrimary)
+        Text(title, style = JkType.heading, color = Jk.colors.textPrimary, textAlign = TextAlign.Center, modifier = Modifier.semantics { heading() })
         Spacer(Modifier.height(Space.x1))
-        Text(message, style = JkType.small, color = Jk.colors.textTertiary, textAlign = TextAlign.Center)
+        Text(message, style = JkType.small, color = Jk.colors.textTertiary, textAlign = TextAlign.Center, modifier = Modifier.widthIn(max = 320.dp))
         if (action != null) {
             Spacer(Modifier.height(Space.x2_5))
             action()
@@ -818,6 +849,46 @@ fun BoxScope.JkLoading() {
         color = Jk.colors.textSecondary,
         strokeWidth = 2.dp,
     )
+}
+
+/** [JkNotice] 的语气：普通提示（薄荷）或警示（危险色）。 */
+enum class NoticeTone { Info, Danger }
+
+/**
+ * 玻璃状态提示条（1.4.0-alpha03）：锁屏的冷却倒计时 / 输错提示、首次设置的出错与“数据已清空”都用它。
+ * 玻璃胶囊底上叠一层很淡的语气色，左边一枚带浅色圆底的图标；读屏会礼貌地播报内容变化。
+ */
+@Composable
+fun JkNotice(
+    text: String,
+    icon: ImageVector,
+    modifier: Modifier = Modifier,
+    tone: NoticeTone = NoticeTone.Info,
+    shape: androidx.compose.ui.graphics.Shape = Radius.control,
+) {
+    val colors = Jk.colors
+    val tint = if (tone == NoticeTone.Danger) colors.danger else colors.accent
+    val wash = if (tone == NoticeTone.Danger) colors.dangerSoft else colors.accentSoft
+    Row(
+        modifier = modifier
+            .jkSurface(Jk.surfaces.chip, shape)
+            .background(wash.copy(alpha = wash.alpha * 0.75f))
+            .padding(start = Space.x1, end = Space.x1_5, top = Space.x1, bottom = Space.x1)
+            .semantics(mergeDescendants = true) { liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier
+                .size(28.dp)
+                .clip(CircleShape)
+                .background(tint.copy(alpha = if (colors.isDark) 0.22f else 0.12f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(16.dp))
+        }
+        Spacer(Modifier.width(Space.x1))
+        Text(text, style = JkType.small.copy(fontFeatureSettings = "tnum"), color = tint)
+    }
 }
 
 /** 一枚小状态标签（例如“离线”“已加密”）。 */

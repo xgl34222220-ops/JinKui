@@ -103,21 +103,21 @@ fun CardTile(type: CardType, colorIndex: Int, size: Dp = 40.dp) {
     }
 }
 
-/** 品牌标记：描边方印里一只带锁孔的匣子。 */
+/** 品牌标记：与桌面图标同一枚 B 款标志（薄荷渐变上两张玻璃卡片与小叶子），玻璃圆角方块。 */
 @Composable
-fun BrandMark(size: Dp = 64.dp) {
+fun BrandMark(size: Dp = 64.dp, modifier: Modifier = Modifier) {
     // 1.3：与桌面图标同一枚标志（方案 B：薄荷渐变上两张玻璃卡片与小叶子），外面一圈玻璃高光与柔和阴影
     val shape = RoundedCornerShape(size * 0.28f)
     Box(
-        modifier = Modifier
+        modifier = modifier
             .size(size)
             .jkSurface(Jk.surfaces.bubble, shape)
             .clearAndSetSemantics { },
         contentAlignment = Alignment.Center,
     ) {
         // 自适应图标的 108dp 画布里只有中间 72dp 可见：放大 1.5 倍后裁到形状里
-        Image(painterResource(R.drawable.ic_launcher_background), contentDescription = null, modifier = Modifier.requiredSize(size * 1.5f))
-        Image(painterResource(R.drawable.ic_launcher_foreground), contentDescription = null, modifier = Modifier.requiredSize(size * 1.5f))
+        Image(painterResource(R.drawable.ic_launcher_b_background), contentDescription = null, modifier = Modifier.requiredSize(size * 1.5f))
+        Image(painterResource(R.drawable.ic_launcher_b_foreground), contentDescription = null, modifier = Modifier.requiredSize(size * 1.5f))
     }
 }
 

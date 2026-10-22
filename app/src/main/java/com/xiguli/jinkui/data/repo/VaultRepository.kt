@@ -18,6 +18,7 @@ import com.xiguli.jinkui.data.model.CardType
 import com.xiguli.jinkui.data.model.FieldKind
 import com.xiguli.jinkui.data.model.HistoryEntry
 import com.xiguli.jinkui.data.model.PendingAttachment
+import com.xiguli.jinkui.data.model.TrashMath
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -48,13 +49,25 @@ class VaultRepository(
     private val state = MutableStateFlow<List<Card>>(emptyList())
     val cards: StateFlow<List<Card>> = state.asStateFlow()
 
+    /** 回收站里的卡片（1.4.0-alpha04 起）：解锁后同样解密到内存，锁定时丢弃；最近删的在前。 */
+    private val trashState = MutableStateFlow<List<Card>>(emptyList())
+    val trash: StateFlow<List<Card>> = trashState.asStateFlow()
+
     private fun keys(): SessionKeys = vault.keys ?: throw IllegalStateException("金匮已锁定")
 
-    suspend fun load() = withContext(Dispatchers.IO) {
+    suspend fun load(now: Long = System.currentTimeMillis()) = withContext(Dispatchers.IO) {
         val keys = keys()
+        // 回收站里满 30 天的卡片：先彻底删除（连同附件文件），再载入
+        val rows = database.cards()
+        val expired = rows.filter { TrashMath.isExpired(it.deletedAt, now) }.map { it.id }.toSet()
+        if (expired.isNotEmpty()) {
+            val doomedFiles = database.attachments().filter { it.cardId in expired }.map { it.id }
+            database.deleteCards(expired)
+            doomedFiles.forEach(files::delete)
+        }
         val fields = database.fields().groupBy { it.cardId }
         val attachments = database.attachments().groupBy { it.cardId }
-        val loaded = database.cards().map { row ->
+        val loaded = rows.filter { it.id !in expired }.map { row ->
             Card(
                 id = row.id,
                 type = CardType.of(row.type),
@@ -78,9 +91,17 @@ class VaultRepository(
                 createdAt = row.createdAt,
                 updatedAt = row.updatedAt,
                 lastUsedAt = row.lastUsedAt,
+                deletedAt = row.deletedAt,
             )
         }
-        publish { loaded }
+        publish { loaded.filter { it.deletedAt == null } }
+        publishTrash { TrashMath.sorted(loaded) }
+    }
+
+    private fun publishTrash(transform: (List<Card>) -> List<Card>) {
+        if (vault.keys == null) return
+        trashState.value = transform(trashState.value)
+        if (vault.keys == null) trashState.value = emptyList()
     }
 
     /**
@@ -96,6 +117,7 @@ class VaultRepository(
     /** 锁定时调用：丢弃内存中的全部明文。 */
     fun clear() {
         state.value = emptyList()
+        trashState.value = emptyList()
     }
 
     fun find(id: String): Card? = state.value.firstOrNull { it.id == id }
@@ -165,11 +187,31 @@ class VaultRepository(
         saved
     }
 
+    /** 删除 = 放进回收站（1.4.0-alpha04 起）：内容原样留在加密数据库里，30 天内可以还原。 */
     suspend fun delete(id: String) = withContext(Dispatchers.IO) {
-        val card = find(id)
-        database.deleteCard(id)
-        card?.attachments?.forEach { files.delete(it.id) }
+        val card = find(id) ?: return@withContext
+        val now = System.currentTimeMillis()
+        database.setCardDeleted(id, now)
         publish { cards -> cards.filterNot { it.id == id } }
+        publishTrash { trash -> TrashMath.sorted(trash.filterNot { it.id == id } + card.copy(deletedAt = now)) }
+    }
+
+    /** 从回收站还原。 */
+    suspend fun restoreFromTrash(id: String) = withContext(Dispatchers.IO) {
+        val card = trashState.value.firstOrNull { it.id == id } ?: return@withContext
+        database.setCardDeleted(id, null)
+        publishTrash { trash -> trash.filterNot { it.id == id } }
+        publish { cards -> cards.filterNot { it.id == id } + card.copy(deletedAt = null) }
+    }
+
+    /** 彻底删除回收站里的卡片（[ids] 为空时清空整个回收站）：字段、附件文件与历史密码一并删除，无法恢复。 */
+    suspend fun purge(ids: Collection<String> = emptyList()) = withContext(Dispatchers.IO) {
+        val doomed = trashState.value.filter { ids.isEmpty() || it.id in ids }
+        if (doomed.isEmpty()) return@withContext
+        database.deleteCards(doomed.map { it.id })
+        doomed.forEach { card -> card.attachments.forEach { files.delete(it.id) } }
+        val gone = doomed.mapTo(HashSet()) { it.id }
+        publishTrash { trash -> trash.filterNot { it.id in gone } }
     }
 
     suspend fun setPinned(id: String, pinned: Boolean) = withContext(Dispatchers.IO) {
@@ -231,17 +273,15 @@ class VaultRepository(
         try {
             for (item in latest) {
                 val incoming = item.card
-                val existing = find(incoming.id)
+                // 回收站里的同一张卡片也算“本机已有”：备份里较新的覆盖它的内容，但它仍留在回收站里
+                val trashed = trashState.value.firstOrNull { it.id == incoming.id }
+                val existing = find(incoming.id) ?: trashed
                 if (existing != null && existing.updatedAt >= incoming.updatedAt) {
                     skipped++
                     continue
                 }
                 val attachments = incoming.attachments.filter { item.attachmentData.containsKey(it.id) }
-                val card = incoming.copy(attachments = attachments)
-                val plan = AttachmentPlan.of(
-                    existing = existing?.attachments.orEmpty().map { it.id },
-                    incoming = attachments.map { it.id },
-                )
+                val card = incoming.copy(attachments = attachments, deletedAt = trashed?.deletedAt)
                 // 先把字段、备注、历史全部加密好，再动磁盘与数据库。
                 val row = card.toRow(keys)
                 val fieldRows = card.fields.mapIndexed { index, field ->
@@ -258,23 +298,25 @@ class VaultRepository(
                 val historyRows = item.history.map {
                     HistoryRow(it.id, card.id, it.label, keys.field.encrypt(it.value, historyContext(it.id)), it.changedAt)
                 }
-                try {
-                    for (attachment in attachments) {
-                        val data = item.attachmentData.getValue(attachment.id)
-                        files.write(attachment.id, keys.attachment.encryptBytes(data, attachmentContext(attachment.id)))
-                    }
-                    // 删除旧内容与写入新内容在同一个事务里：中途失败时本机原来那张卡片原样保留。
-                    database.replaceCard(
-                        card = row,
-                        fields = fieldRows,
-                        attachments = attachments.map { AttachmentRow(it.id, card.id, it.name, it.mime, it.size, it.createdAt) },
-                        history = historyRows,
-                    )
-                } catch (e: Exception) {
-                    plan.deleteOnFailure.forEach(files::delete)
-                    throw e
-                }
-                plan.deleteAfterCommit.forEach(files::delete)
+                AttachmentRestore.run(
+                    existingIds = existing?.attachments.orEmpty().map { it.id },
+                    incoming = attachments,
+                    reservedIds = database.attachments().map { it.id },
+                    write = { source, target ->
+                        val data = item.attachmentData.getValue(source.id)
+                        files.write(target.id, keys.attachment.encryptBytes(data, attachmentContext(target.id)))
+                    },
+                    commit = { staged ->
+                        // 删除旧内容与写入新索引在同一事务里；旧文件直到提交成功才删除。
+                        database.replaceCard(
+                            card = row,
+                            fields = fieldRows,
+                            attachments = staged.map { AttachmentRow(it.id, card.id, it.name, it.mime, it.size, it.createdAt) },
+                            history = historyRows,
+                        )
+                    },
+                    delete = files::delete,
+                )
                 if (existing == null) added++ else updated++
             }
         } finally {
@@ -295,6 +337,7 @@ class VaultRepository(
         createdAt = createdAt,
         updatedAt = updatedAt,
         lastUsedAt = lastUsedAt,
+        deletedAt = deletedAt,
     )
 
     /** 只有密文本身校验失败才显示占位；锁定等其他异常照常抛出，不能把占位文字当成数据。 */

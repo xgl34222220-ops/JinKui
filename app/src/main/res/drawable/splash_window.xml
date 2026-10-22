@@ -10,8 +10,8 @@
         android:height="132dp"
         android:gravity="center">
         <layer-list>
-            <item android:drawable="@drawable/ic_launcher_background" />
-            <item android:drawable="@drawable/ic_launcher_foreground" />
+            <item android:drawable="@drawable/ic_launcher_b_background" />
+            <item android:drawable="@drawable/ic_launcher_b_foreground" />
         </layer-list>
     </item>
 </layer-list>

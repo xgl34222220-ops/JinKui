@@ -168,18 +168,18 @@ fun CalendarContent(
                             .semantics { contentDescription = "回到今天" },
                         contentAlignment = Alignment.Center,
                     ) {
-                        Text("今", style = JkType.heading.copy(fontWeight = FontWeight.Bold), color = colors.textPrimary)
+                        Text("今天", style = JkType.small.copy(fontWeight = FontWeight.Bold), color = colors.accent)
                     }
                 }
                 MintIconButton(MintGlyph.ADD_NOTE, "在这一天记一笔", onAdd, tint = colors.accent)
             }
-            // 当月收 / 支 / 余单独一行，不和右边的按钮抢宽度
+            // 当月支出 / 收入 / 结余单独一行，不和右边的按钮抢宽度（1.5.0-alpha02：写全，与账本首页同一顺序）
             Row(Modifier.padding(horizontal = Space.x2), verticalAlignment = Alignment.CenterVertically) {
-                MonthTotal("收", ui.summary.income, colors.income)
+                MonthTotal("支出", ui.summary.expense, colors.expense)
                 Spacer(Modifier.width(Space.x2))
-                MonthTotal("支", ui.summary.expense, colors.expense)
+                MonthTotal("收入", ui.summary.income, colors.income)
                 Spacer(Modifier.width(Space.x2))
-                MonthTotal("余", ui.summary.balance, if (ui.summary.balance < 0) colors.danger else colors.textPrimary)
+                MonthTotal("结余", ui.summary.balance, if (ui.summary.balance < 0) colors.danger else colors.textPrimary)
             }
           }
         }
@@ -207,13 +207,18 @@ fun CalendarContent(
                     Text(weekdayLabel(selected), style = JkType.small, color = colors.textTertiary)
                     Spacer(Modifier.weight(1f))
                     if (day != null) {
-                        Text("收", style = JkType.small, color = colors.textTertiary)
-                        Spacer(Modifier.width(4.dp))
-                        Text(Money.format(day.income, symbol = false), style = JkType.amountSmall, color = colors.income)
-                        Spacer(Modifier.width(Space.x1_5))
-                        Text("支", style = JkType.small, color = colors.textTertiary)
-                        Spacer(Modifier.width(4.dp))
-                        Text(Money.format(day.expense, symbol = false), style = JkType.amountSmall, color = colors.expense)
+                        // 与账本首页的日头一样：写全“支出 / 收入”，为 0 的一项不显示
+                        if (day.expense != 0L || day.income == 0L) {
+                            Text("支出", style = JkType.small, color = colors.textTertiary)
+                            Spacer(Modifier.width(4.dp))
+                            Text(Money.format(day.expense, symbol = false), style = JkType.amountSmall, color = colors.expense)
+                        }
+                        if (day.income != 0L) {
+                            Spacer(Modifier.width(Space.x1_5))
+                            Text("收入", style = JkType.small, color = colors.textTertiary)
+                            Spacer(Modifier.width(4.dp))
+                            Text(Money.format(day.income, symbol = false), style = JkType.amountSmall, color = colors.income)
+                        }
                     }
                 }
                 val extra = listOfNotNull(
@@ -238,7 +243,7 @@ fun CalendarContent(
                 ) {
                     EmptyCalendarArt()
                     Spacer(Modifier.height(Space.x1_5))
-                    Text("这一天你还没有任何记账", style = JkType.bodyStrong, color = colors.textSecondary)
+                    Text("这一天还没有记账", style = JkType.bodyStrong, color = colors.textSecondary)
                     if (today == null || selected <= today) {
                         Text(
                             "记一笔",

@@ -4,6 +4,9 @@
     <color name="splash_top">#E6F6EF</color>
     <color name="splash_bottom">#BFE6D7</color>
     <color name="splash_background">#CDEDE1</color>
-    <color name="icon_background">#141210</color>
-    <color name="icon_gold">#D4A857</color>
+    <!-- 1.4.0-alpha04 桌面小部件“记一笔” -->
+    <color name="widget_surface">#F2F7FBF9</color>
+    <color name="widget_stroke">#3323785F</color>
+    <color name="widget_text">#FF173B30</color>
+    <color name="widget_text_secondary">#FF4F6B62</color>
 </resources>

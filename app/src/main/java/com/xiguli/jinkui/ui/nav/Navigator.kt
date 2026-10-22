@@ -36,6 +36,27 @@ sealed interface Screen {
     data object AutoBookkeeping : Screen
     /** 自动记账的“待确认”（1.2 起）。 */
     data object PendingInbox : Screen
+    /** 欠款 / 账单总览（1.4 起）：本月待还、即将到期、信用账户、借贷。 */
+    data object Debts : Screen
+    /** 一个信用账户的账单、分期与还款（1.4 起）。 */
+    data class CreditStatement(val accountId: String) : Screen
+    /** 借贷列表（1.4 起）。 */
+    data object Loans : Screen
+    /** 1.4.0-alpha04：借贷列表并直接打开“记一笔借出 / 借入”。 */
+    data class LoansNew(val direction: com.xiguli.jinkui.data.ledger.LoanDirection) : Screen
+    /** 1.4.0-alpha04：账户管理并直接打开“添加账户”（种类预选信用卡）。 */
+    data object LedgerAddCredit : Screen
+    /** 1.4.0-alpha04：报销（待报销、已报销）。 */
+    data object Reimburse : Screen
+    /** 1.4.0-alpha04：自动分类规则与记账模板。 */
+    data object LedgerRules : Screen
+    /** 1.4.0-alpha04：卡包回收站。 */
+    data object CardTrash : Screen
+    /** 1.4.0-alpha04：欠款 / 借贷里的某一个人（对方账户）。 */
+    data class LoanPerson(val accountId: String) : Screen
+
+    /** 1.5.0-alpha02：一个账户的详情（余额、本月流入 / 流出、这个账户的流水）。 */
+    data class AccountDetail(val accountId: String) : Screen
 }
 
 /** 首页底部悬浮栏的五个分区（1.1 起）：账本是首页；卡包保留全部卡片功能。 */

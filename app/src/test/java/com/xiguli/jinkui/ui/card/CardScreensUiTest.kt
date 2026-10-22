@@ -29,6 +29,7 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.unit.dp
@@ -216,7 +217,8 @@ class CardScreensUiTest {
         RuntimeEnvironment.setFontScale(1.3f)
         try {
             val activity = show(dark = true, content = listHome())
-            compose.onNodeWithText("全部 · ${CardSamples.all.size}").assertExists()
+            // 1.5.0-alpha01：置顶的一组在上面，其余在“其他”里
+            compose.onNodeWithText("其他 · ${CardSamples.all.count { !it.pinned }}").assertExists()
             snapshot(activity, "card-list-font130-dark")
         } finally {
             RuntimeEnvironment.setFontScale(1f)
@@ -259,6 +261,7 @@ class CardScreensUiTest {
         card: com.xiguli.jinkui.data.model.Card,
         revealed: MutableList<String> = mutableStateListOf(),
         copied: MutableList<String> = mutableListOf(),
+        events: MutableList<String> = mutableListOf(),
     ): @Composable () -> Unit = {
         Column(Modifier.padding(top = Space.x2)) {
             CardDetailContent(
@@ -268,10 +271,13 @@ class CardScreensUiTest {
                 onRevealAll = { ids, show -> revealed.clear(); if (show) revealed.addAll(ids) },
                 copiedKey = copied.lastOrNull(),
                 onCopy = { copied += it.id },
-                onEdit = {}, onHistory = {}, onDuplicate = {}, onViewAttachment = {},
+                onEdit = { events += "edit" }, onHistory = {}, onDuplicate = {}, onViewAttachment = {},
                 loadAttachment = { ByteArray(0) },
+                onDelete = { events += "trash" },
                 ticking = false,
                 clock = { CardSamples.now },
+                onTogglePin = { events += "pin" },
+                onCopyNote = { events += "note" },
             )
         }
     }
@@ -291,6 +297,31 @@ class CardScreensUiTest {
         // 卡号四位一组显示
         compose.onNodeWithText("6225 8888 1234 5972").assertExists()
         snapshot(activity, "card-detail-revealed")
+    }
+
+    /** 1.5.0-alpha02：头部图标 + 名称 + 类型，下面“编辑 / 收藏 / 移到回收站”，备注可复制，底部“修改于”。 */
+    @Test
+    fun cardDetailHeaderAndActions() {
+        val events = mutableListOf<String>()
+        val activity = show(content = detail(CardSamples.github, events = events))
+        compose.onNodeWithText("GitHub").assertExists()
+        compose.onNodeWithText("登录密码").assertExists()
+        compose.onNodeWithText("编辑").performClick()
+        compose.onNodeWithText("收藏").performClick()
+        compose.onNodeWithText("移到回收站").performClick()
+        compose.onNodeWithText("修改于", substring = true).assertExists()
+        compose.waitForIdle()
+        assertEquals(listOf("edit", "pin", "trash"), events)
+        snapshot(activity, "card-detail-header-light")
+        closeActivities()
+        // 收藏过的显示“已收藏”
+        val dark = show(dark = true, content = detail(CardSamples.cmb, events = events))
+        compose.onNodeWithText("已收藏").assertExists()
+        compose.onAllNodesWithText("银行卡", substring = true).onFirst().assertExists()
+        snapshot(dark, "card-detail-header-dark")
+        compose.onNodeWithText("复制").performClick()
+        compose.waitForIdle()
+        assertEquals("note", events.last())
     }
 
     @Test
@@ -330,11 +361,56 @@ class CardScreensUiTest {
                 onAddField = {}, onGenerate = {}, onScanQr = {}, onAddPhoto = {}, loadAttachment = { ByteArray(0) },
             )
         }
-        compose.onNodeWithText("卡面").assertExists()
-        compose.onNodeWithText("字段").assertExists()
+        // 1.5.0-alpha02：类型在最上面，按组填：主要信息 → 自定义字段 → 备注 → 标签 → 卡面颜色
+        compose.onNodeWithText("类型").assertExists()
+        compose.onNodeWithText("主要信息").assertExists()
+        compose.onNodeWithText("自定义字段").assertExists()
+        compose.onNodeWithText("添加自定义字段").assertExists()
+        compose.onNodeWithText("卡面颜色").assertExists()
         compose.onNodeWithText("请填写名称，例如“招商银行储蓄卡”").assertExists()
         compose.onNodeWithText("这里通常只有数字（可以带空格或短横线）").assertExists()
         snapshot(activity, "card-add-form")
+    }
+
+    /** 1.5.0-alpha02：登录密码表单——先类型（新建可更换），密码下面直接生成，两步验证一组，自定义字段。 */
+    @Test
+    fun loginFormInlineGeneratorAndCustomFields() {
+        val draft = CardDraft(null, CardType.LOGIN)
+        draft.title = "GitHub"
+        draft.fields.add(DraftField("cf1", "安全问题", "第一只宠物", sensitive = false, kind = com.xiguli.jinkui.data.model.FieldKind.TEXT))
+        var retype = 0
+        val activity = show {
+            CardEditForm(
+                draft = draft, isNew = true, suggestions = emptyList(), scanningId = null,
+                onAddField = {}, onGenerate = {}, onScanQr = {}, onAddPhoto = {}, loadAttachment = { ByteArray(0) },
+                onChangeType = { retype++ },
+            )
+        }
+        compose.onNodeWithText("登录密码").assertExists()
+        compose.onNodeWithText("更换").performClick()
+        compose.onNodeWithText("两步验证").assertExists()
+        compose.onNodeWithText("添加两步验证码").assertExists()
+        compose.onNodeWithText("自定义字段").assertExists()
+        snapshot(activity, "card-add-login-light")
+        val password = draft.fields.first { it.kind == com.xiguli.jinkui.data.model.FieldKind.PASSWORD }
+        compose.onAllNodesWithText("生成强密码").onFirst().performClick()
+        compose.waitForIdle()
+        assertEquals(1, retype)
+        assertEquals(20, password.value.length)
+        compose.onNodeWithText("强度：强").assertExists()
+        compose.onNodeWithText("添加两步验证码").performScrollTo().performClick()
+        compose.waitForIdle()
+        assertTrue(draft.fields.any { it.kind == com.xiguli.jinkui.data.model.FieldKind.TOTP })
+        closeActivities()
+        val dark = show(dark = true) {
+            CardEditForm(
+                draft = draft, isNew = false, suggestions = emptyList(), scanningId = null,
+                onAddField = {}, onGenerate = {}, onScanQr = {}, onAddPhoto = {}, loadAttachment = { ByteArray(0) },
+            )
+        }
+        // 编辑已有卡片不能换类型
+        compose.onNodeWithText("更换").assertDoesNotExist()
+        snapshot(dark, "card-add-login-dark")
     }
 
     @Test
@@ -395,11 +471,20 @@ class CardScreensUiTest {
             )
         }
         compose.onNodeWithText("完成").assertExists()
+        // 1.5.0-alpha01：类型下面一句白话
+        compose.onNodeWithText("花出去的钱").assertExists()
         compose.mainClock.advanceTimeBy(1_000)
         // 底部面板有进入动画，直接触发语义上的点击，不依赖手势坐标
         compose.onNodeWithContentDescription("保存").performSemanticsAction(SemanticsActions.OnClick)
         compose.waitForIdle()
         assertEquals(listOf("请输入大于 0 的金额"), messages)
         snapshot(activity, "entry-sheet", withDialog = true)
+        val dark = show(dark = true) {
+            EntrySheet(
+                data = LedgerSamples.data, existing = null, onDismiss = {}, onSave = { _, _, _ -> }, onDelete = {}, onMessage = {},
+                initialTime = LedgerSamples.at(10, 10, 12, 0),
+            )
+        }
+        snapshot(dark, "entry-sheet-dark", withDialog = true)
     }
 }

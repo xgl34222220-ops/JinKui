@@ -110,9 +110,49 @@ class LedgerManageScreensUiTest {
         )
         val ui = buildBudgetUi(data, october, LedgerSamples.zone)
         val activity = show { LedgerBudgetContent(ui, {}, {}, { _, _ -> }, {}, today = LedgerSamples.today) }
-        compose.onNodeWithText("每月总预算").assertExists()
+        // 1.5.0-alpha02：先回答“本月还能花多少”，下面每月预算 / 已花 / 每天还能花
+        compose.onNodeWithText("本月还能花(元)").assertExists()
+        compose.onNodeWithText("1,951.60").assertExists()
+        compose.onNodeWithText("已花").assertExists()
+        compose.onNodeWithText("每天还能花").assertExists()
+        compose.onNodeWithText("88.70").assertExists()
+        compose.onNodeWithText("已花 ¥129.90，预算 ¥500.00").assertExists()
         compose.onNodeWithText("添加分类预算").assertExists()
+        // 这个月花了钱、还没预算的分类：点一下就能设
+        assertEquals(listOf("cat-housing", "cat-fun", "cat-transport"), ui.unbudgeted.map { it.first.id })
+        var edited: Pair<String?, Long>? = null
+        compose.onNodeWithText("居住 已花 ¥3,800.00").assertExists()
         snapshot(activity, "ledger-budget-light")
+        closeActivities()
+        show { LedgerBudgetContent(ui, {}, {}, { id, amount -> edited = id to amount }, {}, today = LedgerSamples.today) }
+        compose.onNodeWithText("居住 已花 ¥3,800.00").performClick()
+        compose.waitForIdle()
+        assertEquals("cat-housing" to 0L, edited)
+        compose.onNodeWithText("改预算").performClick()
+        compose.waitForIdle()
+        assertEquals(null to 600_000L, edited)
+        closeActivities()
+        val dark = show(dark = true) { LedgerBudgetContent(ui, {}, {}, { _, _ -> }, {}, today = LedgerSamples.today) }
+        snapshot(dark, "ledger-budget-dark")
+    }
+
+    @Test
+    fun budgetWithoutTotalAndOverspent() {
+        val none = buildBudgetUi(LedgerSamples.data.copy(budgets = emptyList()), october, LedgerSamples.zone)
+        val a = show { LedgerBudgetContent(none, {}, {}, { _, _ -> }, {}, today = LedgerSamples.today) }
+        compose.onNodeWithText("10月已花(元)").assertExists()
+        compose.onNodeWithText("设每月总预算").assertExists()
+        snapshot(a, "ledger-budget-empty-light")
+        closeActivities()
+        val over = buildBudgetUi(
+            LedgerSamples.data.copy(budgets = listOf(LedgerBudget("b-total", null, 300_000), LedgerBudget("b-food", "cat-food", 2_000))),
+            october, LedgerSamples.zone,
+        )
+        val b = show { LedgerBudgetContent(over, {}, {}, { _, _ -> }, {}, today = LedgerSamples.today) }
+        compose.onNodeWithText("10月已超支(元)").assertExists()
+        compose.onNodeWithText("1,048.40").assertExists()
+        compose.onNodeWithText("超支").assertExists()
+        snapshot(b, "ledger-budget-over-light")
     }
 
     @Test

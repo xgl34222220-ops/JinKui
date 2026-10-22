@@ -18,7 +18,7 @@ import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import com.xiguli.jinkui.ui.components.SecureDialog
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
@@ -247,15 +247,21 @@ private fun DeleteRangeFlow(
             val state = rememberDatePickerState(
                 initialSelectedDateMillis = (s ?: LocalDate.now(zone)).atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli(),
             )
+            // 1.4.0-alpha03：与其他日期选择一样带防截屏标记，按钮换成金匮自己的按钮
             DatePickerDialog(
                 onDismissRequest = onDismiss,
+                properties = SecureDialog,
                 confirmButton = {
-                    TextButton(onClick = {
-                        val picked = state.selectedDateMillis?.let { Instant.ofEpochMilli(it).atZone(ZoneOffset.UTC).toLocalDate() } ?: return@TextButton
-                        if (s == null) start = picked else end = if (picked.isBefore(s)) s.also { start = picked } else picked
-                    }) { Text("下一步") }
+                    JkButton("下一步", {
+                        val picked = state.selectedDateMillis?.let { Instant.ofEpochMilli(it).atZone(ZoneOffset.UTC).toLocalDate() }
+                        if (picked != null) {
+                            if (s == null) start = picked else end = if (picked.isBefore(s)) s.also { start = picked } else picked
+                        }
+                    }, compact = true, modifier = Modifier.padding(end = Space.x1, bottom = Space.x1))
                 },
-                dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+                dismissButton = {
+                    JkButton("取消", onDismiss, style = ButtonStyle.Ghost, compact = true, modifier = Modifier.padding(bottom = Space.x1))
+                },
             ) {
                 Text(
                     "选择$picking",

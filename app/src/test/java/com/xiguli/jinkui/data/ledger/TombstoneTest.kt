@@ -120,7 +120,7 @@ class TombstoneTest {
         )
         val bytes = BackupJson.encode(emptyList(), 1L, data)
         val root = JSONObject(String(bytes, Charsets.UTF_8))
-        assertEquals(4, root.getInt("schema"))
+        assertEquals(6, root.getInt("schema"))
         assertEquals(data, BackupJson.decodeAll(bytes).ledger)
 
         // schema 3（0.7.0 / 0.8.0）的备份：没有 tombstones，照常导入
@@ -132,8 +132,8 @@ class TombstoneTest {
         assertTrue(BackupJson.decodeAll(unknownKind.toByteArray()).ledger.tombstones.isEmpty())
         val badId = """{"app":"jinkui","schema":4,"cards":[],"ledger":{"tombstones":[{"id":"../x","kind":"tx","deletedAt":1}]}}"""
         assertThrows(BackupFormatException::class.java) { BackupJson.decodeAll(badId.toByteArray()) }
-        // 更新版本（schema 5）的备份明确拒绝
-        val future = """{"app":"jinkui","schema":5,"cards":[]}"""
+        // 更新版本（比当前 schema 新）的备份明确拒绝
+        val future = """{"app":"jinkui","schema":${BackupJson.SCHEMA + 1},"cards":[]}"""
         assertThrows(BackupFormatException::class.java) { BackupJson.decodeAll(future.toByteArray()) }
     }
 }

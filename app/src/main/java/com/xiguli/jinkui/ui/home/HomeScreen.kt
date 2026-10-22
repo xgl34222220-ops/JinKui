@@ -202,6 +202,8 @@ fun HomeScreen(
     onSettings: () -> Unit,
     onHealth: () -> Unit,
     onOrganize: () -> Unit,
+    /** 1.5.0-alpha01：卡包列表底部的回收站入口。 */
+    onTrash: () -> Unit = {},
 ) {
     val container = LocalContainer.current
     val viewModel = jkViewModel { HomeViewModel(container) }
@@ -233,6 +235,7 @@ fun HomeScreen(
             onToggleView = { container.settings.update { it.copy(deckView = true) } },
             onLock = { container.vault.lock() },
             onCreate = { showTypes = true },
+            onTrash = onTrash,
             onMore = { showMore = true },
             onHealth = onHealth,
             onSort = { order -> container.settings.update { it.copy(sortOrder = order) } },
@@ -486,10 +489,10 @@ private fun QuickActionsSheet(
     }
 }
 
-/** 新建卡片：直接从 11 种卡面里挑一种。 */
+/** 新建卡片：直接从 11 种卡面里挑一种（1.5.0-alpha02 起编辑页“更换类型”也用它）。 */
 @Composable
-private fun TypePickerSheet(onDismiss: () -> Unit, onPick: (CardType) -> Unit) {
-    JkSheet(onDismiss = onDismiss, title = "新建卡片") {
+internal fun TypePickerSheet(onDismiss: () -> Unit, title: String = "新建卡片", onPick: (CardType) -> Unit) {
+    JkSheet(onDismiss = onDismiss, title = title) {
         Column(
             modifier = Modifier
                 .heightIn(max = 460.dp)

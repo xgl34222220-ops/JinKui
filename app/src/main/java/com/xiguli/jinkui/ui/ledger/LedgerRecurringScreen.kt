@@ -139,7 +139,9 @@ class LedgerRecurringViewModel(private val container: AppContainer) : ViewModel(
         viewModelScope.launch {
             runCatching { container.ledger.deleteRecurring(rule.id) }
                 .onSuccess {
-                    container.messages.show("已删除，之前记下的流水保留")
+                    container.messages.show("已删除，之前记下的流水保留", "撤销") {
+                        container.scope.launch { runCatching { container.ledger.restoreRecurring(rule) } }
+                    }
                     onDone()
                 }
                 .onFailure { container.messages.show("删除失败") }
@@ -330,7 +332,7 @@ internal fun RecurringEditSheet(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text("暂停", style = JkType.body, color = colors.textPrimary)
-                        Text("暂停期间不生成；恢复后会补记暂停期间到期的各期", style = JkType.caption, color = colors.textTertiary)
+                        Text("暂停时不自动记；恢复后，暂停期间该记的会一次补上", style = JkType.caption, color = colors.textTertiary)
                     }
                     JkSwitch(paused, { paused = it })
                 }
@@ -375,6 +377,7 @@ internal fun RecurringEditSheet(
         AccountPickerSheet(
             title = if (pickTo) "转入账户" else if (type == TxType.TRANSFER) "转出账户" else "选择账户",
             accounts = if (pickTo) active.filter { it.id != accountId } else active,
+            balances = remember(data.accounts, data.transactions) { LedgerMath.balances(data.accounts, data.transactions) },
             onDismiss = {
                 pickFrom = false
                 pickTo = false

@@ -41,8 +41,9 @@ class HomeModelTest {
 
     @Test
     fun filtersListPinnedTypesThenTags() {
+        // 1.5.0-alpha01：先按类型（参考 Bitwarden / Apple 密码），再是置顶与标签
         val keys = buildHomeUi(cards, "", null, SortOrder.TITLE, 0).filters.map { it.first }
-        assertEquals(listOf("p:", "t:login", "t:bank", "t:wifi", "g:工作"), keys)
+        assertEquals(listOf("t:login", "t:bank", "t:wifi", "p:", "g:工作"), keys)
     }
 
     @Test

@@ -4,4 +4,8 @@
     <color name="splash_top">#13241F</color>
     <color name="splash_bottom">#0B1310</color>
     <color name="splash_background">#0F1B17</color>
+    <color name="widget_surface">#F2142420</color>
+    <color name="widget_stroke">#335FC2A5</color>
+    <color name="widget_text">#FFE6F4EE</color>
+    <color name="widget_text_secondary">#FFA9C4BA</color>
 </resources>
