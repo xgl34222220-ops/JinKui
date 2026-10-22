@@ -74,7 +74,7 @@ object LoanEntryMath {
                 .map { LoanTarget(it.id, DebtMath.personOf(it)) }
         } else {
             DebtMath.overview(data, today, zone).loans
-                .filter { it.direction == action.direction && !it.settled && it.remaining > 0 }
+                .filter { it.direction == action.direction && !it.settled }
                 .sortedBy { it.loan.date }
                 .map { LoanTarget(it.account.id, it.person, it.loan.id, it.remaining) }
         }
