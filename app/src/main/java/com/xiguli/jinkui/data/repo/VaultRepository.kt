@@ -282,10 +282,6 @@ class VaultRepository(
                 }
                 val attachments = incoming.attachments.filter { item.attachmentData.containsKey(it.id) }
                 val card = incoming.copy(attachments = attachments, deletedAt = trashed?.deletedAt)
-                val plan = AttachmentPlan.of(
-                    existing = existing?.attachments.orEmpty().map { it.id },
-                    incoming = attachments.map { it.id },
-                )
                 // 先把字段、备注、历史全部加密好，再动磁盘与数据库。
                 val row = card.toRow(keys)
                 val fieldRows = card.fields.mapIndexed { index, field ->
@@ -302,23 +298,25 @@ class VaultRepository(
                 val historyRows = item.history.map {
                     HistoryRow(it.id, card.id, it.label, keys.field.encrypt(it.value, historyContext(it.id)), it.changedAt)
                 }
-                try {
-                    for (attachment in attachments) {
-                        val data = item.attachmentData.getValue(attachment.id)
-                        files.write(attachment.id, keys.attachment.encryptBytes(data, attachmentContext(attachment.id)))
-                    }
-                    // 删除旧内容与写入新内容在同一个事务里：中途失败时本机原来那张卡片原样保留。
-                    database.replaceCard(
-                        card = row,
-                        fields = fieldRows,
-                        attachments = attachments.map { AttachmentRow(it.id, card.id, it.name, it.mime, it.size, it.createdAt) },
-                        history = historyRows,
-                    )
-                } catch (e: Exception) {
-                    plan.deleteOnFailure.forEach(files::delete)
-                    throw e
-                }
-                plan.deleteAfterCommit.forEach(files::delete)
+                AttachmentRestore.run(
+                    existingIds = existing?.attachments.orEmpty().map { it.id },
+                    incoming = attachments,
+                    reservedIds = database.attachments().map { it.id },
+                    write = { source, target ->
+                        val data = item.attachmentData.getValue(source.id)
+                        files.write(target.id, keys.attachment.encryptBytes(data, attachmentContext(target.id)))
+                    },
+                    commit = { staged ->
+                        // 删除旧内容与写入新索引在同一事务里；旧文件直到提交成功才删除。
+                        database.replaceCard(
+                            card = row,
+                            fields = fieldRows,
+                            attachments = staged.map { AttachmentRow(it.id, card.id, it.name, it.mime, it.size, it.createdAt) },
+                            history = historyRows,
+                        )
+                    },
+                    delete = files::delete,
+                )
                 if (existing == null) added++ else updated++
             }
         } finally {

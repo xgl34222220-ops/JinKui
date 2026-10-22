@@ -359,6 +359,22 @@ class LedgerRepository(
         }
     }
 
+    /** 只撤销这次保存；后续修改过的记录不能被旧消息覆盖。 */
+    suspend fun undoSave(receipt: LedgerSaveReceipt) = withContext(Dispatchers.IO) {
+        recurringLock.withLock {
+            val keys = keys()
+            val restored = receipt.restore(state.value, System.currentTimeMillis())
+            val saved = receipt.saved
+            if (receipt.previous == null) {
+                val marker = restored.tombstones.first { it.id == saved.id }
+                database.deleteLedgerTransactions(listOf(saved.id), listOf(marker.toRow()))
+            } else {
+                database.saveLedgerTransaction(restored.transactions.first { it.id == saved.id }.toRow(keys))
+            }
+            publish { it.copy(transactions = restored.transactions, tombstones = restored.tombstones) }
+        }
+    }
+
     /** 删除 [from, until) 这段时间里的全部流水（导入出错时的兜底清理）。返回删掉的流水。 */
     suspend fun deleteRange(from: Long, until: Long): List<LedgerTransaction> =
         deleteTransactions(state.value.transactions.filter { it.occurredAt in from until until }.map { it.id })
@@ -446,7 +462,11 @@ class LedgerRepository(
 
     // ── 流水 ──────────────────────────────────────────────────────
 
-    suspend fun saveTransaction(tx: LedgerTransaction): LedgerTransaction = withContext(Dispatchers.IO) {
+    suspend fun saveTransaction(tx: LedgerTransaction): LedgerTransaction = saveWithUndo(tx).saved
+
+    /** 保存及其撤销前态在同一写锁内捕获，避免 UI 快照与并发导入交错。 */
+    suspend fun saveWithUndo(tx: LedgerTransaction): LedgerSaveReceipt = withContext(Dispatchers.IO) {
+        recurringLock.withLock {
         val keys = keys()
         val current = state.value
         val normalized = tx.copy(
@@ -472,7 +492,8 @@ class LedgerRepository(
         )
         database.saveLedgerTransaction(saved.toRow(keys))
         publish { data -> data.copy(transactions = data.transactions.filterNot { it.id == saved.id } + saved) }
-        saved
+        LedgerSaveReceipt(saved, previous)
+        }
     }
 
     /**

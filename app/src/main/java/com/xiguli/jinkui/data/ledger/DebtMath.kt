@@ -109,7 +109,7 @@ data class LoanView(
     val direction: LoanDirection get() = loan.direction
     val remaining: Long get() = (principal - repaid).coerceAtLeast(0L)
     val interestRemaining: Long get() = (loan.interest - interestPaid).coerceAtLeast(0L)
-    val settled: Boolean get() = principal > 0L && principal - repaid <= 0L
+    val settled: Boolean get() = principal > 0L && remaining == 0L && interestRemaining == 0L
     fun overdue(today: LocalDate): Boolean = !settled && loan.dueDate != null && today > loan.dueDate
 }
 
@@ -706,8 +706,8 @@ object DebtMath {
         val people = open.groupBy { it.person }.map { (person, list) ->
             PersonTotal(
                 person,
-                list.filter { it.direction == LoanDirection.LEND }.sumOf { it.remaining },
-                list.filter { it.direction == LoanDirection.BORROW }.sumOf { it.remaining },
+                list.filter { it.direction == LoanDirection.LEND }.sumOf { it.remaining + it.interestRemaining },
+                list.filter { it.direction == LoanDirection.BORROW }.sumOf { it.remaining + it.interestRemaining },
                 list.size,
             )
         }.sortedByDescending { it.receivable + it.payable }
@@ -719,8 +719,8 @@ object DebtMath {
             items = items,
             credits = credits,
             loans = loans,
-            receivable = open.filter { it.direction == LoanDirection.LEND }.sumOf { it.remaining },
-            payable = open.filter { it.direction == LoanDirection.BORROW }.sumOf { it.remaining },
+            receivable = open.filter { it.direction == LoanDirection.LEND }.sumOf { it.remaining + it.interestRemaining },
+            payable = open.filter { it.direction == LoanDirection.BORROW }.sumOf { it.remaining + it.interestRemaining },
             people = people,
             creditDebt = credits.sumOf { it.debt },
         )

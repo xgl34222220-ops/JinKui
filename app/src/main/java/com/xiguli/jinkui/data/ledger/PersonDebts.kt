@@ -21,12 +21,12 @@ data class PersonDebt(
     val interestPaid: Long,
     val loans: List<LoanView>,
 ) {
-    val settled: Boolean get() = remaining <= 0L
+    val settled: Boolean get() = remaining <= 0L && loans.all { it.settled }
     fun overdue(today: LocalDate): Boolean = !settled && due != null && today > due
     /** 还款进度 0..1。 */
     val progress: Float get() = if (total <= 0L) 0f else (repaid.toFloat() / total).coerceIn(0f, 1f)
     /** 没还清的几笔，最早借的在前（收款 / 还款先冲最早的那笔）。 */
-    val open: List<LoanView> get() = loans.filter { !it.settled && it.remaining > 0 }.sortedWith(compareBy<LoanView> { it.loan.date }.thenBy { it.loan.createdAt })
+    val open: List<LoanView> get() = loans.filter { !it.settled }.sortedWith(compareBy<LoanView> { it.loan.date }.thenBy { it.loan.createdAt })
     /** 全部记录（借出 / 借入、收款 / 还款、利息、免除），新的在前。 */
     val entries: List<LedgerTransaction> get() = loans.flatMap { it.entries }.distinctBy { it.id }.sortedByDescending { it.occurredAt }
 }
@@ -71,6 +71,7 @@ object PersonDebtMath {
         for (loan in person.open) {
             if (left <= 0L) break
             val part = minOf(left, loan.remaining)
+            if (part == 0L) continue
             out += loan to part
             left -= part
         }

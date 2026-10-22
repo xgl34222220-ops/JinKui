@@ -130,19 +130,32 @@ object LedgerMath {
         transactions: List<LedgerTransaction>,
         filter: TxFilter,
         categories: List<LedgerCategory>,
+        accounts: List<LedgerAccount> = emptyList(),
     ): List<LedgerTransaction> {
         if (!filter.isActive) return transactions
         val categoryIds = filter.categoryId?.let { withChildren(it, categories) }
         val tokens = filter.query.trim().lowercase().split(Regex("\\s+")).filter { it.isNotEmpty() }
+        val categoryNames = categories.associateBy { it.id }
+        val accountNames = accounts.associateBy { it.id }
         return transactions.filter { tx ->
             (filter.accountId == null || tx.accountId == filter.accountId || tx.toAccountId == filter.accountId) &&
                 (categoryIds == null || tx.categoryId in categoryIds) &&
-                (tokens.isEmpty() || matches(tx, tokens))
+                (tokens.isEmpty() || matches(tx, tokens, categoryNames, accountNames))
         }
     }
 
-    private fun matches(tx: LedgerTransaction, tokens: List<String>): Boolean {
+    private fun matches(
+        tx: LedgerTransaction, tokens: List<String>,
+        categories: Map<String, LedgerCategory>, accounts: Map<String, LedgerAccount>,
+    ): Boolean {
         val haystack = buildString {
+            append(Money.format(tx.amount, symbol = false)).append('\n')
+            append(Money.format(tx.amount, symbol = false).replace(",", "")).append('\n')
+            append(accounts[tx.accountId]?.name.orEmpty()).append('\n')
+            append(accounts[tx.toAccountId]?.name.orEmpty()).append('\n')
+            val category = categories[tx.categoryId]
+            append(category?.name.orEmpty()).append('\n')
+            append(categories[category?.parentId]?.name.orEmpty()).append('\n')
             append(tx.note).append('\n')
             tx.tags.forEach { append(it).append('\n') }
         }.lowercase()
