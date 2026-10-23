@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>金匮 · 账本 UI 方案对比</title>
+<link rel="stylesheet" href="css/tokens.css">
+<link rel="stylesheet" href="css/ui.css">
+</head>
+<body>
+
+<header class="studio-bar">
+  <div class="brand">
+    <span class="brand-mark">匮</span>
+    <span class="brand-text">
+      <strong>金匮 · 账本</strong>
+      <em>UI 方案原型 — 同一套界面，三种视觉语言</em>
+    </span>
+  </div>
+
+  <div class="bar-controls">
+    <div class="seg" id="screenSeg"></div>
+    <div class="seg" id="schemeSeg"></div>
+    <button class="bar-btn" id="compareBtn" type="button">并排对比</button>
+  </div>
+</header>
+
+<main class="stage" id="stage"></main>
+
+<aside class="notes" id="notes"></aside>
+
+<footer class="studio-foot">
+  <span>原型仅用于确定视觉方向；色值与间距取自 <code>ui/theme/Theme.kt</code> 的 JkColors / Space / Radius，选定后按 1:1 落到 Compose。</span>
+  <span class="foot-hint">↑↓ 滚动查看整页 · 点击底部导航切换页面</span>
+</footer>
+
+<script src="js/icons.js"></script>
+<script src="js/data.js"></script>
+<script src="js/charts.js"></script>
+<script src="js/screens.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

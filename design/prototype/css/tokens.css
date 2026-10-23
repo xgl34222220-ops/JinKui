@@ -1,0 +1,186 @@
+/* ==========================================================================
+   金匮账本 · 设计令牌
+   三套方案共用同一份变量名，只换取值。scheme-* 类挂在手机根节点上，
+   因此同一份 DOM 可以同时以三种方案渲染，做真正的并排对比。
+
+   方案 A「纸墨」的取值直接来自 app/src/main/java/com/xiguli/jinkui/ui/theme/Theme.kt
+   的 LightColors 与 CardPalette —— 也就是金匮现在长什么样。
+   方案 C「墨金」来自同文件的 DarkColors，并补了图表用的宝石色阶。
+   方案 B「鲜活」是记账模块专属的一套，色板更亮，层次靠柔和投影而不是描边。
+   ========================================================================== */
+
+/* ---------- 工作台（不属于任何方案，是「看方案的房间」） ---------- */
+:root {
+  --studio-bg: #101012;
+  --studio-bg-2: #17171a;
+  --studio-line: #26262b;
+  --studio-ink: #f2f0ec;
+  --studio-ink-2: #a8a49c;
+  --studio-ink-3: #6f6b64;
+  --studio-accent: #d4a857;
+
+  --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
+          "HarmonyOS Sans SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+  --serif-num: "Songti SC", "Noto Serif CJK SC", "Source Han Serif SC",
+               "STSong", "SimSun", Georgia, serif;
+  --mono-num: "SF Mono", "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+
+* { box-sizing: border-box; }
+
+/* ==========================================================================
+   方案 A · 纸墨 —— 沿用金匮现有浅色：暖纸白 + 赤金点缀，1dp 描边，零投影
+   数字用宋体，像一本装订好的账簿。分类色直接复用 CardPalette 八色。
+   ========================================================================== */
+.scheme-paper {
+  --bg: #f7f6f3;
+  --hero: #ffffff;
+  --surface: #ffffff;
+  --surface-2: #f0eee9;
+  --surface-3: #eae7e0;
+  --border: #e6e3dc;
+  --border-strong: #d8d4ca;
+  --ink: #1a1815;
+  --ink-2: #5a554d;
+  --ink-3: #8c867b;
+  --accent: #946616;
+  --accent-ink: #946616;
+  --accent-soft: #f3ebda;
+  --danger: #b3261e;
+  --danger-soft: #f9e7e5;
+  --success: #2b6b4f;
+  --success-soft: #e6f0ea;
+  --track: #eceae4;
+  --shadow: none;
+  --shadow-soft: none;
+  --radius-card: 24px;
+  --radius-tile: 14px;
+  --radius-chip: 10px;
+  --num-font: var(--serif-num);
+  --num-weight: 600;
+  --num-tracking: 0.5px;
+  --hairline: 1px;
+
+  /* 分类图标：不着色，只在选中时露出赤金 */
+  --cat-bg: transparent;
+  --cat-border: var(--border-strong);
+  --cat-ink: var(--ink-2);
+  --cat-on-bg: var(--accent-soft);
+  --cat-on-border: #e2d3b4;
+  --cat-on-ink: var(--accent);
+
+  /* 图表用 CardPalette 八色（墨/赤金/松绿/靛蓝/朱砂/黛紫/石青/岩灰） */
+  --ramp-1: #3a3632; --ramp-2: #8f6420; --ramp-3: #2f6b57; --ramp-4: #3b5b8c;
+  --ramp-5: #a8483a; --ramp-6: #6b4e8c; --ramp-7: #2e7a86; --ramp-8: #6e6a62;
+  --ramp-9: #9c8f74; --ramp-10: #55504a;
+
+  --nav-bg: rgba(255, 255, 255, 0.92);
+  --key-bg: #ffffff;
+  --key-ink: #1a1815;
+}
+
+/* ==========================================================================
+   方案 B · 鲜活 —— 记账专属：亮中性底 + 白瓷面板 + 柔和投影，分类各有其色
+   数字用无衬线等宽数字，图表饱满。整体更像一台「消费仪表盘」。
+   ========================================================================== */
+.scheme-vivid {
+  --bg: #f4f5f7;
+  --hero: #ffffff;
+  --surface: #ffffff;
+  --surface-2: #f2f3f6;
+  --surface-3: #e9ebef;
+  --border: #e8e9ed;
+  --border-strong: #dcdee4;
+  --ink: #16181d;
+  --ink-2: #55595f;
+  --ink-3: #8b9099;
+  --accent: #f2643c;
+  --accent-ink: #e0522c;
+  --accent-soft: #fdeee8;
+  --danger: #e0483d;
+  --danger-soft: #fdeceb;
+  --success: #12a97a;
+  --success-soft: #e6f7f1;
+  --track: #eceef2;
+  --shadow: 0 1px 2px rgba(22, 24, 29, .04), 0 8px 24px rgba(22, 24, 29, .06);
+  --shadow-soft: 0 1px 2px rgba(22, 24, 29, .04), 0 4px 12px rgba(22, 24, 29, .04);
+  --radius-card: 22px;
+  --radius-tile: 16px;
+  --radius-chip: 999px;
+  --num-font: var(--sans);
+  --num-weight: 700;
+  --num-tracking: -0.6px;
+  --hairline: 0px;
+
+  /* 分类图标：淡彩底 + 本色图标 */
+  --cat-bg: color-mix(in srgb, var(--cat) 12%, #ffffff);
+  --cat-border: transparent;
+  --cat-ink: color-mix(in srgb, var(--cat) 82%, #16181d);
+  --cat-on-bg: var(--cat);
+  --cat-on-border: transparent;
+  --cat-on-ink: #ffffff;
+
+  --ramp-1: #f2643c; --ramp-2: #f5a623; --ramp-3: #e8507a; --ramp-4: #9b5de5;
+  --ramp-5: #4c8df6; --ramp-6: #17b890; --ramp-7: #00b8d9; --ramp-8: #8a6a4f;
+  --ramp-9: #f7c948; --ramp-10: #7c8798;
+
+  --nav-bg: rgba(255, 255, 255, 0.94);
+  --key-bg: #ffffff;
+  --key-ink: #16181d;
+}
+
+/* ==========================================================================
+   方案 C · 墨金 —— 金匮深色语言延伸：暖墨黑 + 描金，数字用等宽体
+   像私人银行终端。深色不是浅色的反相，图表另配一套宝石色阶。
+   ========================================================================== */
+.scheme-ink {
+  --bg: #141210;
+  --hero: #1c1a17;
+  --surface: #1c1a17;
+  --surface-2: #25221e;
+  --surface-3: #2e2a25;
+  --border: #2f2b26;
+  --border-strong: #3d382f;
+  --ink: #f2eee7;
+  --ink-2: #b8b1a6;
+  --ink-3: #857e73;
+  --accent: #d4a857;
+  --accent-ink: #e0bb74;
+  --accent-soft: #2e2718;
+  --danger: #f2857a;
+  --danger-soft: #34201d;
+  --success: #7fc9a4;
+  --success-soft: #1c2b23;
+  --track: #2a2621;
+  --shadow: none;
+  --shadow-soft: none;
+  --radius-card: 24px;
+  --radius-tile: 14px;
+  --radius-chip: 10px;
+  --num-font: var(--mono-num);
+  --num-weight: 500;
+  --num-tracking: 0.2px;
+  --hairline: 1px;
+
+  /* 分类图标：暗底描边 + 提亮后的本色 */
+  --cat-bg: color-mix(in srgb, var(--cat) 16%, #25221e);
+  --cat-border: color-mix(in srgb, var(--cat) 30%, #2f2b26);
+  --cat-ink: color-mix(in srgb, var(--cat) 72%, #ffffff);
+  --cat-on-bg: var(--accent);
+  --cat-on-border: transparent;
+  --cat-on-ink: #141210;
+
+  --ramp-1: #d4a857; --ramp-2: #e0857a; --ramp-3: #7fc9a4; --ramp-4: #8fb4e8;
+  --ramp-5: #c39be8; --ramp-6: #6fd3dd; --ramp-7: #e8c07a; --ramp-8: #a39c90;
+  --ramp-9: #d98cae; --ramp-10: #8e9c7a;
+
+  --nav-bg: rgba(28, 26, 23, 0.94);
+  --key-bg: #25221e;
+  --key-ink: #f2eee7;
+}
+
+/* 方案级微调：同一份结构，各自的气质 */
+.scheme-paper .amount-hero { letter-spacing: 1px; }
+.scheme-vivid .panel { box-shadow: var(--shadow-soft); }
+.scheme-ink .panel { background: linear-gradient(180deg, #1e1c18 0%, #1a1815 100%); }
+.scheme-ink .amount-hero { text-shadow: 0 0 24px rgba(212, 168, 87, .18); }
